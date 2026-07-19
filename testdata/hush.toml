@@ -1,0 +1,25 @@
+# Configuration used by the integration tests.
+#
+# Until the NER layer lands, personal and company names are caught by listing
+# them explicitly here.
+
+default_region = "FR"
+
+# Names the tool must never redact.
+allowlist = ["Lille"]
+
+[[denylist]]
+term = "Acme Consulting SARL"
+kind = "provider"
+
+[[denylist]]
+term = "Globex Industries"
+kind = "company"
+
+[[denylist]]
+term = "Jean Dupont"
+kind = "person"
+
+[[patterns]]
+name = "contract number"
+regex = "CT-[0-9]{6}"
