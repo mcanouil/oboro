@@ -78,12 +78,16 @@ impl Config {
 
     /// Whether `text` matches an allowlist entry, ignoring case and
     /// surrounding whitespace.
+    ///
+    /// Case folding is Unicode-aware: ASCII-only folding would leave
+    /// `SOCIÉTÉ` and `Société` unequal, silently failing for exactly the
+    /// French text this tool targets.
     #[must_use]
     pub fn is_allowlisted(&self, text: &str) -> bool {
-        let needle = text.trim();
+        let needle = text.trim().to_lowercase();
         self.allowlist
             .iter()
-            .any(|entry| entry.trim().eq_ignore_ascii_case(needle))
+            .any(|entry| entry.trim().to_lowercase() == needle)
     }
 }
 
@@ -253,6 +257,19 @@ term = "Acme"
         let regex = &config.denylist[0].regex;
         assert!(regex.is_match("invoice from ACME today"));
         assert!(!regex.is_match("acmentioned"));
+    }
+
+    #[test]
+    fn the_allowlist_folds_accented_case() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let path = write(dir.path(), "allowlist = [\"Société Générale\"]\n");
+        let config = Config::load(Some(&path)).expect("configuration must load");
+        assert!(
+            config.is_allowlisted("SOCIÉTÉ GÉNÉRALE"),
+            "ASCII-only folding would leave the accented letters unequal"
+        );
+        assert!(config.is_allowlisted("  société générale  "));
+        assert!(!config.is_allowlisted("Société Anonyme"));
     }
 
     #[test]

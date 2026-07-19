@@ -88,18 +88,7 @@ struct StoreArgs {
 }
 
 impl StoreArgs {
-    fn open(&self) -> Result<Vault> {
-        let db = match &self.vault {
-            Some(path) => path.clone(),
-            None => vault::default_db_path()?,
-        };
-        let key = match &self.key {
-            Some(path) => path.clone(),
-            None => vault::default_key_path()?,
-        };
-        Vault::open(&db, &key)
-    }
-
+    /// The vault and key paths, falling back to the defaults under `~/.hush`.
     fn paths(&self) -> Result<(PathBuf, PathBuf)> {
         let db = match &self.vault {
             Some(path) => path.clone(),
@@ -110,6 +99,11 @@ impl StoreArgs {
             None => vault::default_key_path()?,
         };
         Ok((db, key))
+    }
+
+    fn open(&self) -> Result<Vault> {
+        let (db, key) = self.paths()?;
+        Vault::open(&db, &key)
     }
 }
 

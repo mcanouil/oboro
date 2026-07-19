@@ -56,19 +56,24 @@ pub struct RestoreReport {
 pub fn clean(text: &str, config: &Config, vault: &mut Vault) -> Result<CleanReport> {
     let spans = merge::resolve(Rules::new(config).detect(text));
 
-    let mut output = text.to_owned();
+    let mut output = String::with_capacity(text.len());
     let mut by_tag: BTreeMap<String, usize> = BTreeMap::new();
     let mut replaced = 0;
+    let mut cursor = 0;
 
-    // Replacing from the end keeps the earlier byte offsets valid.
-    for span in spans.iter().rev() {
+    // `resolve` returns disjoint spans in source order, so one forward pass
+    // covers the text without ever revisiting what it has written.
+    for span in &spans {
         let placeholder = vault
             .placeholder_for(&span.kind, &span.text)
             .with_context(|| format!("allocating a placeholder for a {} entity", span.kind))?;
-        output.replace_range(span.start..span.end, &placeholder);
+        output.push_str(&text[cursor..span.start]);
+        output.push_str(&placeholder);
+        cursor = span.end;
         *by_tag.entry(span.kind.tag()).or_default() += 1;
         replaced += 1;
     }
+    output.push_str(&text[cursor..]);
 
     Ok(CleanReport {
         text: output,

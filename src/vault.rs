@@ -36,7 +36,9 @@ pub struct Entry {
 /// derived key material through `Zeroizing`.
 pub struct Vault {
     connection: Connection,
-    encryption_key: Zeroizing<[u8; 32]>,
+    /// Built once: deriving the key schedule per operation is pure waste,
+    /// and the key material it holds is already resident for the vault's life.
+    cipher: Aes256Gcm,
     index_key: Zeroizing<[u8; 32]>,
 }
 
@@ -60,7 +62,10 @@ impl Vault {
 
         Ok(Self {
             connection,
-            encryption_key: Zeroizing::new(blake3::derive_key(ENCRYPTION_CONTEXT, &*master)),
+            cipher: Aes256Gcm::new(&Key::<Aes256Gcm>::from(blake3::derive_key(
+                ENCRYPTION_CONTEXT,
+                &*master,
+            ))),
             index_key: Zeroizing::new(blake3::derive_key(INDEX_CONTEXT, &*master)),
         })
     }
@@ -198,10 +203,10 @@ impl Vault {
     /// Encrypts `value`, binding the ciphertext to its tag so a row cannot be
     /// silently moved to another entity kind.
     fn seal(&self, tag: &str, value: &str) -> Result<([u8; NONCE_LEN], Vec<u8>)> {
-        let cipher = self.cipher();
         let mut nonce_bytes = [0u8; NONCE_LEN];
         rand::rng().fill_bytes(&mut nonce_bytes);
-        let ciphertext = cipher
+        let ciphertext = self
+            .cipher
             .encrypt(
                 &Nonce::from(nonce_bytes),
                 Payload {
@@ -218,7 +223,7 @@ impl Vault {
             .try_into()
             .map_err(|_| anyhow!("vault row has a malformed nonce; the database may be corrupt"))?;
         let plaintext = self
-            .cipher()
+            .cipher
             .decrypt(
                 &Nonce::from(nonce),
                 Payload {
@@ -232,10 +237,6 @@ impl Vault {
                 )
             })?;
         String::from_utf8(plaintext).context("a vault value is not valid UTF-8")
-    }
-
-    fn cipher(&self) -> Aes256Gcm {
-        Aes256Gcm::new(&Key::<Aes256Gcm>::from(*self.encryption_key))
     }
 }
 
@@ -309,10 +310,30 @@ fn load_or_create_key(path: &Path) -> Result<Zeroizing<[u8; 32]>> {
 
     let mut key = Zeroizing::new([0u8; 32]);
     rand::rng().fill_bytes(&mut *key);
-    std::fs::write(path, *key)
+    write_private_file(path, &*key)
         .with_context(|| format!("writing a new vault key to {}", path.display()))?;
-    restrict_permissions(path)?;
     Ok(key)
+}
+
+/// Writes a file that is owner-only from the moment it exists.
+///
+/// Writing first and restricting afterwards would leave the key readable by
+/// anyone for the duration, since the default umask usually grants group and
+/// world read.
+fn write_private_file(path: &Path, contents: &[u8]) -> Result<()> {
+    use std::io::Write as _;
+
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path)?;
+    file.write_all(contents)?;
+    file.sync_all()?;
+    Ok(())
 }
 
 /// Creates a directory readable only by its owner.

@@ -509,6 +509,58 @@ mod tests {
         assert_eq!(card.kind, EntityKind::CreditCard);
     }
 
+    proptest::proptest! {
+        /// Luhn's purpose is catching single-digit typos, so altering one
+        /// digit of a valid number must always invalidate it.
+        #[test]
+        fn luhn_rejects_any_single_digit_typo(
+            digits in proptest::collection::vec(0u8..10, 8..20),
+            position in 0usize..8,
+            shift in 1u8..10,
+        ) {
+            let mut number: String = digits.iter().map(|d| char::from(b'0' + d)).collect();
+            // Fix the final digit so the number is Luhn-valid to begin with.
+            let check = (0..10u8)
+                .find(|candidate| {
+                    let mut trial = number.clone();
+                    trial.pop();
+                    trial.push(char::from(b'0' + candidate));
+                    luhn_valid(&trial)
+                })
+                .expect("some check digit always makes Luhn hold");
+            number.pop();
+            number.push(char::from(b'0' + check));
+            proptest::prop_assert!(luhn_valid(&number));
+
+            let position = position % number.len();
+            let original = number.as_bytes()[position] - b'0';
+            let replacement = (original + shift) % 10;
+            proptest::prop_assume!(replacement != original);
+            let mut corrupted: Vec<u8> = number.into_bytes();
+            corrupted[position] = b'0' + replacement;
+            let corrupted = String::from_utf8(corrupted).expect("still ASCII");
+            proptest::prop_assert!(!luhn_valid(&corrupted), "typo went undetected in {corrupted}");
+        }
+
+        /// The validators must never panic, whatever the input.
+        #[test]
+        fn validators_tolerate_arbitrary_input(text in ".{0,64}") {
+            let _ = luhn_valid(&text);
+            let _ = is_valid_iban(&text);
+        }
+
+        /// Detection must never panic and must stay inside the text.
+        #[test]
+        fn detection_yields_spans_within_the_text(text in ".{0,256}") {
+            let config = Config::default();
+            for span in Rules::new(&config).detect(&text) {
+                proptest::prop_assert!(span.end <= text.len());
+                proptest::prop_assert!(span.start <= span.end);
+                proptest::prop_assert_eq!(&text[span.start..span.end], span.text.as_str());
+            }
+        }
+    }
+
     #[test]
     fn empty_text_yields_no_spans() {
         assert!(detect("").is_empty());
