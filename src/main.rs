@@ -146,9 +146,7 @@ fn clean(
 
     let config_path = match config_path {
         Some(path) => Some(path.to_path_buf()),
-        None => std::env::current_dir()
-            .ok()
-            .and_then(|dir| Config::discover(&dir)),
+        None => Config::discover_from_cwd(),
     };
     let config = Config::load(config_path.as_deref())?;
     let mut vault = store.open()?;
@@ -240,21 +238,16 @@ fn map_list(reveal: bool, store: &StoreArgs) -> Result<()> {
     let mut out = stdout.lock();
     for entry in entries {
         if reveal {
-            let (tag, seq) =
-                pipeline::split_placeholder(&entry.placeholder).with_context(|| {
-                    format!(
-                        "the vault holds a malformed placeholder {}",
-                        entry.placeholder
-                    )
-                })?;
-            let value = vault.value_for(tag, seq)?.unwrap_or_default();
+            let value = vault.value_for(&entry.tag, entry.seq)?.unwrap_or_default();
             writeln!(
                 out,
-                "{}\t{}\t{}",
-                entry.placeholder, entry.created_at, value
+                "{}	{}	{}",
+                entry.placeholder(),
+                entry.created_at,
+                value
             )?;
         } else {
-            writeln!(out, "{}\t{}", entry.placeholder, entry.created_at)?;
+            writeln!(out, "{}	{}", entry.placeholder(), entry.created_at)?;
         }
     }
     if !reveal {
@@ -295,9 +288,7 @@ fn doctor(store: &StoreArgs) -> Result<()> {
         }
     }
 
-    let config_path = std::env::current_dir()
-        .ok()
-        .and_then(|dir| Config::discover(&dir));
+    let config_path = Config::discover_from_cwd();
     match &config_path {
         Some(path) => println!("config:     {}", path.display()),
         None => println!("config:     none found (using defaults)"),

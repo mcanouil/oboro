@@ -49,24 +49,56 @@ impl EntityKind {
         }
     }
 
-    /// Reconstructs a kind from a placeholder tag.
+    /// How specifically this kind identifies the bytes it matched.
     ///
-    /// Unknown tags are treated as custom kinds so that a vault written by a
-    /// newer version still restores under an older one.
+    /// Some values are plausibly two things at once: a nine-digit SIREN is
+    /// also a well-formed French phone number, and a fourteen-digit SIRET is
+    /// a well-formed card number. When two equally long spans disagree, the
+    /// kind that verified more structure should name the value.
+    ///
+    /// This is deliberately separate from [`Span::confidence`]. Specificity
+    /// ranks *labels*; confidence estimates whether a detector is *right*.
+    /// Conflating them would make a hand-tuned constant compete directly
+    /// with a model's probability once the NER layer lands.
     #[must_use]
-    pub fn from_tag(tag: &str) -> Self {
-        match tag {
-            "PERSON" => Self::Person,
-            "ORG" => Self::Organisation,
-            "ADDRESS" => Self::Address,
-            "PHONE" => Self::Phone,
-            "EMAIL" => Self::Email,
-            "IBAN" => Self::Iban,
-            "CARD" => Self::CreditCard,
-            "SIREN" => Self::Siren,
-            "SIRET" => Self::Siret,
-            "IP" => Self::IpAddress,
-            other => Self::Custom(other.to_owned()),
+    pub fn specificity(&self) -> u8 {
+        match self {
+            // Declared by the user, who knows their own data.
+            Self::Custom(_) => 6,
+            // Checksummed or syntactically unambiguous.
+            Self::Email | Self::Iban | Self::IpAddress | Self::Siret => 5,
+            Self::CreditCard => 4,
+            Self::Person | Self::Organisation | Self::Siren => 3,
+            Self::Phone => 2,
+            // Matched on shape alone.
+            Self::Address => 1,
+        }
+    }
+
+    /// Folds away formatting differences that should not produce a second
+    /// placeholder for what a reader would call the same value.
+    ///
+    /// This belongs to the kind rather than to the vault: whether two
+    /// spellings mean the same thing is a fact about phone numbers and
+    /// IBANs, not about storage.
+    #[must_use]
+    pub fn normalise(&self, value: &str) -> String {
+        let trimmed = value.trim();
+        match self {
+            Self::Phone => trimmed
+                .chars()
+                .filter(|c| c.is_ascii_digit() || *c == '+')
+                .collect(),
+            Self::Iban | Self::CreditCard | Self::Siren | Self::Siret => trimmed
+                .chars()
+                .filter(char::is_ascii_alphanumeric)
+                .map(|c| c.to_ascii_uppercase())
+                .collect(),
+            _ => trimmed
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .to_lowercase(),
         }
     }
 }
@@ -107,7 +139,13 @@ pub struct Span {
     pub end: usize,
     pub kind: EntityKind,
     pub text: String,
-    /// Detector confidence in `0.0..=1.0`; deterministic rules report `1.0`.
+    /// How sure the detector is that this really is an entity, in
+    /// `0.0..=1.0`.
+    ///
+    /// Deterministic rules report `1.0`: each one has already cleared a
+    /// checksum or a parser, so it is not guessing. Which *kind* wins when
+    /// two rules claim the same bytes is [`EntityKind::specificity`], not
+    /// this.
     pub confidence: f32,
 }
 
@@ -145,23 +183,37 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tags_round_trip_through_from_tag() {
-        let kinds = [
-            EntityKind::Person,
-            EntityKind::Organisation,
-            EntityKind::Address,
-            EntityKind::Phone,
-            EntityKind::Email,
-            EntityKind::Iban,
-            EntityKind::CreditCard,
-            EntityKind::Siren,
-            EntityKind::Siret,
-            EntityKind::IpAddress,
-            EntityKind::Custom("CONTRACT".to_owned()),
-        ];
-        for kind in kinds {
-            assert_eq!(EntityKind::from_tag(&kind.tag()), kind);
-        }
+    fn a_more_specific_kind_outranks_the_kind_it_resembles() {
+        assert!(EntityKind::Siren.specificity() > EntityKind::Phone.specificity());
+        assert!(EntityKind::Siret.specificity() > EntityKind::CreditCard.specificity());
+        assert!(
+            EntityKind::Custom("contract".to_owned()).specificity()
+                > EntityKind::Address.specificity()
+        );
+    }
+
+    #[test]
+    fn normalisation_folds_formatting_per_kind() {
+        assert_eq!(
+            EntityKind::Phone.normalise("06 12 34 56 78"),
+            EntityKind::Phone.normalise("0612345678")
+        );
+        assert_eq!(
+            EntityKind::Iban.normalise("FR14 2004 1010"),
+            EntityKind::Iban.normalise("fr1420041010")
+        );
+        assert_eq!(
+            EntityKind::Person.normalise("  Jean   Dupont "),
+            EntityKind::Person.normalise("JEAN DUPONT")
+        );
+    }
+
+    #[test]
+    fn a_custom_kind_does_not_inherit_phone_normalisation() {
+        // Dispatching on the tag string would have folded this to digits,
+        // because the sanitised tag of "phone" is PHONE.
+        let custom = EntityKind::Custom("phone".to_owned());
+        assert_eq!(custom.normalise("Ref +33 1234"), "ref +33 1234");
     }
 
     #[test]

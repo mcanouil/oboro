@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Bug Fixes
+
+- fix: Fold accented case in the allowlist, so an entry such as `Société Générale` matches `SOCIÉTÉ GÉNÉRALE` instead of being silently ignored.
+- fix: Create the vault key file with owner-only permissions from the outset, rather than restricting them after writing.
+- fix: Build the devcontainer against a pinned current toolchain, so the project compiles inside it.
+
 ### New Features
 
 - feat: Add `clean` to replace sensitive values in `.txt` and `.md` files with stable placeholders.

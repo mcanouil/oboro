@@ -6,20 +6,24 @@ use super::Span;
 ///
 /// Longer spans win, because a partial match is usually a fragment of a
 /// larger entity: the phone recogniser sees a digit run inside an IBAN, and
-/// keeping the IBAN redacts strictly more. Ties break on confidence, then on
-/// the earlier start, so the result does not depend on detector ordering.
+/// keeping the IBAN redacts strictly more.
+///
+/// Equal-length spans are ranked by [`EntityKind::specificity`], so the kind
+/// that verified more structure names the value, and only then by detector
+/// confidence. Sorting is total down to the start offset, so the result never
+/// depends on the order detectors ran in.
 #[must_use]
 pub fn resolve(mut spans: Vec<Span>) -> Vec<Span> {
     spans.sort_by(|a, b| {
         b.len()
             .cmp(&a.len())
+            .then(b.kind.specificity().cmp(&a.kind.specificity()))
             .then(
                 b.confidence
                     .partial_cmp(&a.confidence)
                     .unwrap_or(std::cmp::Ordering::Equal),
             )
             .then(a.start.cmp(&b.start))
-            .then(a.kind.cmp(&b.kind))
     });
 
     let mut kept: Vec<Span> = Vec::with_capacity(spans.len());

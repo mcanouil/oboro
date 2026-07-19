@@ -19,17 +19,6 @@ static PLACEHOLDER: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"\[\[([A-Z][A-Z0-9_]*)_(\d+)\]\]").expect("placeholder pattern is valid")
 });
 
-/// Splits `[[TAG_3]]` into its tag and sequence number.
-///
-/// Returns `None` when the text is not a placeholder this tool could have
-/// issued, such as one whose number does not fit a sequence.
-#[must_use]
-pub fn split_placeholder(placeholder: &str) -> Option<(&str, i64)> {
-    let inner = placeholder.strip_prefix("[[")?.strip_suffix("]]")?;
-    let (tag, seq) = inner.rsplit_once('_')?;
-    Some((tag, seq.parse().ok()?))
-}
-
 /// What `clean` did to a document.
 pub struct CleanReport {
     pub text: String,
@@ -98,16 +87,20 @@ pub fn restore(text: &str, vault: &Vault) -> Result<RestoreReport> {
     let mut unknown = 0;
     let mut cursor = 0;
 
-    for found in PLACEHOLDER.find_iter(text) {
-        // A sequence too large to be one of ours cannot resolve; leaving the
-        // text untouched is handled by not advancing the cursor.
-        let Some((tag, seq)) = split_placeholder(found.as_str()) else {
+    for capture in PLACEHOLDER.captures_iter(text) {
+        let (Some(found), Some(tag), Some(seq)) = (capture.get(0), capture.get(1), capture.get(2))
+        else {
+            continue;
+        };
+        // A sequence too large to be one of ours cannot resolve. Skipping
+        // without advancing the cursor leaves the text exactly as it was.
+        let Ok(seq) = seq.as_str().parse::<i64>() else {
             unknown += 1;
             continue;
         };
 
         output.push_str(&text[cursor..found.start()]);
-        if let Some(value) = vault.value_for(tag, seq)? {
+        if let Some(value) = vault.value_for(tag.as_str(), seq)? {
             output.push_str(&value);
             restored += 1;
         } else {

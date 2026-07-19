@@ -24,10 +24,22 @@ const INDEX_CONTEXT: &str = "hush 2026-07-19 vault value index";
 const NONCE_LEN: usize = 12;
 
 /// A stored mapping, as shown by `hush map list`.
+///
+/// The tag and sequence are kept apart rather than rendered into a
+/// placeholder, so a caller that needs to look the value up does not have to
+/// parse back what this struct just formatted.
 pub struct Entry {
-    pub placeholder: String,
-    pub kind: EntityKind,
+    pub tag: String,
+    pub seq: i64,
     pub created_at: String,
+}
+
+impl Entry {
+    /// The placeholder this mapping issues, such as `[[PERSON_1]]`.
+    #[must_use]
+    pub fn placeholder(&self) -> String {
+        placeholder(&self.tag, self.seq)
+    }
 }
 
 /// An encrypted, deterministic placeholder store.
@@ -82,7 +94,7 @@ impl Vault {
     /// rejects the write.
     pub fn placeholder_for(&mut self, kind: &EntityKind, value: &str) -> Result<String> {
         let tag = kind.tag();
-        let index = self.index_hash(&tag, value);
+        let index = self.index_hash(&tag, &kind.normalise(value));
 
         if let Some(seq) = self
             .connection
@@ -163,8 +175,8 @@ impl Vault {
                 let seq: i64 = row.get(1)?;
                 let created_at: String = row.get(2)?;
                 Ok(Entry {
-                    placeholder: placeholder(&tag, seq),
-                    kind: EntityKind::from_tag(&tag),
+                    tag,
+                    seq,
                     created_at,
                 })
             })
@@ -191,8 +203,7 @@ impl Vault {
 
     /// The lookup key for a value: keyed so that the database cannot be
     /// probed for a guessed value without the key file.
-    fn index_hash(&self, tag: &str, value: &str) -> [u8; 32] {
-        let normalised = normalise(tag, value);
+    fn index_hash(&self, tag: &str, normalised: &str) -> [u8; 32] {
         let mut hasher = blake3::Hasher::new_keyed(&self.index_key);
         hasher.update(tag.as_bytes());
         hasher.update(b"\0");
@@ -245,28 +256,6 @@ impl Vault {
 #[must_use]
 pub fn placeholder(tag: &str, seq: i64) -> String {
     format!("[[{tag}_{seq}]]")
-}
-
-/// Folds away the formatting differences that should not create a second
-/// placeholder for what a reader would call the same value.
-fn normalise(tag: &str, value: &str) -> String {
-    let trimmed = value.trim();
-    match tag {
-        "PHONE" => trimmed
-            .chars()
-            .filter(|c| c.is_ascii_digit() || *c == '+')
-            .collect(),
-        "IBAN" | "CARD" | "SIREN" | "SIRET" => trimmed
-            .chars()
-            .filter(char::is_ascii_alphanumeric)
-            .map(|c| c.to_ascii_uppercase())
-            .collect(),
-        _ => trimmed
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ")
-            .to_lowercase(),
-    }
 }
 
 fn initialise_schema(connection: &Connection) -> Result<()> {
@@ -392,7 +381,7 @@ mod tests {
 
     struct TestVault {
         vault: Vault,
-        _dir: tempfile::TempDir,
+        dir: tempfile::TempDir,
     }
 
     impl TestVault {
@@ -400,7 +389,19 @@ mod tests {
             let dir = tempfile::tempdir().expect("temporary directory");
             let vault = Vault::open(&dir.path().join("vault.db"), &dir.path().join("key"))
                 .expect("opening a fresh vault");
-            Self { vault, _dir: dir }
+            Self { vault, dir }
+        }
+
+        fn path(&self) -> &Path {
+            self.dir.path()
+        }
+
+        fn db(&self) -> PathBuf {
+            self.dir.path().join("vault.db")
+        }
+
+        fn key(&self) -> PathBuf {
+            self.dir.path().join("key")
         }
     }
 
@@ -513,16 +514,12 @@ mod tests {
 
     #[test]
     fn mappings_persist_across_reopening() {
-        let dir = tempfile::tempdir().expect("temporary directory");
-        let db = dir.path().join("vault.db");
-        let key = dir.path().join("key");
-        {
-            let mut vault = Vault::open(&db, &key).expect("opening");
-            vault
-                .placeholder_for(&EntityKind::Person, "Jean Dupont")
-                .expect("allocating");
-        }
-        let reopened = Vault::open(&db, &key).expect("reopening");
+        let mut fixture = TestVault::new();
+        fixture
+            .vault
+            .placeholder_for(&EntityKind::Person, "Jean Dupont")
+            .expect("allocating");
+        let reopened = Vault::open(&fixture.db(), &fixture.key()).expect("reopening");
         assert_eq!(
             reopened
                 .value_for("PERSON", 1)
@@ -534,19 +531,15 @@ mod tests {
 
     #[test]
     fn a_foreign_key_cannot_decrypt_the_vault() {
-        let dir = tempfile::tempdir().expect("temporary directory");
-        let db = dir.path().join("vault.db");
-        {
-            let mut vault =
-                Vault::open(&db, &dir.path().join("key")).expect("opening with the real key");
-            vault
-                .placeholder_for(&EntityKind::Person, "Jean Dupont")
-                .expect("allocating");
-        }
+        let mut fixture = TestVault::new();
+        fixture
+            .vault
+            .placeholder_for(&EntityKind::Person, "Jean Dupont")
+            .expect("allocating");
 
-        let other_key = dir.path().join("other-key");
+        let other_key = fixture.path().join("other-key");
         std::fs::write(&other_key, [7u8; 32]).expect("writing a foreign key");
-        let intruder = Vault::open(&db, &other_key).expect("opening with a foreign key");
+        let intruder = Vault::open(&fixture.db(), &other_key).expect("opening with a foreign key");
         assert!(
             intruder.value_for("PERSON", 1).is_err(),
             "a foreign key must not decrypt stored values"
@@ -561,8 +554,9 @@ mod tests {
             .expect("allocating");
         let entries = vault.entries().expect("listing");
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].placeholder, "[[PERSON_1]]");
-        assert_eq!(entries[0].kind, EntityKind::Person);
+        assert_eq!(entries[0].placeholder(), "[[PERSON_1]]");
+        assert_eq!(entries[0].tag, "PERSON");
+        assert_eq!(entries[0].seq, 1);
     }
 
     #[test]
@@ -583,10 +577,10 @@ mod tests {
 
     #[test]
     fn a_malformed_key_file_is_rejected() {
-        let dir = tempfile::tempdir().expect("temporary directory");
-        let key = dir.path().join("key");
+        let fixture = TestVault::new();
+        let key = fixture.path().join("short-key");
         std::fs::write(&key, b"too short").expect("writing a short key");
-        let error = Vault::open(&dir.path().join("vault.db"), &key)
+        let error = Vault::open(&fixture.path().join("other.db"), &key)
             .err()
             .expect("a short key must be rejected");
         assert!(format!("{error:#}").contains("expected 32"));
@@ -596,10 +590,8 @@ mod tests {
     #[test]
     fn the_key_file_is_readable_only_by_its_owner() {
         use std::os::unix::fs::PermissionsExt;
-        let dir = tempfile::tempdir().expect("temporary directory");
-        let key = dir.path().join("key");
-        Vault::open(&dir.path().join("vault.db"), &key).expect("opening");
-        let mode = std::fs::metadata(&key)
+        let fixture = TestVault::new();
+        let mode = std::fs::metadata(fixture.key())
             .expect("reading key metadata")
             .permissions()
             .mode();
