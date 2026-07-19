@@ -1,4 +1,4 @@
-//! User configuration loaded from `hush.toml`.
+//! User configuration loaded from `oboro.toml`.
 //!
 //! The file is optional: without one, the deterministic recognisers run with
 //! French defaults and no user patterns.
@@ -12,7 +12,7 @@ use serde::Deserialize;
 use crate::detect::EntityKind;
 
 /// The file name looked up in the working directory and its ancestors.
-pub const CONFIG_FILE: &str = "hush.toml";
+pub const CONFIG_FILE: &str = "oboro.toml";
 
 /// A user-defined pattern, such as a contract number format.
 pub struct CustomPattern {
@@ -67,7 +67,7 @@ impl Config {
             .with_context(|| format!("applying configuration from {}", path.display()))
     }
 
-    /// Searches `start` and its ancestors for a `hush.toml`.
+    /// Searches `start` and its ancestors for a `oboro.toml`.
     #[must_use]
     pub fn discover(start: &Path) -> Option<PathBuf> {
         start.ancestors().find_map(|dir| {
@@ -76,7 +76,7 @@ impl Config {
         })
     }
 
-    /// Searches the working directory and its ancestors for a `hush.toml`.
+    /// Searches the working directory and its ancestors for a `oboro.toml`.
     #[must_use]
     pub fn discover_from_cwd() -> Option<PathBuf> {
         std::env::current_dir()

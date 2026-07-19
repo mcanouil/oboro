@@ -573,29 +573,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
-name = "hush"
-version = "0.1.0"
-dependencies = [
- "aes-gcm",
- "anyhow",
- "assert_cmd",
- "blake3",
- "clap",
- "dirs",
- "phonenumber",
- "predicates",
- "proptest",
- "rand 0.10.2",
- "regex",
- "rusqlite",
- "serde",
- "tempfile",
- "thiserror",
- "toml",
- "zeroize",
-]
-
-[[package]]
 name = "hybrid-array"
 version = "0.4.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -730,6 +707,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
 dependencies = [
  "autocfg",
+]
+
+[[package]]
+name = "oboro"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "anyhow",
+ "assert_cmd",
+ "blake3",
+ "clap",
+ "dirs",
+ "phonenumber",
+ "predicates",
+ "proptest",
+ "rand 0.10.2",
+ "regex",
+ "rusqlite",
+ "serde",
+ "tempfile",
+ "thiserror",
+ "toml",
+ "zeroize",
 ]
 
 [[package]]

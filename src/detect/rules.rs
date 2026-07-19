@@ -5,7 +5,7 @@
 //! positives a regex alone would produce.
 //!
 //! Where a trade-off remains, these recognisers favour recall: over-redaction
-//! is recoverable through the allowlist in `hush.toml`, whereas a missed
+//! is recoverable through the allowlist in `oboro.toml`, whereas a missed
 //! entity is a leak.
 
 use std::net::{Ipv4Addr, Ipv6Addr};
@@ -130,7 +130,7 @@ impl<'a> Rules<'a> {
         spans
     }
 
-    /// Applies user-defined patterns from `hush.toml`.
+    /// Applies user-defined patterns from `oboro.toml`.
     ///
     /// These are declared deliberately by the user, so they rank as exact.
     fn push_custom(&self, spans: &mut Vec<Span>, text: &str) {

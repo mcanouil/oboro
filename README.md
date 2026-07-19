@@ -1,8 +1,8 @@
-# hush
+# oboro
 
 An anonymisation layer between your files and a language model.
 
-`hush` replaces sensitive values in a document with stable placeholders, so
+`oboro` replaces sensitive values in a document with stable placeholders, so
 the text can be pasted into Claude Code, Copilot, Codex or Cursor without
 leaking phone numbers, bank details, addresses or client names.
 The mapping is kept in a local encrypted vault, so the model's answer can be
@@ -14,10 +14,10 @@ network requests.
 ## How it works
 
 ```text
-contract.txt ──► hush clean ──► contract.clean.md ──► paste into a model
+contract.txt ──► oboro clean ──► contract.clean.md ──► paste into a model
                      │                                        │
                      ▼                                        ▼
-              vault (encrypted)  ◄────── hush restore ◄── model's answer
+              vault (encrypted)  ◄────── oboro restore ◄── model's answer
 ```
 
 The same value always becomes the same placeholder within a vault, so a
@@ -27,25 +27,25 @@ model still sees that two documents mention the same client.
 
 ```bash
 # Anonymise a document.
-hush clean contract.txt
+oboro clean contract.txt
 
 # Look at the result, then paste it into a model.
 cat contract.clean.md
 
 # Put the real values back into the answer you got.
-hush restore answer.md
+oboro restore answer.md
 
 # See what the vault holds.
-hush map list
+oboro map list
 
 # Check the setup.
-hush doctor
+oboro doctor
 ```
 
 Both `clean` and `restore` accept `--stdout`, so they compose in a pipeline:
 
 ```bash
-hush clean report.txt --stdout | pbcopy
+oboro clean report.txt --stdout | pbcopy
 ```
 
 ### What gets detected
@@ -64,13 +64,13 @@ This build recognises, in French and English documents:
 | French street addresses and postcodes | Pattern |
 | Anything you list yourself | Your regular expressions and terms |
 
-Personal and company names are matched from the denylist in `hush.toml`.
+Personal and company names are matched from the denylist in `oboro.toml`.
 Detecting them without being told is the job of the local NER model in a
 later phase.
 
 ## Configuration
 
-`hush` reads the nearest `hush.toml`, searching upwards from the working
+`oboro` reads the nearest `oboro.toml`, searching upwards from the working
 directory. Every section is optional.
 
 ```toml
@@ -95,8 +95,8 @@ regex = "CT-[0-9]{6}"
 
 | Path | Contents |
 | --- | --- |
-| `~/.hush/vault.db` | Placeholder mapping, values encrypted with AES-256-GCM |
-| `~/.hush/key` | The 32-byte key, created on first use |
+| `~/.oboro/vault.db` | Placeholder mapping, values encrypted with AES-256-GCM |
+| `~/.oboro/key` | The 32-byte key, created on first use |
 
 Both are created with owner-only permissions. Values are looked up through a
 keyed hash rather than the plaintext, so the database on its own reveals
@@ -129,8 +129,8 @@ In Visual Studio Code, reopen the folder in the container when prompted.
 Otherwise use the image directly:
 
 ```bash
-docker build -f .devcontainer/Dockerfile -t hush-dev .devcontainer
-docker run --rm -it -v "$PWD":/work -w /work -u vscode hush-dev bash
+docker build -f .devcontainer/Dockerfile -t oboro-dev .devcontainer
+docker run --rm -it -v "$PWD":/work -w /work -u vscode oboro-dev bash
 ```
 
 Then, inside the container:

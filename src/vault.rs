@@ -1,6 +1,6 @@
 //! The reversible mapping between real values and placeholders.
 //!
-//! The vault is the only part of `hush` that holds sensitive data at rest, so
+//! The vault is the only part of `oboro` that holds sensitive data at rest, so
 //! it is encrypted: values are sealed with AES-256-GCM under a key derived
 //! from a local key file, and looked up through a keyed hash rather than the
 //! plaintext. Possession of the database alone therefore reveals neither the
@@ -18,12 +18,12 @@ use zeroize::Zeroizing;
 use crate::detect::EntityKind;
 
 /// Domain separation for the two keys derived from the master key.
-const ENCRYPTION_CONTEXT: &str = "hush 2026-07-19 vault value encryption";
-const INDEX_CONTEXT: &str = "hush 2026-07-19 vault value index";
+const ENCRYPTION_CONTEXT: &str = "oboro 2026-07-19 vault value encryption";
+const INDEX_CONTEXT: &str = "oboro 2026-07-19 vault value index";
 
 const NONCE_LEN: usize = 12;
 
-/// A stored mapping, as shown by `hush map list`.
+/// A stored mapping, as shown by `oboro map list`.
 ///
 /// The tag and sequence are kept apart rather than rendered into a
 /// placeholder, so a caller that needs to look the value up does not have to
@@ -351,28 +351,28 @@ fn restrict_permissions(path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// The default vault location, `~/.hush/vault.db`.
+/// The default vault location, `~/.oboro/vault.db`.
 ///
 /// # Errors
 ///
 /// Returns an error if the home directory cannot be determined.
 pub fn default_db_path() -> Result<PathBuf> {
-    Ok(hush_home()?.join("vault.db"))
+    Ok(oboro_home()?.join("vault.db"))
 }
 
-/// The default key location, `~/.hush/key`.
+/// The default key location, `~/.oboro/key`.
 ///
 /// # Errors
 ///
 /// Returns an error if the home directory cannot be determined.
 pub fn default_key_path() -> Result<PathBuf> {
-    Ok(hush_home()?.join("key"))
+    Ok(oboro_home()?.join("key"))
 }
 
-fn hush_home() -> Result<PathBuf> {
+fn oboro_home() -> Result<PathBuf> {
     let home = dirs::home_dir()
         .ok_or_else(|| anyhow!("cannot determine the home directory; pass --vault explicitly"))?;
-    Ok(home.join(".hush"))
+    Ok(home.join(".oboro"))
 }
 
 #[cfg(test)]
