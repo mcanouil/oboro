@@ -76,6 +76,14 @@ impl Config {
         })
     }
 
+    /// Searches the working directory and its ancestors for a `hush.toml`.
+    #[must_use]
+    pub fn discover_from_cwd() -> Option<PathBuf> {
+        std::env::current_dir()
+            .ok()
+            .and_then(|dir| Self::discover(&dir))
+    }
+
     /// Whether `text` matches an allowlist entry, ignoring case and
     /// surrounding whitespace.
     ///

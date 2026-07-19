@@ -67,27 +67,6 @@ static FR_POSTCODE_CITY: LazyLock<Regex> = LazyLock::new(|| {
         .expect("postcode pattern is valid")
 });
 
-/// Confidence per recogniser, used to break ties between equal-length spans.
-///
-/// A nine-digit SIREN is also a plausible French phone number, and a
-/// fourteen-digit SIRET is a plausible card number. Ranking the checks by how
-/// much structure they verify makes the more specific recogniser win, so the
-/// placeholder carries the right kind rather than merely redacting the value.
-mod confidence {
-    /// Checksummed or syntactically unambiguous.
-    pub const EXACT: f32 = 1.0;
-    /// Luhn-checked and length-locked to fourteen digits.
-    pub const SIRET: f32 = 0.99;
-    /// Luhn-checked over thirteen to nineteen digits.
-    pub const CARD: f32 = 0.97;
-    /// Luhn-checked but only nine digits, so collisions are likelier.
-    pub const SIREN: f32 = 0.95;
-    /// Validated by `libphonenumber`, which still accepts many digit runs.
-    pub const PHONE: f32 = 0.90;
-    /// Matched on shape alone.
-    pub const ADDRESS: f32 = 0.75;
-}
-
 /// The rules layer, compiled once against a [`Config`].
 pub struct Rules<'a> {
     config: &'a Config,
@@ -106,95 +85,41 @@ impl<'a> Rules<'a> {
     pub fn detect(&self, text: &str) -> Vec<Span> {
         let mut spans = Vec::new();
 
-        push_matches(
-            &mut spans,
-            text,
-            &EMAIL,
-            &EntityKind::Email,
-            confidence::EXACT,
-            |_| true,
-        );
-        push_matches(
-            &mut spans,
-            text,
-            &IBAN,
-            &EntityKind::Iban,
-            confidence::EXACT,
-            is_valid_iban,
-        );
-        push_matches(
-            &mut spans,
-            text,
-            &CARD,
-            &EntityKind::CreditCard,
-            confidence::CARD,
-            |m| {
-                let digits = digits_of(m);
-                (13..=19).contains(&digits.len()) && luhn_valid(&digits)
-            },
-        );
-        push_matches(
-            &mut spans,
-            text,
-            &SIRET,
-            &EntityKind::Siret,
-            confidence::SIRET,
-            |m| {
-                let digits = digits_of(m);
-                // A real SIRET is a Luhn-valid SIREN followed by a Luhn-valid
-                // whole; requiring both rejects most incidental digit runs.
-                digits.len() == 14 && luhn_valid(&digits) && luhn_valid(&digits[..9])
-            },
-        );
-        push_matches(
-            &mut spans,
-            text,
-            &SIREN,
-            &EntityKind::Siren,
-            confidence::SIREN,
-            |m| {
-                let digits = digits_of(m);
-                digits.len() == 9 && luhn_valid(&digits)
-            },
-        );
+        push_matches(&mut spans, text, &EMAIL, &EntityKind::Email, |_| true);
+        push_matches(&mut spans, text, &IBAN, &EntityKind::Iban, is_valid_iban);
+        push_matches(&mut spans, text, &CARD, &EntityKind::CreditCard, |m| {
+            let digits = digits_of(m);
+            (13..=19).contains(&digits.len()) && luhn_valid(&digits)
+        });
+        push_matches(&mut spans, text, &SIRET, &EntityKind::Siret, |m| {
+            let digits = digits_of(m);
+            // A real SIRET is a Luhn-valid SIREN followed by a Luhn-valid
+            // whole; requiring both rejects most incidental digit runs.
+            digits.len() == 14 && luhn_valid(&digits) && luhn_valid(&digits[..9])
+        });
+        push_matches(&mut spans, text, &SIREN, &EntityKind::Siren, |m| {
+            let digits = digits_of(m);
+            digits.len() == 9 && luhn_valid(&digits)
+        });
         push_matches(
             &mut spans,
             text,
             &PHONE_CANDIDATE,
             &EntityKind::Phone,
-            confidence::PHONE,
             |m| is_valid_phone(m, &self.config.default_region),
         );
-        push_matches(
-            &mut spans,
-            text,
-            &IPV4,
-            &EntityKind::IpAddress,
-            confidence::EXACT,
-            |m| Ipv4Addr::from_str(m.trim()).is_ok(),
-        );
-        push_matches(
-            &mut spans,
-            text,
-            &IPV6,
-            &EntityKind::IpAddress,
-            confidence::EXACT,
-            |m| Ipv6Addr::from_str(m.trim()).is_ok(),
-        );
-        push_matches(
-            &mut spans,
-            text,
-            &FR_STREET,
-            &EntityKind::Address,
-            confidence::ADDRESS,
-            |_| true,
-        );
+        push_matches(&mut spans, text, &IPV4, &EntityKind::IpAddress, |m| {
+            Ipv4Addr::from_str(m.trim()).is_ok()
+        });
+        push_matches(&mut spans, text, &IPV6, &EntityKind::IpAddress, |m| {
+            Ipv6Addr::from_str(m.trim()).is_ok()
+        });
+        push_matches(&mut spans, text, &FR_STREET, &EntityKind::Address, |_| true);
         push_matches(
             &mut spans,
             text,
             &FR_POSTCODE_CITY,
             &EntityKind::Address,
-            confidence::ADDRESS,
             |_| true,
         );
 
@@ -211,14 +136,7 @@ impl<'a> Rules<'a> {
     fn push_custom(&self, spans: &mut Vec<Span>, text: &str) {
         for pattern in &self.config.patterns {
             let kind = EntityKind::Custom(pattern.name.clone());
-            push_matches(
-                spans,
-                text,
-                &pattern.regex,
-                &kind,
-                confidence::EXACT,
-                |_| true,
-            );
+            push_matches(spans, text, &pattern.regex, &kind, |_| true);
         }
     }
 
@@ -226,14 +144,7 @@ impl<'a> Rules<'a> {
     /// client list. Matching is case-insensitive and whole-word.
     fn push_denylist(&self, spans: &mut Vec<Span>, text: &str) {
         for entry in &self.config.denylist {
-            push_matches(
-                spans,
-                text,
-                &entry.regex,
-                &entry.kind,
-                confidence::EXACT,
-                |_| true,
-            );
+            push_matches(spans, text, &entry.regex, &entry.kind, |_| true);
         }
     }
 
@@ -252,16 +163,12 @@ fn push_matches(
     text: &str,
     regex: &Regex,
     kind: &EntityKind,
-    confidence: f32,
     validate: impl Fn(&str) -> bool,
 ) {
     for m in regex.find_iter(text) {
         let matched = m.as_str();
         if validate(matched) {
-            spans.push(Span {
-                confidence,
-                ..Span::new(m.start(), m.end(), kind.clone(), matched)
-            });
+            spans.push(Span::new(m.start(), m.end(), kind.clone(), matched));
         }
     }
 }
@@ -335,7 +242,7 @@ pub fn is_valid_iban(candidate: &str) -> bool {
 fn is_valid_phone(candidate: &str, default_region: &str) -> bool {
     let trimmed = candidate.trim();
     // Reject runs that are clearly something else, such as long account codes.
-    let digit_count = trimmed.chars().filter(char::is_ascii_digit).count();
+    let digit_count = digits_of(trimmed).len();
     if !(7..=15).contains(&digit_count) {
         return false;
     }

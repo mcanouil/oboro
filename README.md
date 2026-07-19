@@ -121,14 +121,28 @@ Read them before trusting the output with anything that matters.
 
 ## Development
 
-Open the repository in the devcontainer, which carries the Rust toolchain and
-the OCR libraries the later phases need. Then:
+Build in the devcontainer. It carries the pinned Rust toolchain, Tesseract
+and the OCR libraries the converter phases need, so the only thing your
+machine needs is Docker.
+
+In Visual Studio Code, reopen the folder in the container when prompted.
+Otherwise use the image directly:
+
+```bash
+docker build -f .devcontainer/Dockerfile -t hush-dev .devcontainer
+docker run --rm -it -v "$PWD":/work -w /work -u vscode hush-dev bash
+```
+
+Then, inside the container:
 
 ```bash
 cargo test
 cargo clippy --all-targets -- -D warnings
 cargo fmt --all --check
 ```
+
+The toolchain is pinned by `rust-toolchain.toml`, so the container, CI and a
+host build all use the same compiler.
 
 The test that matters most is `tests/leak.rs`: it plants known values in a
 fixture and fails if any of them survives `clean`.
