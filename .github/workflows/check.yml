@@ -42,3 +42,28 @@ jobs:
 
       - name: Build release binary
         run: cargo build --release
+
+  ocr:
+    name: Test with OCR
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.0
+
+      - name: Install Tesseract
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang libclang-dev libleptonica-dev libtesseract-dev \
+            tesseract-ocr tesseract-ocr-eng tesseract-ocr-fra
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2.9.1
+
+      - name: Lint
+        run: cargo clippy --all-targets --features ocr -- -D warnings
+
+      - name: Test
+        run: cargo test --all-targets --features ocr

@@ -1,47 +1,122 @@
 //! Conversion of input files into the plain text the detectors work on.
 //!
-//! Later phases add office documents, PDFs and images; this phase handles the
-//! formats that need no decoding.
+//! The guiding rule is that a conversion either produces the document's real
+//! text or fails. Returning a fraction of a document would hand the detectors
+//! less than the user is about to share, and produce output that looks
+//! sanitised without ever having been read.
+
+mod docx;
+mod pdf;
+mod xlsx;
+
+#[cfg(feature = "ocr")]
+mod ocr;
 
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 
-/// Extensions understood by this build, for error messages and `doctor`.
-pub const SUPPORTED: &[&str] = &["txt", "md", "markdown", "text"];
+/// A format this build knows how to read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Format {
+    /// Plain text and markdown, read as-is.
+    Text,
+    Docx,
+    Xlsx,
+    Pdf,
+    Image,
+}
+
+/// The one place mapping extensions to formats.
+///
+/// Both [`supported`] and the dispatch in [`to_text`] derive from this, so a
+/// format cannot be advertised without being wired up, or wired up without
+/// being advertised.
+const FORMATS: &[(&str, Format)] = &[
+    ("txt", Format::Text),
+    ("text", Format::Text),
+    ("md", Format::Text),
+    ("markdown", Format::Text),
+    ("docx", Format::Docx),
+    ("xlsx", Format::Xlsx),
+    ("xlsm", Format::Xlsx),
+    ("pdf", Format::Pdf),
+    ("png", Format::Image),
+    ("jpg", Format::Image),
+    ("jpeg", Format::Image),
+    ("tif", Format::Image),
+    ("tiff", Format::Image),
+];
+
+/// Whether this build can perform optical character recognition.
+#[must_use]
+pub const fn ocr_available() -> bool {
+    cfg!(feature = "ocr")
+}
+
+/// Extensions this build accepts, for error messages and `doctor`.
+///
+/// Image formats only appear when the `ocr` feature is compiled in, since
+/// without it there is no way to read them.
+#[must_use]
+pub fn supported() -> Vec<&'static str> {
+    FORMATS
+        .iter()
+        .filter(|(_, format)| *format != Format::Image || ocr_available())
+        .map(|(extension, _)| *extension)
+        .collect()
+}
+
+/// The format of `path`, by extension.
+#[must_use]
+pub fn format_of(path: &Path) -> Option<Format> {
+    let extension = path.extension()?.to_str()?.to_ascii_lowercase();
+    FORMATS
+        .iter()
+        .find(|(candidate, _)| *candidate == extension)
+        .map(|(_, format)| *format)
+}
 
 /// Reads `path` and returns its text content.
 ///
-/// Unsupported formats fail rather than being read as bytes, because
-/// silently mis-decoding a document would hand the detectors gibberish and
-/// produce output that looks sanitised but is not.
-///
 /// # Errors
 ///
-/// Returns an error if the extension is not supported, the file cannot be
-/// read, or its contents are not valid UTF-8.
+/// Returns an error if the format is unsupported, the file cannot be read or
+/// parsed, or the document holds no extractable text. That last case matters:
+/// a scanned PDF silently yielding nothing would look like a document with
+/// nothing sensitive in it.
 pub fn to_text(path: &Path) -> Result<String> {
-    let extension = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-
-    if !SUPPORTED.contains(&extension.as_str()) {
+    let Some(format) = format_of(path) else {
         bail!(
-            "unsupported file type '{}' for {}; this build reads: {}",
-            if extension.is_empty() {
-                "(none)"
-            } else {
-                &extension
-            },
+            "unsupported file type for {}; this build reads: {}",
             path.display(),
-            SUPPORTED.join(", ")
+            supported().join(", ")
         );
-    }
+    };
 
-    std::fs::read_to_string(path)
-        .with_context(|| format!("reading {}; it must be valid UTF-8 text", path.display()))
+    match format {
+        Format::Text => std::fs::read_to_string(path)
+            .with_context(|| format!("reading {}; it must be valid UTF-8 text", path.display())),
+        Format::Docx => docx::to_text(path),
+        Format::Xlsx => xlsx::to_text(path),
+        Format::Pdf => pdf::to_text(path),
+        Format::Image => image_to_text(path),
+    }
+}
+
+#[cfg(feature = "ocr")]
+fn image_to_text(path: &Path) -> Result<String> {
+    ocr::image_to_text(path)
+}
+
+#[cfg(not(feature = "ocr"))]
+fn image_to_text(path: &Path) -> Result<String> {
+    bail!(
+        "cannot read {}: reading images needs optical character recognition, \
+         which this build was compiled without. Rebuild with `--features ocr` \
+         after installing Tesseract.",
+        path.display()
+    )
 }
 
 #[cfg(test)]
@@ -67,10 +142,10 @@ mod tests {
     #[test]
     fn rejects_unsupported_extensions_by_name() {
         let dir = tempfile::tempdir().expect("temporary directory");
-        let path = dir.path().join("contract.docx");
+        let path = dir.path().join("archive.zip");
         std::fs::write(&path, "binary").expect("writing");
-        let error = to_text(&path).expect_err("docx is not supported yet");
-        assert!(format!("{error:#}").contains("docx"));
+        let error = to_text(&path).expect_err("zip is not supported");
+        assert!(format!("{error:#}").contains("unsupported file type"));
     }
 
     #[test]
@@ -88,10 +163,32 @@ mod tests {
     }
 
     #[test]
-    fn rejects_non_utf8_content() {
+    fn rejects_non_utf8_text_content() {
         let dir = tempfile::tempdir().expect("temporary directory");
         let path = dir.path().join("latin.txt");
         std::fs::write(&path, [0xff, 0xfe, 0x00]).expect("writing");
         assert!(to_text(&path).is_err());
+    }
+
+    #[test]
+    fn extensions_are_matched_regardless_of_case() {
+        assert_eq!(format_of(Path::new("a.PDF")), Some(Format::Pdf));
+        assert_eq!(format_of(Path::new("a.DocX")), Some(Format::Docx));
+        assert_eq!(format_of(Path::new("a.zip")), None);
+    }
+
+    #[test]
+    fn image_support_is_advertised_only_when_it_works() {
+        assert_eq!(supported().contains(&"png"), ocr_available());
+    }
+
+    #[cfg(not(feature = "ocr"))]
+    #[test]
+    fn images_explain_how_to_enable_reading_them() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let path = dir.path().join("scan.png");
+        std::fs::write(&path, [0x89, b'P', b'N', b'G']).expect("writing");
+        let error = to_text(&path).expect_err("no ocr in this build");
+        assert!(format!("{error:#}").contains("--features ocr"));
     }
 }

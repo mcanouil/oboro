@@ -34,21 +34,89 @@ const PLANTED: &[&str] = &[
     "CT-874512",
 ];
 
+/// Every readable fixture, so a converter cannot be added without the leak
+/// test covering it.
+const DOCUMENTS: &[&str] = &[
+    "contract.txt",
+    "contract.docx",
+    "clients.xlsx",
+    "invoice.pdf",
+];
+
 #[test]
 fn no_planted_value_survives_cleaning() {
+    for document in DOCUMENTS {
+        let workspace = Workspace::new();
+        let cleaned = workspace.clean_fixture(document);
+
+        let leaked: Vec<&str> = PLANTED
+            .iter()
+            .copied()
+            .filter(|planted| cleaned.contains(planted))
+            .collect();
+
+        assert!(
+            leaked.is_empty(),
+            "{document} leaked {} value(s): {leaked:#?}\n\n--- output ---\n{cleaned}",
+            leaked.len()
+        );
+    }
+}
+
+/// Accented prose must survive conversion untouched. A reader that dropped
+/// entity references would turn "Société" into "Socit", which is both wrong
+/// in the output and no longer matches a denylisted name.
+#[test]
+fn accented_text_survives_document_conversion() {
     let workspace = Workspace::new();
-    let cleaned = workspace.clean_fixture("contract.txt");
+    let cleaned = workspace.clean_fixture("contract.docx");
+    for expected in ["Représenté", "Téléphone", "Référence"] {
+        assert!(
+            cleaned.contains(expected),
+            "conversion mangled '{expected}':\n{cleaned}"
+        );
+    }
+}
 
-    let leaked: Vec<&str> = PLANTED
-        .iter()
-        .copied()
-        .filter(|planted| cleaned.contains(planted))
-        .collect();
+#[test]
+fn every_document_format_round_trips() {
+    for document in DOCUMENTS {
+        let workspace = Workspace::new();
+        let cleaned = workspace.clean_fixture(document);
+        let restored = workspace.restore(&cleaned);
+        assert!(
+            restored.contains("Acme Consulting SARL"),
+            "{document} did not restore its provider name:\n{restored}"
+        );
+        assert!(
+            !restored.contains("[["),
+            "{document} left placeholders behind after restoring:\n{restored}"
+        );
+    }
+}
 
+/// A document whose text cannot be read must fail rather than produce output
+/// that looks sanitised but was never actually read.
+#[test]
+fn a_scanned_document_is_refused_rather_than_half_read() {
+    let workspace = Workspace::new();
+    let output = workspace
+        .command()
+        .arg("clean")
+        .arg(support::fixture("scanned.pdf"))
+        .arg("--stdout")
+        .output()
+        .expect("running oboro clean");
+
+    assert!(!output.status.success(), "a scanned PDF must not succeed");
+    let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        leaked.is_empty(),
-        "sanitised output leaked {} value(s): {leaked:#?}\n\n--- output ---\n{cleaned}",
-        leaked.len()
+        stderr.contains("scanned"),
+        "the error must say why: {stderr}"
+    );
+    assert!(
+        output.stdout.is_empty(),
+        "nothing may be written for a document that could not be read"
     );
 }
 

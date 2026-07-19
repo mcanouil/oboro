@@ -48,6 +48,24 @@ Both `clean` and `restore` accept `--stdout`, so they compose in a pipeline:
 oboro clean report.txt --stdout | pbcopy
 ```
 
+### What it reads
+
+| Format | How |
+| --- | --- |
+| `.txt`, `.md` | Read directly |
+| `.docx` | Text runs pulled from the document body |
+| `.xlsx`, `.xlsm` | Every sheet flattened to tab-separated rows |
+| `.pdf` | Embedded text; scanned PDFs are refused, not half-read |
+| `.png`, `.jpg`, `.tif` | Tesseract, with a build compiled `--features ocr` |
+
+Optical character recognition is optional because it needs the Tesseract
+system libraries. Without it the binary depends on nothing but Rust, and
+images are refused with a message saying so rather than read as empty.
+
+```bash
+cargo build --release --features ocr
+```
+
 ### What gets detected
 
 This build recognises, in French and English documents:
@@ -112,8 +130,13 @@ Read them before trusting the output with anything that matters.
 - Identifiers that fail their own checksum are not recognised. A mistyped
   IBAN will not be detected.
 - Names are only redacted if you list them, until the NER phase lands.
-- Only `.txt` and `.md` are read so far. Office documents, PDFs and images
-  come next.
+- A PDF made of scanned images is refused rather than read. Export its pages
+  as images and pass those to a build with OCR.
+- Reading images needs the `ocr` feature and Tesseract; a plain build refuses
+  them.
+- Recognition accuracy on real photographs is not covered by an automated
+  test yet.
+- Older `.doc`, `.xls` and `.pptx` are not read at all.
 - Detection favours redacting too much over too little. Use the allowlist
   when it goes too far.
 - **Read the sanitised output before you share it.** No tool of this kind

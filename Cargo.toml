@@ -10,12 +10,25 @@ readme = "README.md"
 keywords = ["privacy", "anonymisation", "pii", "redaction", "llm"]
 categories = ["command-line-utilities", "text-processing"]
 
+[features]
+default = []
+# Optical character recognition for images and scanned PDFs. Needs the
+# Tesseract and Leptonica system libraries, so it is off by default to keep
+# the plain build free of anything but Rust.
+ocr = ["dep:leptess"]
+
 [dependencies]
 aes-gcm = "0.11.0"
 anyhow = "1.0.104"
 blake3 = "1.8.5"
+calamine = "0.36.0"
 clap = { version = "4.6.2", features = ["derive"] }
 dirs = "6.0.0"
+leptess = { version = "0.14.0", optional = true }
+lopdf = "0.44.0"
+pdf-extract = "0.12.0"
+quick-xml = "0.41.0"
+zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 phonenumber = "0.3.10"
 rand = "0.10.2"
 regex = "1.13.1"

@@ -20,6 +20,9 @@ All notable changes to this project will be documented in this file.
 
 ### New Features
 
+- feat: Read `.docx`, `.xlsx` and text-based `.pdf` documents, not just `.txt` and `.md`.
+- feat: Read images through Tesseract when built with `--features ocr`, which `doctor` reports on.
+- feat: Refuse a PDF that yields almost no text for its page count, rather than producing output that looks sanitised but was never read.
 - feat: Add `clean` to replace sensitive values in `.txt` and `.md` files with stable placeholders.
 - feat: Add `restore` to put real values back into a model's answer.
 - feat: Add `map list` and `map purge` to inspect and wipe the placeholder mapping.

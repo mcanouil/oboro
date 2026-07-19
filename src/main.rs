@@ -299,7 +299,15 @@ fn doctor(store: &StoreArgs) -> Result<()> {
     println!("allowlist:  {} entr(y/ies)", config.allowlist.len());
     println!("denylist:   {} term(s)", config.denylist.len());
     println!("patterns:   {} custom", config.patterns.len());
-    println!("formats:    {}", convert::SUPPORTED.join(", "));
+    println!("formats:    {}", convert::supported().join(", "));
+    println!(
+        "ocr:        {}",
+        if convert::ocr_available() {
+            "available"
+        } else {
+            "not compiled in; images cannot be read"
+        }
+    );
     println!("network:    never contacted");
     Ok(())
 }
