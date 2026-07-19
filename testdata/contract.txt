@@ -1,0 +1,25 @@
+CONTRAT DE PRESTATION
+
+Entre les soussignés :
+
+Le prestataire, Acme Consulting SARL, SIRET 12345678200002, dont le siège est
+situé 12 bis rue de la Paix, 75002 Paris, représenté par Jean Dupont.
+
+Et le client, Globex Industries, immatriculé sous le SIREN 123456782, dont les
+bureaux sont au 8 avenue des Champs-Élysées, 75008 Paris.
+
+Coordonnées du prestataire :
+  Téléphone : 06 12 34 56 78
+  Courriel : jean.dupont@acme-consulting.example
+  IBAN : FR14 2004 1010 0505 0001 3M02 606
+
+Coordonnées du client :
+  Téléphone : +33 1 42 68 53 00
+  Courriel : marie.martin@globex.example
+  Carte de paiement : 4242 4242 4242 4242
+
+Le serveur de recette est accessible à l'adresse 192.168.14.201.
+
+Référence interne : CT-874512
+
+Fait à Lille, le 3 mars 2026.
