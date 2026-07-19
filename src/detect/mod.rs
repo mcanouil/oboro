@@ -25,7 +25,7 @@ pub enum EntityKind {
     Siren,
     Siret,
     IpAddress,
-    /// A user-defined pattern from `hush.toml`, such as a contract number.
+    /// A user-defined pattern from `oboro.toml`, such as a contract number.
     Custom(String),
 }
 

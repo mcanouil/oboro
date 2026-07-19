@@ -1,7 +1,7 @@
 //! Shared harness for the integration tests.
 //!
 //! Every test runs against a vault in a temporary directory, so no test can
-//! read or write the developer's real `~/.hush`.
+//! read or write the developer's real `~/.oboro`.
 //!
 //! Each test binary compiles this module separately, so helpers used by only
 //! one of them would otherwise be reported as dead code.
@@ -34,9 +34,9 @@ impl Workspace {
         self.dir.path()
     }
 
-    /// A `hush` invocation bound to this workspace's vault.
+    /// A `oboro` invocation bound to this workspace's vault.
     pub fn command(&self) -> Command {
-        let mut command = Command::cargo_bin("hush").expect("the hush binary must build");
+        let mut command = Command::cargo_bin("oboro").expect("the oboro binary must build");
         command
             .arg("--vault")
             .arg(self.dir.path().join("vault.db"))
@@ -52,13 +52,13 @@ impl Workspace {
             .arg("clean")
             .arg(fixture(name))
             .arg("--config")
-            .arg(fixture("hush.toml"))
+            .arg(fixture("oboro.toml"))
             .arg("--stdout")
             .output()
-            .expect("running hush clean");
+            .expect("running oboro clean");
         assert!(
             output.status.success(),
-            "hush clean failed: {}",
+            "oboro clean failed: {}",
             String::from_utf8_lossy(&output.stderr)
         );
         String::from_utf8(output.stdout).expect("output must be UTF-8")
@@ -74,10 +74,10 @@ impl Workspace {
             .arg(&path)
             .arg("--stdout")
             .output()
-            .expect("running hush restore");
+            .expect("running oboro restore");
         assert!(
             output.status.success(),
-            "hush restore failed: {}",
+            "oboro restore failed: {}",
             String::from_utf8_lossy(&output.stderr)
         );
         String::from_utf8(output.stdout).expect("output must be UTF-8")

@@ -1,11 +1,11 @@
 [package]
-name = "hush"
+name = "oboro"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.90"
 description = "Local anonymisation layer between raw files and large language models"
 license = "MIT"
-repository = "https://github.com/mcanouil/hush"
+repository = "https://github.com/mcanouil/oboro"
 readme = "README.md"
 keywords = ["privacy", "anonymisation", "pii", "redaction", "llm"]
 categories = ["command-line-utilities", "text-processing"]

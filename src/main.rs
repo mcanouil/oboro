@@ -6,14 +6,14 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand};
 
-use hush::config::Config;
-use hush::convert;
-use hush::pipeline;
-use hush::vault::{self, Vault};
+use oboro::config::Config;
+use oboro::convert;
+use oboro::pipeline;
+use oboro::vault::{self, Vault};
 
 #[derive(Parser)]
 #[command(
-    name = "hush",
+    name = "oboro",
     version,
     about = "Anonymise files before sharing them with a language model",
     long_about = "Replaces sensitive values with stable placeholders, keeping the mapping in a \
@@ -39,7 +39,7 @@ enum Command {
         /// Write to standard output instead of a file (one input only)
         #[arg(long, conflicts_with = "output")]
         stdout: bool,
-        /// Configuration file (defaults to the nearest hush.toml)
+        /// Configuration file (defaults to the nearest oboro.toml)
         #[arg(long, value_name = "FILE")]
         config: Option<PathBuf>,
     },
@@ -79,16 +79,16 @@ enum MapAction {
 
 #[derive(Args, Clone)]
 struct StoreArgs {
-    /// Vault database (defaults to ~/.hush/vault.db)
+    /// Vault database (defaults to ~/.oboro/vault.db)
     #[arg(long, value_name = "FILE", global = true)]
     vault: Option<PathBuf>,
-    /// Encryption key file (defaults to ~/.hush/key)
+    /// Encryption key file (defaults to ~/.oboro/key)
     #[arg(long, value_name = "FILE", global = true)]
     key: Option<PathBuf>,
 }
 
 impl StoreArgs {
-    /// The vault and key paths, falling back to the defaults under `~/.hush`.
+    /// The vault and key paths, falling back to the defaults under `~/.oboro`.
     fn paths(&self) -> Result<(PathBuf, PathBuf)> {
         let db = match &self.vault {
             Some(path) => path.clone(),

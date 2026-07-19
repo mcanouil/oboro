@@ -1,4 +1,4 @@
-//! `hush` is an anonymisation layer between raw files and large language
+//! `oboro` is an anonymisation layer between raw files and large language
 //! models.
 //!
 //! It converts a document to text, replaces sensitive values with stable
