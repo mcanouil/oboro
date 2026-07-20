@@ -326,7 +326,20 @@ fn write_private_file(path: &Path, contents: &[u8]) -> Result<()> {
 }
 
 /// Creates a directory readable only by its owner.
+///
+/// A directory that already exists is left exactly as it is. It belongs to
+/// whoever made it, and tightening it is not this tool's decision to take:
+/// inside a container the vault's parent is a mounted volume owned by another
+/// user, where the attempt fails outright and takes the whole command with
+/// it.
+///
+/// Nothing is lost by that. The key file is created `0600` in one step by
+/// [`write_private_file`], and the database likewise, so the protection that
+/// matters does not depend on the directory's mode.
 fn create_private_dir(path: &Path) -> Result<()> {
+    if path.is_dir() {
+        return Ok(());
+    }
     std::fs::create_dir_all(path)
         .with_context(|| format!("creating directory {}", path.display()))?;
     #[cfg(unix)]
@@ -584,6 +597,45 @@ mod tests {
             .err()
             .expect("a short key must be rejected");
         assert!(format!("{error:#}").contains("expected 32"));
+    }
+
+    /// A pre-existing directory is somebody else's, and in a container it is
+    /// a mounted volume this process cannot chmod. Failing there would make
+    /// the tool unusable in exactly the place it is most wanted.
+    #[cfg(unix)]
+    #[test]
+    fn a_vault_opens_in_a_directory_it_did_not_create() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let store = dir.path().join("mounted");
+        std::fs::create_dir(&store).expect("creating the directory first");
+        std::fs::set_permissions(&store, std::fs::Permissions::from_mode(0o755))
+            .expect("loosening it, as a volume mount would be");
+
+        let mut vault = Vault::open(&store.join("vault.db"), &store.join("key"))
+            .expect("a directory we did not create must not stop the vault opening");
+        vault
+            .placeholder_for(&EntityKind::Person, "Jean Dupont")
+            .expect("allocating");
+
+        assert_eq!(
+            std::fs::metadata(&store)
+                .expect("reading")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o755,
+            "an existing directory must be left exactly as it was"
+        );
+        assert_eq!(
+            std::fs::metadata(store.join("key"))
+                .expect("reading")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600,
+            "the key must still be owner-only regardless"
+        );
     }
 
     #[cfg(unix)]

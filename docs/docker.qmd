@@ -1,0 +1,110 @@
+---
+title: "Running it in Docker"
+---
+
+A tool that asks you to trust it with confidential documents should be easy to inspect and easy to try.
+The image is one statically linked binary on `distroless/static`, about 19 MB.
+There is no shell in it, no package manager and no interpreter, so there is very little to read and very little to go wrong.
+
+The default build does not depend on an HTTP client at all, since that sits behind the `ner` feature.
+The image therefore has no capacity to make a network request, whatever it is asked to do.
+
+```bash
+docker pull ghcr.io/mcanouil/oboro:latest
+```
+
+## The vault has to outlive the container
+
+::: {.callout-important}
+
+## Mount a volume, or the document cannot be restored
+
+A container's filesystem disappears when the container exits, and the mapping between placeholders and real values lives in that filesystem.
+
+Without `-v oboro-vault:/vault`, `clean` will happily produce a sanitised document whose values are gone the moment the command finishes.
+`restore` then leaves every placeholder untouched and warns that it does not recognise them, which is the last chance you get to notice.
+
+:::
+
+Create the volume once:
+
+```bash
+docker volume create oboro-vault
+```
+
+Then mount it on every run.
+The image sets `OBORO_VAULT` and `OBORO_KEY_FILE` to point inside it, so no command has to repeat the paths.
+
+## Cleaning a document
+
+```bash
+docker run --rm \
+  -v oboro-vault:/vault \
+  -v "$PWD":/work -w /work \
+  --user "$(id -u):$(id -g)" \
+  ghcr.io/mcanouil/oboro:latest clean contract.docx
+```
+
+`--user` matters: without it the container writes as its own unprivileged user and `contract.clean.md` arrives on your disk owned by someone else.
+
+## Restoring an answer
+
+The same volume, so the mapping is there:
+
+```bash
+docker run --rm \
+  -v oboro-vault:/vault \
+  -v "$PWD":/work -w /work \
+  --user "$(id -u):$(id -g)" \
+  ghcr.io/mcanouil/oboro:latest restore answer.md
+```
+
+## Reviewing
+
+`review` is a terminal interface, so it needs a terminal attached:
+
+```bash
+docker run --rm -it \
+  -v oboro-vault:/vault \
+  -v "$PWD":/work -w /work \
+  --user "$(id -u):$(id -g)" \
+  ghcr.io/mcanouil/oboro:latest review contract.docx
+```
+
+## Worth a shell function
+
+The flags are the same every time, which is exactly what a shell function is for:
+
+```bash
+oboro() {
+  docker run --rm -it \
+    -v oboro-vault:/vault \
+    -v "$PWD":/work -w /work \
+    --user "$(id -u):$(id -g)" \
+    ghcr.io/mcanouil/oboro:latest "$@"
+}
+```
+
+After that, `oboro clean contract.docx` behaves as though it were installed.
+
+## What the image cannot do
+
+Optical character recognition and the recognition model both need system libraries, and the model needs a 348 MB download.
+Putting either in the image would cost every user the weight of a capability most of them will not enable, so neither is included.
+
+The image therefore reads `.txt`, `.md`, `.docx`, `.xlsx` and text-based `.pdf`, and finds structured values along with anything on your denylist.
+Names it has not been told about need a build with `--features ner`, described in the [quickstart](quickstart.qmd).
+
+Run `doctor` to see what any given build can do:
+
+```bash
+docker run --rm -v oboro-vault:/vault ghcr.io/mcanouil/oboro:latest doctor
+```
+
+## Building it yourself
+
+The `Dockerfile` is in the repository root and is short enough to read in a minute:
+
+```bash
+docker build -t oboro .
+```
