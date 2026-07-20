@@ -107,10 +107,13 @@ enum MapAction {
 #[derive(Args, Clone)]
 struct StoreArgs {
     /// Vault database (defaults to ~/.oboro/vault.db)
-    #[arg(long, value_name = "FILE", global = true)]
+    ///
+    /// The environment variable exists so a container can point the vault at
+    /// a mounted volume without every command having to repeat the flag.
+    #[arg(long, value_name = "FILE", global = true, env = "OBORO_VAULT")]
     vault: Option<PathBuf>,
     /// Encryption key file (defaults to ~/.oboro/key)
-    #[arg(long, value_name = "FILE", global = true)]
+    #[arg(long, value_name = "FILE", global = true, env = "OBORO_KEY_FILE")]
     key: Option<PathBuf>,
 }
 
@@ -373,6 +376,11 @@ fn doctor(store: &StoreArgs) -> Result<()> {
     }
     #[cfg(not(feature = "ner"))]
     println!("model:      not compiled in; names are matched from the denylist only");
+    #[cfg(feature = "ner")]
     println!("network:    only `models pull`, and only when you run it");
+    // Without that command there is nothing in this build that can open a
+    // socket, and saying otherwise would overstate what it does.
+    #[cfg(not(feature = "ner"))]
+    println!("network:    never contacted");
     Ok(())
 }

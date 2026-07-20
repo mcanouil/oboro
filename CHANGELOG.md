@@ -12,7 +12,15 @@ All notable changes to this project will be documented in this file.
   Anything cleaned with a `hush` build cannot be restored; clean those documents again.
   Nothing shipped under the old name, so no migration path is provided.
 
+### New Features
+
+- feat: Publish a Docker image, one static binary on `distroless/static` with no shell and no network capability, so the tool can be tried without a Rust toolchain.
+- feat: Read the vault and key paths from `OBORO_VAULT` and `OBORO_KEY_FILE`, so a container can point them at a mounted volume without repeating the flags.
+
 ### Bug Fixes
+
+- fix: Open a vault in a directory the tool did not create, instead of failing when it cannot change that directory's permissions. This made the vault unusable on a mounted volume.
+- fix: Report `network: never contacted` in `doctor` for builds without the recognition model, which have no command that can open a socket.
 
 - fix: Read Word headers, footers, footnotes and comments, not only the document body, so a letterhead is no longer silently dropped.
 - fix: Stop refusing short but genuine PDFs; only a page yielding essentially nothing is treated as scanned.

@@ -1,0 +1,12 @@
+# The build context is sent to the daemon in full, and target/ alone is
+# several gigabytes.
+target/
+_site/
+.git/
+.github/
+.devcontainer/
+docs/
+testdata/
+tests/
+*.md
+.kata*

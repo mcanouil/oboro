@@ -17,6 +17,8 @@ website:
         text: Home
       - href: quickstart.qmd
         text: Quickstart
+      - href: docker.qmd
+        text: Docker
       - href: reference.qmd
         text: Reference
       - href: how-it-works.qmd
@@ -32,6 +34,7 @@ website:
         contents:
           - index.qmd
           - quickstart.qmd
+          - docker.qmd
           - configuration.qmd
           - reference.qmd
       - section: "Understanding it"
