@@ -67,3 +67,24 @@ jobs:
 
       - name: Test
         run: cargo test --all-targets --features ocr
+
+  ner:
+    name: Test with the recognition model feature
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.0
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2.9.1
+
+      - name: Lint
+        run: cargo clippy --all-targets --features ner -- -D warnings
+
+      # The model-backed calibration tests stay ignored here: they need a
+      # 348 MB download, and CI verifies that the code compiles and that
+      # everything not needing weights still passes.
+      - name: Test
+        run: cargo test --all-targets --features ner
