@@ -1,0 +1,38 @@
+/*-- scss:defaults --*/
+
+@import "tokens";
+
+$mist: $oboro-mist-dark;
+$ink: $oboro-ink-dark;
+$haze: $oboro-haze-dark;
+$slate: $oboro-slate-dark;
+$moon: $oboro-moon-dark;
+$moon-mark: $oboro-moon-mark-dark;
+$muted: $oboro-muted-dark;
+
+$body-bg: $mist;
+$body-color: $ink;
+$primary: $slate;
+$secondary: $muted;
+$link-color: $slate;
+$link-hover-color: tint-color($slate, 20%);
+$code-color: $ink;
+$code-bg: $haze;
+$pre-bg: $haze;
+$border-color: $haze;
+$table-border-color: $haze;
+
+$font-family-sans-serif: "Public Sans", system-ui, -apple-system, sans-serif;
+$font-family-monospace: "JetBrains Mono", ui-monospace, "SFMono-Regular", monospace;
+$headings-font-family: "Spectral", Georgia, "Times New Roman", serif;
+$headings-font-weight: 600;
+$headings-line-height: 1.25;
+$font-size-base: 1rem;
+$line-height-base: 1.65;
+
+$navbar-dark-bg: $haze;
+$navbar-dark-color: $ink;
+$navbar-dark-hover-color: $slate;
+$navbar-dark-active-color: $slate;
+
+@import "shared";
