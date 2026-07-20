@@ -57,8 +57,23 @@ enum Command {
         #[command(subcommand)]
         action: MapAction,
     },
+    /// Fetch or inspect the local recognition model
+    #[cfg(feature = "ner")]
+    Models {
+        #[command(subcommand)]
+        action: ModelAction,
+    },
     /// Report the tool's configuration and environment
     Doctor,
+}
+
+#[cfg(feature = "ner")]
+#[derive(Subcommand)]
+enum ModelAction {
+    /// Download the model, verifying it against pinned hashes
+    Pull,
+    /// Report what is installed
+    Status,
 }
 
 #[derive(Subcommand)]
@@ -128,6 +143,14 @@ fn run() -> Result<()> {
         Command::Map { action } => match action {
             MapAction::List { reveal } => map_list(reveal, store),
             MapAction::Purge { yes } => map_purge(yes, store),
+        },
+        #[cfg(feature = "ner")]
+        Command::Models { action } => match action {
+            ModelAction::Pull => oboro::models::pull(),
+            ModelAction::Status => {
+                print!("{}", oboro::models::status()?);
+                Ok(())
+            }
         },
         Command::Doctor => doctor(store),
     }
@@ -308,6 +331,23 @@ fn doctor(store: &StoreArgs) -> Result<()> {
             "not compiled in; images cannot be read"
         }
     );
-    println!("network:    never contacted");
+    #[cfg(feature = "ner")]
+    {
+        let installed = oboro::models::is_installed().unwrap_or(false);
+        println!(
+            "model:      {}",
+            if installed {
+                "installed".to_owned()
+            } else {
+                format!(
+                    "not installed; run `oboro models pull` (about {} MB)",
+                    oboro::models::download_bytes() / 1_048_576
+                )
+            }
+        );
+    }
+    #[cfg(not(feature = "ner"))]
+    println!("model:      not compiled in; names are matched from the denylist only");
+    println!("network:    only `models pull`, and only when you run it");
     Ok(())
 }

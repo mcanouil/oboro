@@ -82,9 +82,26 @@ This build recognises, in French and English documents:
 | French street addresses and postcodes | Pattern |
 | Anything you list yourself | Your regular expressions and terms |
 
-Personal and company names are matched from the denylist in `oboro.toml`.
-Detecting them without being told is the job of the local NER model in a
-later phase.
+Personal and company names are found by a local recognition model, built
+with `--features ner`:
+
+```bash
+cargo build --release --features ner
+oboro models pull   # about 348 MB, once, verified against pinned hashes
+```
+
+The model runs on your machine. `models pull` is the only command that ever
+touches the network, and only when you run it.
+
+Without the model, names are matched from the denylist in `oboro.toml`
+instead.
+
+**The model over-redacts, deliberately.** A real name inside a document and
+an ordinary phrase score almost the same: "Thomas Bernard" scores 0.237 while
+"The quick brown fox" scores 0.218. No threshold separates them, so the
+default errs towards redacting and expects you to read the result. Raise
+`ner_threshold` to redact less and risk missing names, or lower it to redact
+more.
 
 ## Configuration
 
@@ -94,6 +111,10 @@ directory. Every section is optional.
 ```toml
 # Region used to interpret national phone number formats.
 default_region = "FR"
+
+# The local recognition model. Lower the threshold to redact more.
+ner_enabled = true
+ner_threshold = 0.15
 
 # Values that must never be redacted.
 allowlist = ["My Own Company Ltd"]
@@ -129,7 +150,10 @@ Read them before trusting the output with anything that matters.
 
 - Identifiers that fail their own checksum are not recognised. A mistyped
   IBAN will not be detected.
-- Names are only redacted if you list them, until the NER phase lands.
+- The recognition model redacts some ordinary prose as though it were a
+  name. This is the intended direction of error, not a bug, but it means the
+  output needs reading before you send it.
+- Without `--features ner`, names are only redacted if you list them.
 - A PDF made of scanned images is refused rather than read. Export its pages
   as images and pass those to a build with OCR.
 - Reading images needs the `ocr` feature and Tesseract; a plain build refuses

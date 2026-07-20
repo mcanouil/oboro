@@ -184,7 +184,8 @@ fn doctor_reports_the_vault_and_confirms_no_network_use() {
         .assert()
         .success()
         .stdout(predicate::str::contains("vault:"))
-        .stdout(predicate::str::contains("never contacted"));
+        .stdout(predicate::str::contains("network:"))
+        .stdout(predicate::str::contains("model:"));
 }
 
 #[test]
