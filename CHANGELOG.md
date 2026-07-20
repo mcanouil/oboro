@@ -22,6 +22,8 @@ All notable changes to this project will be documented in this file.
 
 ### New Features
 
+- feat: Find names, organisations and addresses with a local recognition model, built with `--features ner`, so they no longer have to be listed by hand.
+- feat: Add `models pull` and `models status` to fetch and inspect that model, verifying downloads against pinned hashes.
 - feat: Read `.docx`, `.xlsx` and text-based `.pdf` documents, not just `.txt` and `.md`.
 - feat: Read images through Tesseract when built with `--features ocr`, which `doctor` reports on.
 - feat: Refuse a PDF that yields almost no text for its page count, rather than producing output that looks sanitised but was never read.

@@ -30,6 +30,20 @@ pub struct DenyTerm {
 pub struct Config {
     /// Region used to interpret national phone number formats.
     pub default_region: String,
+    /// Whether to run the local recognition model when it is installed.
+    pub ner_enabled: bool,
+    /// Minimum probability before a model detection is acted on.
+    ///
+    /// Calibrated against the quantised export, and against whole documents
+    /// rather than single sentences: the same name scores 0.47 alone but
+    /// 0.24 once surrounded by context, so a threshold tuned on sentences
+    /// silently misses names in real files.
+    ///
+    /// Ordinary prose misread as a name tops out around 0.13, which leaves
+    /// this default a narrow margin. It errs towards redacting, because a
+    /// false positive costs one allowlist entry and a false negative is a
+    /// name reaching a language model.
+    pub ner_threshold: f32,
     /// Values that must never be redacted, such as the user's own company.
     pub allowlist: Vec<String>,
     pub denylist: Vec<DenyTerm>,
@@ -40,6 +54,8 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             default_region: "FR".to_owned(),
+            ner_enabled: true,
+            ner_threshold: 0.15,
             allowlist: Vec::new(),
             denylist: Vec::new(),
             patterns: Vec::new(),
@@ -104,6 +120,10 @@ impl Config {
 struct RawConfig {
     #[serde(default = "default_region")]
     default_region: String,
+    #[serde(default = "default_ner_enabled")]
+    ner_enabled: bool,
+    #[serde(default = "default_ner_threshold")]
+    ner_threshold: f32,
     #[serde(default)]
     allowlist: Vec<String>,
     #[serde(default)]
@@ -114,6 +134,14 @@ struct RawConfig {
 
 fn default_region() -> String {
     "FR".to_owned()
+}
+
+fn default_ner_enabled() -> bool {
+    true
+}
+
+fn default_ner_threshold() -> f32 {
+    0.15
 }
 
 #[derive(Deserialize)]
@@ -170,8 +198,17 @@ impl RawConfig {
             })
             .collect::<Result<Vec<_>>>()?;
 
+        if !(0.0..=1.0).contains(&self.ner_threshold) {
+            bail!(
+                "ner_threshold must be between 0.0 and 1.0, got {}",
+                self.ner_threshold
+            );
+        }
+
         Ok(Config {
             default_region: self.default_region,
+            ner_enabled: self.ner_enabled,
+            ner_threshold: self.ner_threshold,
             allowlist: self.allowlist,
             denylist,
             patterns,

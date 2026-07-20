@@ -8,5 +8,7 @@
 pub mod config;
 pub mod convert;
 pub mod detect;
+#[cfg(feature = "ner")]
+pub mod models;
 pub mod pipeline;
 pub mod vault;

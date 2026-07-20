@@ -43,7 +43,7 @@ pub struct RestoreReport {
 /// Returns an error if the vault cannot allocate a placeholder, for instance
 /// when its database is unreadable.
 pub fn clean(text: &str, config: &Config, vault: &mut Vault) -> Result<CleanReport> {
-    let spans = merge::resolve(Rules::new(config).detect(text));
+    let spans = merge::resolve(detect_all(text, config)?);
 
     let mut output = String::with_capacity(text.len());
     let mut by_tag: BTreeMap<String, usize> = BTreeMap::new();
@@ -69,6 +69,25 @@ pub fn clean(text: &str, config: &Config, vault: &mut Vault) -> Result<CleanRepo
         replaced,
         by_tag,
     })
+}
+
+/// Runs every detection layer available in this build.
+///
+/// Layers are independent and may overlap; `merge::resolve` decides between
+/// them. Adding a layer is adding to this list.
+// Without the ner feature there is only one layer, so the accumulator needs
+// no mutation and nothing here can fail. Both stay for the build that has it.
+#[cfg_attr(not(feature = "ner"), allow(clippy::unnecessary_wraps))]
+fn detect_all(text: &str, config: &Config) -> Result<Vec<crate::detect::Span>> {
+    #[cfg_attr(not(feature = "ner"), allow(unused_mut))]
+    let mut spans = Rules::new(config).detect(text);
+
+    #[cfg(feature = "ner")]
+    if let Some(recogniser) = crate::detect::ner::load_if_available(config)? {
+        spans.extend(recogniser.detect(text)?);
+    }
+
+    Ok(spans)
 }
 
 /// Puts the real values back into a model's answer.
@@ -171,9 +190,13 @@ mod tests {
         assert_eq!(report.text.matches("[[EMAIL_1]]").count(), 2);
     }
 
+    /// The rules layer alone must not touch text with nothing in it. The
+    /// model layer is probabilistic and may over-redact prose, which is
+    /// covered by its own calibration tests.
     #[test]
-    fn text_without_entities_is_unchanged() {
+    fn text_without_entities_is_unchanged_by_the_rules_layer() {
         let mut fixture = Fixture::new();
+        fixture.config.ner_enabled = false;
         let text = "The quick brown fox jumps over the lazy dog.";
         let report = clean(text, &fixture.config, &mut fixture.vault).expect("cleaning");
         assert_eq!(report.text, text);

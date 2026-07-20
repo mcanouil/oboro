@@ -5,6 +5,8 @@
 //! layer produces [`Span`]s over the same text, which [`merge`] reconciles.
 
 pub mod merge;
+#[cfg(feature = "ner")]
+pub mod ner;
 pub mod rules;
 
 use std::fmt;
