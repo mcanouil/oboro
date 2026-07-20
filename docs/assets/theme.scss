@@ -1,0 +1,389 @@
+/*-- scss:defaults --*/
+
+@import "tokens";
+
+// Bootstrap needs a light-mode value at compile time; the custom properties
+// below carry the real per-mode colours, which is what the rules use.
+$body-bg: $oboro-mist-light;
+$body-color: $oboro-ink-light;
+$primary: $oboro-slate-light;
+$secondary: $oboro-muted-light;
+$link-color: $oboro-slate-light;
+
+$font-family-sans-serif: "Public Sans", system-ui, -apple-system, sans-serif;
+$font-family-monospace: "JetBrains Mono", ui-monospace, "SFMono-Regular", monospace;
+$headings-font-family: "Spectral", Georgia, "Times New Roman", serif;
+$headings-font-weight: 600;
+$headings-line-height: 1.25;
+$font-size-base: 1rem;
+$line-height-base: 1.65;
+
+/*-- scss:rules --*/
+
+// One stylesheet serves both modes, with the palette carried by custom
+// properties keyed on the theme attribute.
+//
+// The previous arrangement compiled a separate file per mode from SCSS
+// variables, and the navbar came out unreadable in both: Bootstrap derives
+// navbar text from whether it believes the bar is light or dark, and a
+// compile-time value cannot answer that. Reading colours at run time from
+// the mode actually in force removes the guesswork, and `!important` settles
+// the specificity arguments that made the first fix insufficient.
+
+:root,
+[data-bs-theme="light"],
+.quarto-light {
+  --oboro-paper: #{$oboro-mist-light};
+  --oboro-ink: #{$oboro-ink-light};
+  --oboro-haze: #{$oboro-haze-light};
+  --oboro-muted: #{$oboro-muted-light};
+  --oboro-primary: #{$oboro-slate-light};
+  --oboro-accent: #{$oboro-moon-light};
+  --oboro-accent-mark: #{$oboro-moon-mark-light};
+  --oboro-code-bg: #fafbfc;
+  --oboro-hairline: rgb(22 32 42 / 0.12);
+  --oboro-tint: rgb(62 96 118 / 0.10);
+  --oboro-tint-accent: rgb(201 162 39 / 0.14);
+}
+
+[data-bs-theme="dark"],
+.quarto-dark {
+  --oboro-paper: #{$oboro-mist-dark};
+  --oboro-ink: #{$oboro-ink-dark};
+  --oboro-haze: #{$oboro-haze-dark};
+  --oboro-muted: #{$oboro-muted-dark};
+  --oboro-primary: #{$oboro-slate-dark};
+  --oboro-accent: #{$oboro-moon-dark};
+  --oboro-accent-mark: #{$oboro-moon-mark-dark};
+  --oboro-code-bg: #141c25;
+  --oboro-hairline: rgb(232 237 242 / 0.14);
+  --oboro-tint: rgb(127 168 196 / 0.14);
+  --oboro-tint-accent: rgb(230 197 88 / 0.16);
+}
+
+body {
+  background-color: var(--oboro-paper);
+  color: var(--oboro-ink);
+  font-synthesis-weight: none;
+}
+
+// --- Navbar --------------------------------------------------------------
+// Foreground is set with the background throughout. Setting only the
+// background is what left this invisible.
+
+.navbar {
+  background: linear-gradient(180deg, var(--oboro-haze) 0%, var(--oboro-paper) 100%) !important;
+  border-bottom: 1px solid var(--oboro-hairline);
+  color: var(--oboro-ink) !important;
+}
+
+.navbar .navbar-brand,
+.navbar .nav-link,
+.navbar .navbar-text,
+.navbar .quarto-navbar-tools .nav-link,
+.navbar .dropdown-toggle {
+  color: var(--oboro-ink) !important;
+  text-decoration: none;
+}
+
+.navbar .navbar-brand {
+  font-family: "Spectral", Georgia, serif;
+  font-weight: 600;
+}
+
+.navbar .nav-link:hover,
+.navbar .nav-link:focus-visible,
+.navbar .nav-link.active,
+.navbar .navbar-nav .show > .nav-link {
+  color: var(--oboro-primary) !important;
+}
+
+// The active page gets an underline as well as a colour, so it does not rely
+// on hue alone to say where you are.
+.navbar .nav-link.active {
+  box-shadow: inset 0 -2px 0 0 var(--oboro-primary);
+}
+
+.navbar .navbar-toggler {
+  border-color: var(--oboro-hairline);
+}
+
+.navbar .navbar-toggler-icon {
+  // The stock icon is a baked image in a fixed colour, so it is redrawn
+  // rather than recoloured.
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'%3e%3cpath stroke='%2316202a' stroke-linecap='round' stroke-miterlimit='10' stroke-width='2' d='M4 7h22M4 15h22M4 23h22'/%3e%3c/svg%3e");
+}
+
+[data-bs-theme="dark"] .navbar .navbar-toggler-icon {
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'%3e%3cpath stroke='%23e8edf2' stroke-linecap='round' stroke-miterlimit='10' stroke-width='2' d='M4 7h22M4 15h22M4 23h22'/%3e%3c/svg%3e");
+}
+
+// Search and the light/dark toggle sit in the navbar and inherit nothing
+// useful from it.
+.navbar #quarto-search .aa-DetachedSearchButton,
+.navbar .quarto-navbar-tools .quarto-color-scheme-toggle {
+  background: transparent;
+  border: 1px solid var(--oboro-hairline);
+  border-radius: 0.375rem;
+  color: var(--oboro-ink) !important;
+}
+
+.navbar #quarto-search .aa-DetachedSearchButton:hover,
+.navbar .quarto-navbar-tools .quarto-color-scheme-toggle:hover {
+  background: var(--oboro-tint);
+  color: var(--oboro-primary) !important;
+}
+
+// --- Sidebar and contents ------------------------------------------------
+
+.sidebar-navigation .sidebar-item-text,
+.sidebar nav .sidebar-item .sidebar-item-text {
+  color: var(--oboro-ink);
+}
+
+.sidebar-navigation .sidebar-item .sidebar-item-text:hover,
+.sidebar-navigation .sidebar-item .active,
+.sidebar-navigation .sidebar-item-text.active,
+#quarto-sidebar .sidebar-item-container .active {
+  color: var(--oboro-primary) !important;
+  font-weight: 600;
+}
+
+.sidebar nav .sidebar-section .sidebar-item-text {
+  font-family: "Spectral", Georgia, serif;
+  font-weight: 600;
+}
+
+#TOC .nav-link,
+.toc-actions a {
+  color: var(--oboro-muted);
+}
+
+#TOC .nav-link:hover,
+#TOC .nav-link.active,
+.toc-actions a:hover {
+  color: var(--oboro-primary);
+}
+
+// --- Tabsets -------------------------------------------------------------
+// The active tab was reading as inactive: Bootstrap gives it the page
+// background and a border, neither of which said anything here.
+
+.panel-tabset .nav-tabs {
+  border-bottom: 1px solid var(--oboro-hairline);
+}
+
+.panel-tabset .nav-tabs .nav-link {
+  color: var(--oboro-muted) !important;
+  background: transparent !important;
+  border: 1px solid transparent;
+  border-top-left-radius: 0.375rem;
+  border-top-right-radius: 0.375rem;
+}
+
+.panel-tabset .nav-tabs .nav-link:hover,
+.panel-tabset .nav-tabs .nav-link:focus-visible {
+  color: var(--oboro-primary) !important;
+  border-color: var(--oboro-hairline);
+  border-bottom-color: transparent;
+}
+
+.panel-tabset .nav-tabs .nav-link.active {
+  color: var(--oboro-primary) !important;
+  background: var(--oboro-paper) !important;
+  border-color: var(--oboro-hairline);
+  border-bottom-color: var(--oboro-paper);
+  font-weight: 600;
+}
+
+// --- Headings, tables, callouts ------------------------------------------
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  color: var(--oboro-ink);
+  letter-spacing: -0.01em;
+}
+
+h2 {
+  border-bottom: 1px solid var(--oboro-hairline);
+  padding-bottom: 0.3rem;
+}
+
+.table {
+  --bs-table-color: var(--oboro-ink);
+  --bs-table-border-color: var(--oboro-hairline);
+
+  > :not(caption) > * > * {
+    background-color: transparent;
+    color: var(--oboro-ink);
+  }
+
+  thead th {
+    border-bottom: 2px solid var(--oboro-hairline);
+    font-weight: 600;
+  }
+}
+
+div.callout {
+  border-left-width: 3px;
+  border-radius: 0.25rem;
+  background-color: var(--oboro-haze);
+}
+
+div.callout .callout-body,
+div.callout .callout-title,
+div.callout .callout-caption {
+  color: var(--oboro-ink);
+}
+
+div.callout.callout-style-default > .callout-header {
+  background-color: var(--oboro-tint);
+  border-bottom: none;
+}
+
+div.callout-warning,
+div.callout-important {
+  border-left-color: var(--oboro-accent-mark);
+}
+
+// --- Code ----------------------------------------------------------------
+
+pre,
+code {
+  font-variant-ligatures: none;
+}
+
+div.sourceCode,
+pre.sourceCode,
+pre {
+  background-color: var(--oboro-code-bg) !important;
+  border: 1px solid var(--oboro-hairline);
+  border-radius: 0.3rem;
+}
+
+code:not(.sourceCode) {
+  background-color: var(--oboro-code-bg);
+  color: var(--oboro-ink);
+}
+
+// github-light and github-dark are tuned for GitHub's own backgrounds. On
+// this surface a handful of tokens land under 4.5, the worst being the
+// commonest: the red carrying attributes, keywords and preprocessor spans.
+// Only the shortfalls are overridden, in the same hue.
+:root,
+[data-bs-theme="light"] {
+  --quarto-hl-at-color: #d53342;
+  --quarto-hl-bu-color: #d53342;
+  --quarto-hl-cf-color: #d53342;
+  --quarto-hl-dt-color: #d53342;
+  --quarto-hl-ex-color: #d53342;
+  --quarto-hl-kw-color: #d53342;
+  --quarto-hl-pp-color: #d53342;
+  --quarto-hl-al-color: #e60000;
+  --quarto-hl-er-color: #e60000;
+  --quarto-hl-wa-color: #be5208;
+}
+
+[data-bs-theme="dark"] {
+  --quarto-hl-co-color: #7d8691;
+  --quarto-hl-cv-color: #7d8691;
+  --quarto-hl-an-color: #7d8691;
+  --quarto-hl-do-color: #7d8691;
+  --quarto-hl-in-color: #7d8691;
+  --quarto-hl-re-color: #7d8691;
+}
+
+// --- The placeholder mark ------------------------------------------------
+// A redaction is what this tool produces, so the examples draw it as a
+// deliberate object rather than leaving it as incidental punctuation.
+// Applied by assets/scripts/placeholders.html; without it the text is
+// unchanged and still correct.
+
+.oboro-placeholder {
+  color: var(--oboro-accent);
+  background-color: var(--oboro-tint-accent);
+  border: 1px solid var(--oboro-accent-mark);
+  border-radius: 0.2rem;
+  padding: 0 0.15em;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+// --- Footer --------------------------------------------------------------
+
+.nav-footer {
+  border-top: 1px solid var(--oboro-hairline);
+  background-color: var(--oboro-paper);
+  color: var(--oboro-muted);
+  font-size: 0.875rem;
+}
+
+.nav-footer a {
+  color: var(--oboro-muted);
+}
+
+// --- GitHub widget -------------------------------------------------------
+// assets/scripts/github-widget.html replaces the #github-widget navbar
+// placeholder with a button carrying star and fork counts. Ported from
+// gribouille, which took it from posit-dev/great-docs.
+
+#github-widget {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.gh-widget-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0.3rem 0.6rem;
+  background: transparent;
+  border: 1px solid var(--oboro-hairline);
+  border-radius: 0.375rem;
+  color: var(--oboro-ink) !important;
+  cursor: pointer;
+  font-size: 0.85rem;
+  line-height: 1;
+}
+
+.gh-widget-trigger:hover,
+.gh-widget-open .gh-widget-trigger {
+  background: var(--oboro-tint);
+  color: var(--oboro-primary) !important;
+}
+
+.gh-widget-trigger .gh-icon {
+  flex: none;
+}
+
+.gh-widget-menu {
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  right: 0;
+  min-width: 13rem;
+  padding: 0.35rem;
+  background: var(--oboro-paper);
+  border: 1px solid var(--oboro-hairline);
+  border-radius: 0.5rem;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
+  z-index: 1080;
+}
+
+.gh-widget-menu a {
+  display: block;
+  padding: 0.4rem 0.7rem;
+  border-radius: 0.375rem;
+  color: var(--oboro-ink);
+  text-decoration: none;
+}
+
+.gh-widget-menu a:hover,
+.gh-widget-menu a:focus-visible {
+  background: var(--oboro-tint);
+  color: var(--oboro-primary);
+}
