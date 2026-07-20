@@ -175,6 +175,28 @@ fn restore_rewrites_the_file_in_place_by_default() {
     assert!(restored.contains("Jean Dupont"));
 }
 
+/// A document with nothing in it must not drag the user into a terminal
+/// only to show an empty list.
+#[test]
+fn review_skips_a_document_with_nothing_to_redact() {
+    let workspace = Workspace::new();
+    let input = workspace.path().join("plain.txt");
+    std::fs::write(&input, "Nothing sensitive at all in this line.\n").expect("writing");
+
+    workspace
+        .command()
+        .arg("review")
+        .arg(&input)
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("nothing detected"));
+
+    assert!(
+        !workspace.path().join("plain.clean.md").exists(),
+        "skipping must not write an output file"
+    );
+}
+
 #[test]
 fn doctor_reports_the_vault_and_confirms_no_network_use() {
     let workspace = Workspace::new();

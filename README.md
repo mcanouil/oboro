@@ -38,6 +38,9 @@ oboro restore answer.md
 # See what the vault holds.
 oboro map list
 
+# Go through the detections yourself before anything is written.
+oboro review contract.txt
+
 # Check the setup.
 oboro doctor
 ```
@@ -95,6 +98,17 @@ touches the network, and only when you run it.
 
 Without the model, names are matched from the denylist in `oboro.toml`
 instead.
+
+Since the model over-redacts, `oboro review` exists to put some of it back.
+It lists every detection with its kind, confidence and surrounding line, and
+you accept or reject each one before a single byte is written:
+
+```text
+j/k move   space toggle   a accept all   n reject none   w write   s skip   q quit
+```
+
+Rejecting a detection leaves the value in the output and never records it in
+the vault.
 
 **The model over-redacts, deliberately.** A real name inside a document and
 an ordinary phrase score almost the same: "Thomas Bernard" scores 0.237 while

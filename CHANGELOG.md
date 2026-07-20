@@ -22,6 +22,7 @@ All notable changes to this project will be documented in this file.
 
 ### New Features
 
+- feat: Add `review`, a terminal screen for accepting or rejecting each detection before anything is written.
 - feat: Find names, organisations and addresses with a local recognition model, built with `--features ner`, so they no longer have to be listed by hand.
 - feat: Add `models pull` and `models status` to fetch and inspect that model, verifying downloads against pinned hashes.
 - feat: Read `.docx`, `.xlsx` and text-based `.pdf` documents, not just `.txt` and `.md`.
