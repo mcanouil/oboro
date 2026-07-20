@@ -8,7 +8,10 @@ website:
   site-url: "https://m.canouil.dev/oboro/"
   repo-url: "https://github.com/mcanouil/oboro"
   repo-actions: [issue, edit]
+  favicon: assets/images/favicon.svg
   navbar:
+    logo: assets/images/logo.svg
+    logo-alt: "oboro"
     left:
       - href: index.qmd
         text: Home
@@ -46,8 +49,9 @@ website:
 format:
   html:
     theme:
-      light: flatly
-      dark: darkly
+      light: [cosmo, assets/theme-light.scss]
+      dark: [cosmo, assets/theme-dark.scss]
+    include-after-body: assets/placeholders.js
     toc: true
     toc-depth: 3
     code-copy: true

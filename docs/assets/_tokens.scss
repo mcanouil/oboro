@@ -1,0 +1,90 @@
+// Shared design tokens for the oboro site.
+//
+// The name means hazy, or veiled by mist, so the palette is built from a
+// moon behind cloud: cool greys for the page, slate for anything you can act
+// on, and a single pale gold reserved for the things the tool actually does,
+// which is to say redactions and warnings.
+//
+// Imported by both theme-light.scss and theme-dark.scss, which supply the
+// values that differ between them.
+
+// Fonts are served from this site rather than a font provider. A tool whose
+// argument is that documents should not be handed to third parties cannot
+// reasonably ask its own readers to fetch typefaces from one.
+
+@font-face {
+  font-family: "Spectral";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("assets/fonts/spectral-400.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Spectral";
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url("assets/fonts/spectral-400-italic.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Spectral";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("assets/fonts/spectral-600.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Public Sans";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("assets/fonts/public-sans-normal.woff2") format("woff2-variations");
+}
+
+@font-face {
+  font-family: "Public Sans";
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("assets/fonts/public-sans-italic.woff2") format("woff2-variations");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url("assets/fonts/jetbrains-mono-normal.woff2") format("woff2-variations");
+}
+
+// The palette. Light and dark values are chosen so every pairing used for
+// text clears WCAG AA at body size; the theme is deliberately low contrast,
+// which is exactly the condition under which that has to be checked rather
+// than assumed.
+
+$oboro-mist-light: #f2f4f6;
+$oboro-mist-dark: #10161c;
+
+$oboro-ink-light: #16202a;
+$oboro-ink-dark: #e8edf2;
+
+$oboro-haze-light: #e2e7ec;
+$oboro-haze-dark: #1b242e;
+
+$oboro-slate-light: #3e6076;
+$oboro-slate-dark: #7fa8c4;
+
+$oboro-moon-light: #6f5709;
+$oboro-moon-dark: #e6c558;
+
+// The accent as drawn rather than as written on: gold is legible as a mark
+// long before it is legible as text, so the swatch and the text colour are
+// allowed to differ.
+$oboro-moon-mark-light: #c9a227;
+$oboro-moon-mark-dark: #e6c558;
+
+$oboro-muted-light: #5a6b78;
+$oboro-muted-dark: #9db0c0;
