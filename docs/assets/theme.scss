@@ -18,6 +18,12 @@ $headings-line-height: 1.25;
 $font-size-base: 1rem;
 $line-height-base: 1.65;
 
+// Sun and moon, from Bootstrap Icons (bi-sun-fill, bi-moon-stars-fill), the
+// same pair quarto-wizard uses. Drawn as masks rather than images so they
+// take currentColor and therefore match whichever pill they sit in.
+$oboro-icon-sun: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="black" viewBox="0 0 16 16"><path d="M8 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8M8 0a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-1 0v-2A.5.5 0 0 1 8 0m0 13a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-1 0v-2A.5.5 0 0 1 8 13m8-5a.5.5 0 0 1-.5.5h-2a.5.5 0 0 1 0-1h2a.5.5 0 0 1 .5.5M3 8a.5.5 0 0 1-.5.5h-2a.5.5 0 0 1 0-1h2A.5.5 0 0 1 3 8m10.657-5.657a.5.5 0 0 1 0 .707l-1.414 1.415a.5.5 0 1 1-.707-.708l1.414-1.414a.5.5 0 0 1 .707 0m-9.193 9.193a.5.5 0 0 1 0 .707L3.05 13.657a.5.5 0 0 1-.707-.707l1.414-1.414a.5.5 0 0 1 .707 0m9.193 2.121a.5.5 0 0 1-.707 0l-1.414-1.414a.5.5 0 0 1 .707-.707l1.414 1.414a.5.5 0 0 1 0 .707M4.464 4.465a.5.5 0 0 1-.707 0L2.343 3.05a.5.5 0 1 1 .707-.707l1.414 1.414a.5.5 0 0 1 0 .708"/></svg>');
+$oboro-icon-moon: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="black" viewBox="0 0 16 16"><path d="M6 .278a.77.77 0 0 1 .08.858 7.2 7.2 0 0 0-.878 3.46c0 4.021 3.278 7.277 7.318 7.277q.792-.001 1.533-.16a.79.79 0 0 1 .81.316.73.73 0 0 1-.031.893A8.35 8.35 0 0 1 8.344 16C3.734 16 0 12.286 0 7.71 0 4.266 2.114 1.312 5.124.06A.75.75 0 0 1 6 .278"/><path d="M10.794 3.148a.217.217 0 0 1 .412 0l.387 1.162c.173.518.579.924 1.097 1.097l1.162.387a.217.217 0 0 1 0 .412l-1.162.387a1.73 1.73 0 0 0-1.097 1.097l-.387 1.162a.217.217 0 0 1-.412 0l-.387-1.162A1.73 1.73 0 0 0 9.31 6.593l-1.162-.387a.217.217 0 0 1 0-.412l1.162-.387a1.73 1.73 0 0 0 1.097-1.097zM13.863.099a.145.145 0 0 1 .274 0l.258.774c.115.346.386.617.732.732l.774.258a.145.145 0 0 1 0 .274l-.774.258a1.16 1.16 0 0 0-.732.732l-.258.774a.145.145 0 0 1-.274 0l-.258-.774a1.16 1.16 0 0 0-.732-.732l-.774-.258a.145.145 0 0 1 0-.274l.774-.258c.346-.115.617-.386.732-.732z"/></svg>');
+
 /*-- scss:rules --*/
 
 // One stylesheet serves both modes, with the palette carried by custom
@@ -118,20 +124,134 @@ body {
   background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'%3e%3cpath stroke='%23e8edf2' stroke-linecap='round' stroke-miterlimit='10' stroke-width='2' d='M4 7h22M4 15h22M4 23h22'/%3e%3c/svg%3e");
 }
 
-// Search and the light/dark toggle sit in the navbar and inherit nothing
-// useful from it.
-.navbar #quarto-search .aa-DetachedSearchButton,
-.navbar .quarto-navbar-tools .quarto-color-scheme-toggle {
+// --- Navbar-right controls ----------------------------------------------
+// The GitHub widget, the search button and the light/dark toggle are one set
+// and should read as one: the same shell, the same hover, the same spacing.
+// Each otherwise inherits from somewhere different and they end up three
+// unrelated shapes.
+
+@mixin oboro-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   background: transparent;
   border: 1px solid var(--oboro-hairline);
   border-radius: 0.375rem;
   color: var(--oboro-ink) !important;
+  cursor: pointer;
+  font-size: 0.85rem;
+  line-height: 1;
+  box-shadow: none;
+  transition:
+    background 150ms ease,
+    border-color 150ms ease,
+    color 150ms ease;
 }
 
-.navbar #quarto-search .aa-DetachedSearchButton:hover,
-.navbar .quarto-navbar-tools .quarto-color-scheme-toggle:hover {
+@mixin oboro-pill-active {
   background: var(--oboro-tint);
+  border-color: var(--oboro-primary);
   color: var(--oboro-primary) !important;
+}
+
+.gh-widget-trigger,
+.navbar #quarto-search .aa-DetachedSearchButton,
+.navbar .quarto-navbar-tools .quarto-color-scheme-toggle,
+.navbar .quarto-navbar-tools-toggle .quarto-color-scheme-toggle {
+  @include oboro-pill;
+}
+
+// Text controls get horizontal padding; icon-only ones are a square with the
+// glyph centred.
+.gh-widget-trigger {
+  padding: 0.3rem 0.6rem;
+}
+
+.navbar #quarto-search .aa-DetachedSearchButton,
+.navbar .quarto-navbar-tools .quarto-color-scheme-toggle {
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+}
+
+.gh-widget-trigger:hover,
+.gh-widget-trigger:focus-visible,
+.gh-widget-open .gh-widget-trigger,
+.navbar #quarto-search .aa-DetachedSearchButton:hover,
+.navbar #quarto-search .aa-DetachedSearchButton:focus-visible,
+.navbar .quarto-navbar-tools .quarto-color-scheme-toggle:hover,
+.navbar .quarto-navbar-tools .quarto-color-scheme-toggle:focus-visible {
+  @include oboro-pill-active;
+}
+
+// Quarto renders an empty <i class="bi"> for the toggle and paints the glyph
+// with a background image, which cannot follow the pill's colour. Masking
+// currentColor instead keeps it in step on hover and in either mode.
+.quarto-color-scheme-toggle .bi::before {
+  content: "";
+  display: inline-block;
+  width: 1rem;
+  height: 1rem;
+  vertical-align: -0.125em;
+  background-image: none;
+  background-color: currentColor;
+  mask-size: contain;
+  mask-repeat: no-repeat;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+}
+
+.quarto-color-scheme-toggle:not(.alternate) .bi::before {
+  mask-image: $oboro-icon-sun;
+  -webkit-mask-image: $oboro-icon-sun;
+}
+
+.quarto-color-scheme-toggle.alternate .bi::before {
+  mask-image: $oboro-icon-moon;
+  -webkit-mask-image: $oboro-icon-moon;
+}
+
+// The search button ships its own placeholder text and icon colours.
+.navbar #quarto-search .aa-DetachedSearchButtonIcon,
+.navbar #quarto-search .aa-DetachedSearchButtonPlaceholder {
+  color: inherit;
+}
+
+.navbar #quarto-search .aa-DetachedSearchButtonPlaceholder,
+.navbar #quarto-search .aa-DetachedSearchButtonQuery {
+  display: none;
+}
+
+.navbar #quarto-search .aa-DetachedSearchButtonIcon {
+  width: auto;
+  margin: 0;
+  padding: 0;
+  color: currentColor;
+}
+
+.navbar #quarto-search .aa-DetachedSearchButtonIcon svg {
+  width: 1.05rem;
+  height: 1.05rem;
+}
+
+// One spacing rule across the whole set, so the boundaries match.
+.navbar .navbar-collapse {
+  flex-grow: 1;
+}
+
+.navbar .navbar-nav.ms-auto {
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.navbar #quarto-search,
+.navbar .quarto-navbar-tools {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 0.4rem;
 }
 
 // --- Sidebar and contents ------------------------------------------------
@@ -335,26 +455,6 @@ code:not(.sourceCode) {
   position: relative;
   display: inline-flex;
   align-items: center;
-}
-
-.gh-widget-trigger {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0.3rem 0.6rem;
-  background: transparent;
-  border: 1px solid var(--oboro-hairline);
-  border-radius: 0.375rem;
-  color: var(--oboro-ink) !important;
-  cursor: pointer;
-  font-size: 0.85rem;
-  line-height: 1;
-}
-
-.gh-widget-trigger:hover,
-.gh-widget-open .gh-widget-trigger {
-  background: var(--oboro-tint);
-  color: var(--oboro-primary) !important;
 }
 
 .gh-widget-trigger .gh-icon {
