@@ -206,14 +206,26 @@ jobs:
     if: ${{ inputs.create_release }}
     runs-on: ${{ matrix.os }}
 
+    permissions:
+      contents: read
+      # Provenance is signed with a workflow identity, which needs both.
+      id-token: write
+      attestations: write
+
     strategy:
       fail-fast: false
       matrix:
         include:
+          # musl rather than glibc: a static binary runs on any distribution
+          # whatever its glibc version, Alpine included.
           - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
+            target: x86_64-unknown-linux-musl
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
           - os: macos-latest
             target: aarch64-apple-darwin
+          - os: macos-13
+            target: x86_64-apple-darwin
 
     steps:
       - name: Checkout the bump commit
@@ -222,15 +234,40 @@ jobs:
           ref: ${{ needs.bump-version.outputs.commit_sha }}
 
       - uses: dtolnay/rust-toolchain@stable
+        if: ${{ !endsWith(matrix.target, '-musl') }}
         with:
           targets: ${{ matrix.target }}
 
       - uses: Swatinem/rust-cache@v2.9.1
+        if: ${{ !endsWith(matrix.target, '-musl') }}
 
       # The default build deliberately depends on nothing but Rust, which is
       # what makes a downloadable binary worth publishing. OCR and the model
       # need system libraries, so those stay a build-from-source choice.
+
+      # musl is built inside Alpine, where it is the native target, rather
+      # than cross-compiled from Debian. Debian's musl-gcc is a specs wrapper
+      # that rejects the -m64 that cc-rs passes, so building SQLite's vendored
+      # C sources fails outright. The runner is already the right
+      # architecture, so the container is native too and nothing is emulated.
+      # This mirrors the Dockerfile, which builds the same way.
+      - name: Build release binary (musl, in Alpine)
+        if: ${{ endsWith(matrix.target, '-musl') }}
+        run: |
+          set -euo pipefail
+          docker run --rm -v "${PWD}":/src -w /src rust:1-alpine sh -c '
+            set -e
+            apk add --no-cache musl-dev
+            cargo build --release --locked
+          '
+          # The container builds as root, so hand the output back before the
+          # remaining steps, which do not run as root, try to read it.
+          sudo chown -R "$(id -u):$(id -g)" target
+          mkdir -p "target/${{ matrix.target }}/release"
+          mv target/release/oboro "target/${{ matrix.target }}/release/oboro"
+
       - name: Build release binary
+        if: ${{ !endsWith(matrix.target, '-musl') }}
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Package
@@ -242,6 +279,13 @@ jobs:
           mkdir -p release_assets
           tar -czf "release_assets/oboro-${VERSION}-${{ matrix.target }}.tar.gz" \
             -C "target/${{ matrix.target }}/release" oboro
+
+      # Lets anyone run `gh attestation verify` and learn which workflow and
+      # which commit produced the file in front of them.
+      - name: Attest the build provenance
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: release_assets/*.tar.gz
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
@@ -314,21 +358,29 @@ jobs:
           git checkout main
           git reset --hard origin/main
 
-      - name: Extract release notes from CHANGELOG
+      # The changelog says what changed; on its own it never says how to get
+      # the thing. The template carries the install and verification steps,
+      # and lives outside the workflow so the prose can be edited without
+      # touching CI.
+      - name: Assemble the release notes
         shell: bash
         run: |
           set -euo pipefail
+          NOTES="RELEASE-${VERSION}.md"
+          sed "s/%%VERSION%%/${VERSION}/g" .github/release-notes.md > "${NOTES}"
+
           HEADING="## ${VERSION}"
           awk -v heading="${HEADING}" '
             index($0, heading) == 1 { flag = 1; next }
             /^## / && flag { flag = 0 }
             flag
-          ' CHANGELOG.md | sed '/./,$!d' > "CHANGELOG-${VERSION}.md"
-          if [ ! -s "CHANGELOG-${VERSION}.md" ]; then
+          ' CHANGELOG.md | sed '/./,$!d' > "changes.md"
+          if [ ! -s "changes.md" ]; then
             echo "::error::No release notes found for ${HEADING} in CHANGELOG.md."
             exit 1
           fi
-          echo "CHANGELOG_FILE=CHANGELOG-${VERSION}.md" >> "${GITHUB_ENV}"
+          cat "changes.md" >> "${NOTES}"
+          echo "NOTES_FILE=${NOTES}" >> "${GITHUB_ENV}"
 
       - name: Download binaries
         uses: actions/download-artifact@v8
@@ -336,6 +388,16 @@ jobs:
           pattern: binary-*
           merge-multiple: true
           path: release_assets
+
+      # Generated here rather than per-architecture: a checksum file written
+      # in the build job would only ever cover the one archive that job made.
+      - name: Checksum every archive
+        working-directory: release_assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum *.tar.gz > SHA256SUMS
+          cat SHA256SUMS
 
       - name: Create GitHub Release
         env:
@@ -345,8 +407,9 @@ jobs:
           set -euo pipefail
           gh release create "${VERSION}" \
             release_assets/*.tar.gz \
+            release_assets/SHA256SUMS \
             --title "${VERSION}" \
-            --notes-file "${CHANGELOG_FILE}" \
+            --notes-file "${NOTES_FILE}" \
             --target "${COMMIT_SHA}"
 
       - name: Restore the Unreleased heading
