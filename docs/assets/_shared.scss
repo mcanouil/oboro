@@ -18,22 +18,44 @@ body {
 
 // The navbar fades out of the page rather than sitting on top of it, which is
 // the one place the mist is allowed to be literal.
+//
+// The foreground has to be set with the background. Bootstrap derives navbar
+// text from whether it thinks the bar is light or dark, and overriding only
+// the background left it computing the opposite: near-white text on the light
+// gradient and near-black on the dark one, invisible either way.
 .navbar {
   background: linear-gradient(180deg, $haze 0%, $mist 100%);
   border-bottom: 1px solid $oboro-edge;
+  color: $ink;
+
+  .navbar-brand,
+  .nav-link,
+  .navbar-text,
+  .quarto-navbar-tools .nav-link {
+    color: $ink;
+
+    &:hover,
+    &:focus {
+      color: $slate;
+    }
+  }
+
+  .nav-link.active,
+  .navbar-nav .show > .nav-link {
+    color: $slate;
+  }
+
+  .navbar-toggler-icon {
+    // The default icon is a background image baked to one colour, so it has
+    // to be redrawn rather than recoloured.
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'%3e%3cpath stroke='#{$ink}' stroke-linecap='round' stroke-miterlimit='10' stroke-width='2' d='M4 7h22M4 15h22M4 23h22'/%3e%3c/svg%3e");
+  }
 }
 
 .navbar-brand {
   font-family: "Spectral", Georgia, serif;
   font-weight: 600;
   letter-spacing: 0.01em;
-}
-
-.navbar-brand img {
-  height: 1.6rem;
-  width: auto;
-  vertical-align: -0.35rem;
-  margin-right: 0.4rem;
 }
 
 h1,

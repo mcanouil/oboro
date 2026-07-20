@@ -17,8 +17,8 @@ $secondary: $muted;
 $link-color: $slate;
 $link-hover-color: tint-color($slate, 20%);
 $code-color: $ink;
-$code-bg: $haze;
-$pre-bg: $haze;
+$code-bg: #141C25;
+$pre-bg: #141C25;
 $border-color: $haze;
 $table-border-color: $haze;
 
@@ -36,3 +36,23 @@ $navbar-dark-hover-color: $slate;
 $navbar-dark-active-color: $slate;
 
 @import "shared";
+
+/*-- scss:rules --*/
+
+// Syntax highlighting, nudged to clear WCAG AA on the code surface.
+//
+// github-light and github-dark are tuned for GitHub's own backgrounds. On
+// the surface used here a handful of tokens land just under 4.5, and the
+// worst of them is the commonest: the red carrying attributes, keywords and
+// preprocessor spans, at 4.42 across a hundred and fifty spans a page.
+// These override only the tokens that fall short, in the same hue.
+
+:root {
+  // Comments are the one dark token below AA, at 3.57.
+  --quarto-hl-co-color: #7d8691;
+  --quarto-hl-cv-color: #7d8691;
+  --quarto-hl-an-color: #7d8691;
+  --quarto-hl-do-color: #7d8691;
+  --quarto-hl-in-color: #7d8691;
+  --quarto-hl-re-color: #7d8691;
+}

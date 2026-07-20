@@ -8,10 +8,7 @@ website:
   site-url: "https://m.canouil.dev/oboro/"
   repo-url: "https://github.com/mcanouil/oboro"
   repo-actions: [issue, edit]
-  favicon: assets/images/favicon.svg
   navbar:
-    logo: assets/images/logo.svg
-    logo-alt: "oboro"
     left:
       - href: index.qmd
         text: Home
@@ -54,6 +51,11 @@ format:
     theme:
       light: [cosmo, assets/theme-light.scss]
       dark: [cosmo, assets/theme-dark.scss]
+    # Pinned rather than left to the default, which is tuned for a white code
+    # background and loses contrast against a tinted one.
+    syntax-highlighting:
+      light: github-light
+      dark: github-dark
     include-after-body: assets/placeholders.js
     toc: true
     toc-depth: 3
