@@ -14,6 +14,8 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- fix: Read Word headers, footers, footnotes and comments, not only the document body, so a letterhead is no longer silently dropped.
+- fix: Stop refusing short but genuine PDFs; only a page yielding essentially nothing is treated as scanned.
 - fix: Fold accented case in the allowlist, so an entry such as `Société Générale` matches `SOCIÉTÉ GÉNÉRALE` instead of being silently ignored.
 - fix: Create the vault key file with owner-only permissions from the outset, rather than restricting them after writing.
 - fix: Build the devcontainer against a pinned current toolchain, so the project compiles inside it.

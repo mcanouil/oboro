@@ -10,9 +10,13 @@ use std::path::Path;
 use anyhow::{Context, Result, anyhow, bail};
 
 /// Below this many characters per page, a PDF is treated as scanned rather
-/// than as a document whose text simply could not be read. Real prose runs to
-/// hundreds of characters a page; page furniture alone rarely clears this.
-const MIN_CHARS_PER_PAGE: usize = 50;
+/// than as a document whose text could not be read.
+///
+/// Deliberately low. The case worth catching is a page that yields nothing at
+/// all, and a legitimately sparse document is a real thing: a single-line
+/// invoice carrying just an IBAN clears thirty characters and must be read,
+/// not refused. Set high enough to catch stray page furniture, no higher.
+const MIN_CHARS_PER_PAGE: usize = 8;
 
 pub fn to_text(path: &Path) -> Result<String> {
     let pages = page_count(path)?;
@@ -65,6 +69,28 @@ fn page_count(path: &Path) -> Result<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn fixture(name: &str) -> std::path::PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("testdata")
+            .join(name)
+    }
+
+    /// A one-line invoice is short but perfectly readable, and refusing it
+    /// would block a legitimate document.
+    #[test]
+    fn a_sparse_but_genuine_document_is_read() {
+        let text = to_text(&fixture("sparse.pdf")).expect("a short document must still be read");
+        assert!(text.contains("FR14"), "expected the IBAN, got:\n{text}");
+    }
+
+    /// A page yielding nothing must be refused, since output that looks
+    /// sanitised but was never read is the worst outcome here.
+    #[test]
+    fn a_page_with_no_text_is_refused() {
+        let error = to_text(&fixture("scanned.pdf")).expect_err("must refuse");
+        assert!(format!("{error:#}").contains("scanned"));
+    }
 
     #[test]
     fn a_file_that_is_not_a_pdf_is_reported_clearly() {

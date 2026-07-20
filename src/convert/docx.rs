@@ -20,19 +20,26 @@ pub fn to_text(path: &Path) -> Result<String> {
     let mut archive = zip::ZipArchive::new(file)
         .with_context(|| format!("{} is not a readable .docx archive", path.display()))?;
 
-    let mut body = String::new();
-    archive
-        .by_name(BODY)
-        .with_context(|| {
-            format!(
-                "{} has no {BODY}; it may be an older .doc renamed to .docx",
-                path.display()
-            )
-        })?
-        .read_to_string(&mut body)
-        .with_context(|| format!("reading the body of {}", path.display()))?;
+    let parts = text_parts(&archive);
+    if !parts.iter().any(|part| part.eq_ignore_ascii_case(BODY)) {
+        bail!(
+            "{} has no {BODY}; it may be an older .doc renamed to .docx",
+            path.display()
+        );
+    }
 
-    let text = extract(&body).with_context(|| format!("parsing the body of {}", path.display()))?;
+    let mut text = String::new();
+    for part in parts {
+        let mut xml = String::new();
+        archive
+            .by_name(&part)
+            .with_context(|| format!("opening {part} of {}", path.display()))?
+            .read_to_string(&mut xml)
+            .with_context(|| format!("reading {part} of {}", path.display()))?;
+        let extracted =
+            extract(&xml).with_context(|| format!("parsing {part} of {}", path.display()))?;
+        text.push_str(&extracted);
+    }
 
     if text.trim().is_empty() {
         bail!(
@@ -41,6 +48,50 @@ pub fn to_text(path: &Path) -> Result<String> {
         );
     }
     Ok(text)
+}
+
+/// The archive members that carry readable text, in reading order.
+///
+/// A letterhead lives in a header part and a contact line often in a footer,
+/// so reading only the body would hand back a document missing exactly the
+/// details worth redacting. Comments and footnotes are included for the same
+/// reason: they are text the author wrote and may well share.
+fn text_parts<R: std::io::Read + std::io::Seek>(archive: &zip::ZipArchive<R>) -> Vec<String> {
+    let mut headers = Vec::new();
+    let mut body = Vec::new();
+    let mut rest = Vec::new();
+
+    for name in archive.file_names() {
+        let Some(part) = name.strip_prefix("word/") else {
+            continue;
+        };
+        // Producers vary in casing, and a part missed here is text silently
+        // dropped from a document the user is about to share.
+        let part = part.to_ascii_lowercase();
+        // The lint fires on the literal comparison; `part` is already folded
+        // to lowercase on the line above, so the check is case-insensitive.
+        #[allow(clippy::case_sensitive_file_extension_comparisons)]
+        if !part.ends_with(".xml") || part.contains('/') {
+            continue;
+        }
+        if part.starts_with("header") {
+            headers.push(name.to_owned());
+        } else if part == "document.xml" {
+            body.push(name.to_owned());
+        } else if part.starts_with("footer")
+            || part == "footnotes.xml"
+            || part == "endnotes.xml"
+            || part == "comments.xml"
+        {
+            rest.push(name.to_owned());
+        }
+    }
+
+    // Sorting keeps header1 before header2, so output order is stable rather
+    // than following whatever order the archive happens to list.
+    headers.sort();
+    rest.sort();
+    headers.into_iter().chain(body).chain(rest).collect()
 }
 
 /// Pulls the text runs out of a `document.xml` body.
@@ -165,6 +216,29 @@ mod tests {
     fn decodes_entities_and_accents() {
         let xml = body("<w:p><w:r><w:t>Soci&#233;t&#233; &amp; Fils</w:t></w:r></w:p>");
         assert_eq!(extract(&xml).expect("parsing"), "Société & Fils\n");
+    }
+
+    /// A letterhead lives in a header part. Reading only the body would
+    /// hand back a document missing the very details worth redacting.
+    #[test]
+    fn reads_headers_and_footers_not_only_the_body() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("testdata")
+            .join("letterhead.docx");
+        let text = to_text(&path).expect("reading");
+        assert!(
+            text.contains("Acme Consulting SARL"),
+            "header dropped:\n{text}"
+        );
+        assert!(
+            text.contains("12 bis rue de la Paix"),
+            "header dropped:\n{text}"
+        );
+        assert!(
+            text.contains("jean.dupont@acme-consulting.example"),
+            "footer dropped:\n{text}"
+        );
+        assert!(text.contains("Corps du document"), "body dropped:\n{text}");
     }
 
     #[test]
