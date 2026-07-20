@@ -1,0 +1,90 @@
+---
+title: "oboro"
+subtitle: "An anonymisation layer between your files and a language model."
+---
+
+You have a contract to reason about, and a model that could help.
+The contract has a client's name in it, a bank account, a phone number.
+Pasting it into Claude Code, Copilot, Codex or Cursor sends all of that to somebody else's computer.
+
+`oboro` sits in between.
+It reads the document, replaces the sensitive parts with stable placeholders, and keeps the mapping locally so the answer can be turned back into the real thing afterwards.
+
+```{mermaid}
+%%| label: fig-flow
+%%| fig-cap: "What happens to a document, and what never leaves the machine."
+
+flowchart LR
+    A[contract.docx] -->|oboro clean| B[contract.clean.md]
+    B --> C{{paste into a model}}
+    C --> D[the model's answer]
+    D -->|oboro restore| E[answer with real values]
+    A -.-> V[(encrypted vault)]
+    V -.-> E
+
+    style V stroke-dasharray: 4 4
+```
+
+The name is 朧, Japanese for hazy, or veiled by mist.
+The tool blurs identifying detail rather than silencing it: the document still reads as a document, and the model can still reason about it.
+
+## What it looks like
+
+```text
+Marie Lefevre a rencontre le directeur de Sogexia Partners hier.
+Son numero est le 06 12 34 56 78.
+```
+
+becomes
+
+```text
+[[PERSON_1]] a rencontre le directeur de [[ORG_1]] hier.
+Son numero est le [[PHONE_1]].
+```
+
+The same value always becomes the same placeholder, so a model can still tell that two documents mention the same client.
+
+## What it reads
+
+| Format | How |
+| --- | --- |
+| `.txt`, `.md` | Directly. |
+| `.docx` | Text runs from the body, headers, footers, footnotes and comments. |
+| `.xlsx`, `.xlsm` | Every sheet, flattened to rows. |
+| `.pdf` | Embedded text. Scanned PDFs are refused rather than half-read. |
+| `.png`, `.jpg`, `.tif` | Tesseract, in a build compiled with `--features ocr`. |
+
+## What it finds
+
+Structured values are matched by rules and confirmed by a real check, not just a regular expression.
+
+| Kind | Confirmed by |
+| --- | --- |
+| Email addresses | Pattern. |
+| Phone numbers | `libphonenumber`. |
+| IBANs | ISO 13616 mod-97 checksum. |
+| Payment cards | Luhn checksum, 13 to 19 digits. |
+| SIRET | Luhn on both the SIREN prefix and the whole number. |
+| SIREN | Luhn checksum. |
+| IP addresses | Parsed as IPv4 or IPv6. |
+| French addresses | Pattern. |
+| Your own formats | Regular expressions you supply. |
+
+Names, companies and addresses have no structure to match on.
+Those are found by a recognition model that runs on your machine, described in [How it works](how-it-works.qmd).
+
+::: {.callout-warning}
+
+## Read the output before you send it
+
+No tool of this kind catches everything, and this one deliberately errs towards redacting too much rather than too little.
+Both failures matter, and neither is fixed by trusting the output unread.
+[Limitations](limitations.qmd) is the honest account of where it falls short.
+
+:::
+
+## Where to go next
+
+- [Quickstart](quickstart.qmd) to install it and clean your first document.
+- [Reference](reference.qmd) for every command and option.
+- [Confidentiality](confidentiality.qmd) for what is stored, where, and how.

@@ -1,0 +1,82 @@
+---
+title: "How it works"
+---
+
+## The three layers
+
+Detection runs in layers, cheapest first.
+Each produces spans over the same text, and a merge step decides between them.
+
+```{mermaid}
+%%| label: fig-layers
+%%| fig-cap: "Each layer proposes; the merge step disposes."
+
+flowchart TB
+    T[document text] --> R[rules]
+    T --> N[recognition model]
+    R --> M{merge}
+    N --> M
+    M --> S[disjoint spans]
+    S --> P[placeholders]
+```
+
+### Rules
+
+Regular expressions paired with a real check.
+The expression proposes a candidate and the check confirms it: an IBAN must clear ISO 13616 mod-97, a card and a SIREN must clear Luhn, a phone number must satisfy `libphonenumber`.
+
+This matters because a regular expression alone is a poor judge.
+Any sixteen digits look like a card number; only some of them are one.
+
+A SIRET has to satisfy Luhn twice, once on its nine-digit SIREN prefix and once on the whole fourteen digits, which rejects most incidental runs of digits.
+
+### The recognition model
+
+Names have no checksum.
+Neither do company names, and listing every client by hand does not scale.
+
+A [GLiNER](https://github.com/urchade/GLiNER) model handles those, running entirely on your machine.
+`oboro models pull` fetches a quantised ONNX export and verifies it against pinned hashes.
+The model is asked for four kinds of thing: people, organisations, companies and addresses.
+
+It is zero-shot, meaning those are ordinary words rather than trained categories, which is why it can find a company it has never seen.
+
+## Deciding between layers
+
+Two layers often claim the same words, sometimes disagreeing about what they are.
+
+Longer spans win first, because a short match is usually a fragment of a longer one.
+The phone recogniser sees a run of digits inside an IBAN; keeping the IBAN redacts strictly more.
+
+When two spans are the same length, the more specific kind wins.
+A nine-digit SIREN is also a well-formed French phone number, and SIREN is the more specific reading, so the placeholder says `SIREN`.
+
+Only then does confidence break the tie.
+
+::: {.callout-note}
+
+## Specificity is not confidence
+
+These are two different questions, and mixing them causes trouble.
+Specificity ranks *labels*: a SIRET is a more specific reading than a card number.
+Confidence estimates whether a detector is *right*: the model is 31% sure this is a person.
+
+Ranking them together would put a hand-tuned constant into direct competition with a model's probability, and let the constant win arguments it has no business winning.
+
+:::
+
+## The vault
+
+Every replaced value is stored so it can be put back.
+
+The database holds no plaintext.
+Values are sealed with AES-256-GCM under a key derived from a local key file, and looked up through a keyed hash rather than the value itself.
+The database on its own therefore reveals neither the values nor whether a value you guessed is present.
+
+Two separate keys are derived from the one key file, one for encryption and one for the lookup index, so the two jobs never share key material.
+
+Allocation is deterministic: the same value always yields the same placeholder within a vault.
+That is what lets a model see that two documents mention the same client without knowing who the client is.
+
+Formatting differences are folded away first, so `06 12 34 56 78` and `0612345678` are one value and one placeholder.
+What comes back on restore is the spelling that was stored first.

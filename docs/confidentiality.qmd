@@ -1,0 +1,67 @@
+---
+title: "Confidentiality"
+---
+
+The point of this tool is that your documents stay yours.
+Here is exactly what that means, and what it does not.
+
+## Nothing is sent anywhere
+
+`oboro` makes no network requests while reading, cleaning or restoring anything.
+It opens no sockets and listens on none.
+There is no telemetry, no usage reporting and no update check.
+
+One command touches the network, and only when you run it: `oboro models pull`, which downloads the recognition model from Hugging Face.
+Nothing about your documents is involved.
+
+## What is stored, and where
+
+| Path | Contents |
+| --- | --- |
+| `~/.oboro/vault.db` | The mapping. Values encrypted with AES-256-GCM. |
+| `~/.oboro/key` | A 32-byte key, generated on first use. |
+| `~/.oboro/models/` | The recognition model, if you fetched it. |
+
+Both the vault and the key are created readable only by you, and the key file is created that way from the moment it exists rather than being tightened afterwards.
+`oboro doctor` reports their permissions so you can confirm.
+
+Pass `--vault` and `--key` to keep a separate vault per project.
+
+## How the vault protects values
+
+Values are never written in plaintext.
+Each is sealed with AES-256-GCM, and the ciphertext is bound to its entity kind, so a row cannot be quietly moved to another kind.
+
+Lookups do not use the value either.
+They use a keyed hash of it, so somebody holding the database but not the key file cannot test whether a value they guessed is present.
+Without that keyed step, a database of hashed phone numbers would fall to anybody willing to hash every phone number.
+
+Two keys are derived from your key file through domain separation, one for encryption and one for the index, so neither job weakens the other.
+
+::: {.callout-important}
+
+## The key file is the whole thing
+
+Lose `~/.oboro/key` and the vault cannot be read, by you or anyone.
+Every document you cleaned becomes permanently unrestorable.
+
+Copy it and you have copied the ability to decrypt every value you have ever redacted.
+Treat it the way you would treat an SSH private key.
+
+:::
+
+## The model is verified, not just downloaded
+
+`models pull` checks each file against a SHA-256 hash pinned in the source.
+A file that does not match is deleted rather than kept.
+
+This matters more than it might seem.
+A model decides which parts of your documents are sensitive, so weights from a compromised mirror could quietly recognise nothing at all and you would notice only by reading every output.
+
+## What this does not protect against
+
+- **A compromised machine.** Anything reading your files can read your key.
+- **What you do with the output.** The tool cannot tell whether you read the sanitised file before sending it.
+- **What the model infers.** Redacting a name does not redact the fact that a document describes a dispute with a supplier in Lille in March.
+  Enough context can identify people without naming them, and no placeholder scheme fixes that.
+- **Anything it failed to detect.** See [Limitations](limitations.qmd).

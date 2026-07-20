@@ -1,0 +1,119 @@
+# @license MIT
+# @copyright 2026 Mickaël Canouil
+# @author Mickaël Canouil
+
+name: Deploy Documentation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "README.md"
+      - "CHANGELOG.md"
+      - ".github/workflows/deploy.yml"
+  # Build on pull requests without deploying, so a broken page is caught before
+  # it lands rather than after it is already published.
+  pull_request:
+    paths:
+      - "docs/**"
+      - "README.md"
+      - "CHANGELOG.md"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: "Commit or ref to build (defaults to the triggering ref)."
+        type: string
+        required: false
+        default: ""
+
+# Only the deploy job touches Pages, and it raises its own permissions.
+permissions:
+  contents: read
+
+# Pages accepts one deployment at a time, so queue rather than cancel. Pull
+# requests never deploy, so they get a per-ref group and can run in parallel.
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('docs-pr-{0}', github.ref) || 'pages' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: Render site
+    runs-on: ubuntu-latest
+    # The Release workflow deploys the docs itself, so skip the bump commit
+    # rather than deploying the same content twice.
+    if: >-
+      ${{ github.event_name != 'push'
+        || !startsWith(github.event.head_commit.message, 'ci: bump version to') }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Set up Quarto CLI
+        uses: quarto-dev/quarto-actions/setup@v2
+        with:
+          version: release
+
+      - name: Render site
+        run: quarto render docs
+
+      - name: Upload site artifact
+        if: ${{ github.event_name != 'pull_request' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: site
+          path: _site
+          retention-days: 1
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name != 'pull_request' }}
+
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Download site artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: site
+          path: _site
+
+      - name: Prepare site for deployment
+        run: touch _site/.nojekyll
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v6
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: "./_site"
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
+
+      - name: Summary
+        env:
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: |
+          {
+            echo "## Documentation deploy"
+            echo ""
+            echo "- URL: ${PAGE_URL}"
+          } >> "${GITHUB_STEP_SUMMARY}"

@@ -3,3 +3,9 @@
 .kata.local.toml
 
 /target
+
+/.quarto/
+**/*.quarto_ipynb
+
+# Quarto
+/_site/

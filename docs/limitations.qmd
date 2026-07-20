@@ -1,0 +1,81 @@
+---
+title: "Limitations"
+---
+
+This page is the honest account.
+A privacy tool that oversells itself is worse than none, because it replaces caution with confidence.
+
+::: {.callout-warning}
+
+## Read the output before you send it
+
+Every limitation below has the same mitigation.
+The sanitised file is a few seconds' reading, and that reading is part of the workflow rather than an optional extra.
+
+:::
+
+## The model cannot tell a name from a phrase
+
+This is the sharpest limitation, and it is not something a better setting fixes.
+
+Measured on the shipped model:
+
+| Text | Score |
+| --- | --- |
+| `Thomas Bernard`, inside a document | 0.237 |
+| `The quick brown fox` | 0.218 |
+
+They are eighteen thousandths apart.
+No threshold separates a real name from an ordinary phrase, so the tool redacts both and expects you to put back what it got wrong.
+
+That is why [`oboro review`](reference.qmd#review) exists.
+
+Two consequences follow.
+Ordinary prose sometimes comes back with holes in it, which is a nuisance.
+And a name may still be missed, which is not.
+
+## Context changes what the model sees
+
+The same name scores 0.47 alone and 0.24 once surrounded by a document.
+
+The default threshold is calibrated on whole documents for exactly this reason.
+An earlier version was tuned on single sentences and silently missed a name in a real file, which is the failure this tool exists to prevent.
+
+## Identifiers that fail their own checksum are not found
+
+A mistyped IBAN, a SIREN with a digit dropped, a card number that fails Luhn: none are detected.
+
+The check is what makes the rules trustworthy rather than noisy, so it stays.
+Add a [custom pattern](configuration.qmd#patterns) if your documents carry identifiers that do not validate.
+
+## Scanned PDFs are refused, not read
+
+A PDF whose pages are images yields almost no text.
+Rather than hand back a nearly empty file that looks sanitised, `oboro` refuses it and says why.
+
+Reading those pages needs rasterising them, which needs a large external library the tool does not carry.
+Export the pages as images and pass those to a build with `--features ocr`.
+
+## Formats it does not read
+
+Older `.doc`, `.xls` and `.ppt`, along with `.pptx`, are not read at all.
+Neither is anything embedded inside a document: a spreadsheet pasted into a Word file is not reached.
+
+## Recognition accuracy on real images is not tested
+
+The OCR path compiles and its failure paths are covered, but no automated test feeds Tesseract a photograph and checks the result.
+Treat text recovered from images as less reliable than text read directly.
+
+## What redaction does not hide
+
+Replacing a name with `[[PERSON_1]]` removes the name.
+It does not remove the shape of the story around it.
+
+A document describing a dispute with a named supplier in a named town in a named month may identify everyone involved even with every name replaced.
+Structured identifiers are the part this tool can handle; inference from context is not, and no placeholder scheme solves it.
+
+## Language coverage
+
+The rules are written for French and English documents.
+The address patterns in particular are French.
+The recognition model is multilingual, but the tool has been exercised mostly on those two languages.

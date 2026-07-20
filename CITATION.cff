@@ -1,9 +1,18 @@
 cff-version: 1.2.0
-title: "Oboro"
+title: "oboro"
 message: "If you use this project, please cite it as below."
 type: software
 authors:
-  - name: "Mickaël Canouil"
+  - family-names: "Canouil"
+    given-names: "Mickaël"
+    orcid: "https://orcid.org/0000-0002-3396-4549"
 repository-code: "https://github.com/mcanouil/oboro"
+url: "https://m.canouil.dev/oboro"
+abstract: "A local anonymisation layer that replaces sensitive values in documents with reversible placeholders before they are shared with a language model."
+keywords:
+  - anonymisation
+  - privacy
+  - large language models
 license: MIT
+version: 0.1.0
 date-released: "2026-07-19"
