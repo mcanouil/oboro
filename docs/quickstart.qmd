@@ -1,0 +1,118 @@
+---
+title: "Quickstart"
+---
+
+## Install
+
+`oboro` is a Rust program, so a Rust toolchain builds it:
+
+```bash
+git clone https://github.com/mcanouil/oboro.git
+cd oboro
+cargo build --release
+```
+
+The binary lands in `target/release/oboro`.
+
+That plain build depends on nothing but Rust.
+Two capabilities need system libraries and are therefore optional.
+
+::: {.panel-tabset}
+
+## Names and companies
+
+Finding names nobody told the tool about needs the recognition model:
+
+```bash
+cargo build --release --features ner
+oboro models pull
+```
+
+`models pull` fetches about 348 MB once and checks it against pinned hashes.
+It is the only command that ever touches the network.
+
+## Images
+
+Reading images and scanned documents needs Tesseract:
+
+```bash
+# Debian and Ubuntu
+sudo apt-get install tesseract-ocr tesseract-ocr-fra libtesseract-dev libleptonica-dev
+
+# macOS
+brew install tesseract tesseract-lang
+
+cargo build --release --features ocr
+```
+
+## Both
+
+```bash
+cargo build --release --features "ner,ocr"
+```
+
+:::
+
+Check what your build can do:
+
+```bash
+oboro doctor
+```
+
+## Clean a document
+
+```bash
+oboro clean contract.docx
+```
+
+That writes `contract.clean.md` beside the input and tells you what it replaced:
+
+```text
+contract.docx -> contract.clean.md (7 replaced: ADDRESS 2, EMAIL 1, IBAN 1, ORG 1, PERSON 1, PHONE 1)
+```
+
+Read it, then paste it into whichever model you are using.
+
+## Decide for yourself what gets hidden
+
+`clean` redacts everything it finds.
+`review` shows you the list first and lets you reject anything it got wrong:
+
+```bash
+oboro review contract.docx
+```
+
+```text
+┌ contract.docx  —  6 of 7 will be redacted ─────────────────────┐
+│ [x] PERSON      31%  Jean Dupont                               │
+│ [x] ORG         52%  Acme Consulting SARL                      │
+│ [ ] PERSON      22%  Le Havre                                  │
+│ [x] IBAN       100%  FR14 2004 1010 0505 0001 3M02 606         │
+└────────────────────────────────────────────────────────────────┘
+ j/k move   space toggle   a accept all   n reject none   w write
+```
+
+Rejecting a detection leaves the value in the output and never records it anywhere.
+
+## Bring the answer back
+
+The model replies using the placeholders.
+Save its answer and put the real values back:
+
+```bash
+oboro restore answer.md
+```
+
+Or keep it in a pipeline:
+
+```bash
+pbpaste | oboro restore /dev/stdin --stdout
+```
+
+## A whole round trip
+
+```bash
+oboro clean contract.docx --stdout | pbcopy   # paste into the model
+pbpaste > answer.md                            # save what it said
+oboro restore answer.md --stdout               # read it with real values
+```

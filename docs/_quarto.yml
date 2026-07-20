@@ -1,0 +1,55 @@
+project:
+  type: website
+  output-dir: ../_site
+
+website:
+  title: "oboro"
+  description: "An anonymisation layer between your files and a language model."
+  site-url: "https://m.canouil.dev/oboro/"
+  repo-url: "https://github.com/mcanouil/oboro"
+  repo-actions: [issue, edit]
+  navbar:
+    left:
+      - href: index.qmd
+        text: Home
+      - href: quickstart.qmd
+        text: Quickstart
+      - href: reference.qmd
+        text: Reference
+      - href: how-it-works.qmd
+        text: How it works
+    right:
+      - icon: github
+        href: https://github.com/mcanouil/oboro
+        aria-label: Source on GitHub
+  sidebar:
+    style: floating
+    contents:
+      - section: "Using oboro"
+        contents:
+          - index.qmd
+          - quickstart.qmd
+          - configuration.qmd
+          - reference.qmd
+      - section: "Understanding it"
+        contents:
+          - how-it-works.qmd
+          - confidentiality.qmd
+          - limitations.qmd
+      - section: "Contributing"
+        contents:
+          - development.qmd
+  page-footer:
+    left: "MIT licensed."
+    right: "Nothing on this site is sent anywhere. Neither is anything oboro reads."
+
+format:
+  html:
+    theme:
+      light: flatly
+      dark: darkly
+    toc: true
+    toc-depth: 3
+    code-copy: true
+    code-overflow: wrap
+    anchor-sections: true

@@ -1,0 +1,118 @@
+---
+title: "Command reference"
+---
+
+Every command accepts `--vault` and `--key` to point at a store other than the default, which is useful for keeping one vault per project.
+
+## `clean`
+
+Anonymises files into sanitised markdown.
+
+```bash
+oboro clean <FILE>... [OPTIONS]
+```
+
+| Option | Effect |
+| --- | --- |
+| `-o`, `--output <DIR>` | Write outputs into this directory instead of beside each input. |
+| `--stdout` | Write to standard output. Takes a single file. |
+| `--config <FILE>` | Use this configuration instead of the nearest `oboro.toml`. |
+
+Output is named after the input, so `report.docx` becomes `report.clean.md`.
+
+## `review`
+
+Shows every detection and lets you accept or reject each one before anything is written.
+
+```bash
+oboro review <FILE>... [OPTIONS]
+```
+
+| Key | Action |
+| --- | --- |
+| `j`, `k`, or arrows | Move through the list. |
+| `g`, `G` | Jump to the first or last detection. |
+| `space`, `enter` | Toggle the selected detection. |
+| `a` | Accept every detection. |
+| `n` | Reject every detection. |
+| `w` | Write this document and move on. |
+| `s` | Skip this document, writing nothing. |
+| `q`, `esc` | Stop, writing nothing further. |
+
+Everything starts accepted, so confirming without touching anything gives exactly what `clean` would have produced.
+A document with nothing detected is skipped rather than opening an empty screen.
+
+## `restore`
+
+Puts real values back into a model's answer.
+
+```bash
+oboro restore <FILE> [--stdout]
+```
+
+Without `--stdout` the file is rewritten in place.
+
+Placeholders the vault does not know are left untouched and reported.
+They are more likely to be something the model invented than a mapping to recover, and deleting them would corrupt the answer.
+
+## `map`
+
+Inspects or wipes the mapping.
+
+```bash
+oboro map list [--reveal]
+oboro map purge --yes
+```
+
+`list` shows placeholders and when they were created.
+`--reveal` also prints the real values, so it prints secrets to your terminal.
+
+::: {.callout-important}
+
+## Purging cannot be undone
+
+`map purge` deletes every mapping.
+Any document you cleaned earlier can no longer be restored, because the values it stood for are gone.
+The `--yes` flag is required precisely because there is no way back.
+
+:::
+
+## `models`
+
+Fetches and inspects the recognition model.
+Only present in builds compiled with `--features ner`.
+
+```bash
+oboro models pull
+oboro models status
+```
+
+`pull` downloads roughly 348 MB once and verifies it against pinned SHA-256 hashes.
+A file that fails verification is deleted rather than kept.
+Running it again re-verifies what is already there instead of trusting it.
+
+## `doctor`
+
+Reports what this build can do and where it keeps things.
+
+```bash
+oboro doctor
+```
+
+```text
+vault:      /Users/you/.oboro/vault.db
+key:        /Users/you/.oboro/key
+  /Users/you/.oboro/vault.db mode 0600 (ok)
+  /Users/you/.oboro/key mode 0600 (ok)
+config:     /Users/you/work/oboro.toml
+region:     FR
+allowlist:  1 entr(y/ies)
+denylist:   3 term(s)
+patterns:   1 custom
+formats:    txt, text, md, markdown, docx, xlsx, xlsm, pdf
+ocr:        not compiled in; images cannot be read
+model:      installed
+network:    only `models pull`, and only when you run it
+```
+
+Start here when something is not being detected: it shows whether the model is installed, which configuration was found, and which formats this build reads.

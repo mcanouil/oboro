@@ -1,0 +1,392 @@
+# @license MIT
+# @copyright 2026 Mickaël Canouil
+# @author Mickaël Canouil
+
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        type: choice
+        description: "Version bump (applied when 'Create release' is ticked)"
+        default: "minor"
+        options:
+          - "patch"
+          - "minor"
+          - "major"
+      create_release:
+        type: boolean
+        description: "Bump versions, tag, and create a GitHub Release"
+        default: true
+      deploy_pages:
+        type: boolean
+        description: "Deploy documentation to GitHub Pages"
+        default: true
+
+permissions:
+  contents: read
+
+# Serialise releases and never cancel one in flight: aborting midway could
+# leave the bump merged but the tag and release absent.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Test before releasing
+    if: ${{ inputs.create_release || inputs.deploy_pages }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2.9.1
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      # Every feature combination compiles different code, so releasing on the
+      # default build alone would ship an untested one.
+      - name: Lint every feature combination
+        run: |
+          set -euo pipefail
+          cargo clippy --all-targets -- -D warnings
+          cargo clippy --all-targets --features ner -- -D warnings
+
+      - name: Test
+        run: cargo test --all-targets
+
+  bump-version:
+    name: Bump version
+    needs: validate
+    if: ${{ inputs.create_release }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    env:
+      BRANCH: ci/bump-version
+      BUMP: ${{ inputs.version }}
+
+    outputs:
+      version: ${{ steps.bump.outputs.version }}
+      release_date: ${{ steps.bump.outputs.release_date }}
+      pr_url: ${{ steps.bump.outputs.pr_url }}
+      commit_sha: ${{ steps.bump.outputs.commit_sha }}
+
+    steps:
+      - name: Create GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.APP_ID }}
+          private-key: ${{ secrets.APP_KEY }}
+
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Set up Git user
+        id: setup-git
+        uses: ./.github/actions/setup-git-user
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          app-slug: ${{ steps.app-token.outputs.app-slug }}
+          gh-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute next version and update sources
+        id: bump
+        env:
+          GH_TOKEN: ${{ steps.setup-git.outputs.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          CURRENT=$(grep -E '^version[[:space:]]*=' Cargo.toml | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/')
+          IFS='.' read -r MAJOR MINOR PATCH <<< "${CURRENT}"
+          case "${BUMP}" in
+            major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+            minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+            patch) PATCH=$((PATCH + 1)) ;;
+            *) echo "::error::Unknown bump: ${BUMP}"; exit 1 ;;
+          esac
+          VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          DATE=$(date -u +%Y-%m-%d)
+
+          if git show-ref --quiet "refs/heads/${BRANCH}"; then
+            git branch -D "${BRANCH}"
+          fi
+          if git ls-remote --exit-code --heads origin "${BRANCH}" >/dev/null 2>&1; then
+            git push origin --delete "${BRANCH}"
+          fi
+          git checkout -b "${BRANCH}"
+
+          sed -E -i '0,/^version[[:space:]]*=/s/^(version[[:space:]]*=[[:space:]]*")[^"]+/\1'"${VERSION}"'/' Cargo.toml
+          sed -E -i 's/^(version:[[:space:]]*).*/\1'"${VERSION}"'/' CITATION.cff
+          sed -E -i 's/^(date-released:[[:space:]]*).*/\1"'"${DATE}"'"/' CITATION.cff
+          sed -i "s/^## \[Unreleased\]/## ${VERSION} (${DATE})/" CHANGELOG.md
+
+          # Keep the lockfile in step, or the released tag builds a version that
+          # disagrees with its own manifest.
+          cargo update --workspace --quiet
+
+          git add Cargo.toml Cargo.lock CITATION.cff CHANGELOG.md
+          git commit -m "ci: bump version to ${VERSION} :rocket:"
+          git push --force origin "${BRANCH}"
+
+          sleep 5
+          PR_URL=$(gh pr create \
+            --fill-first \
+            --base "${GITHUB_REF_NAME}" \
+            --head "${BRANCH}" \
+            --label "Type: CI/CD :robot:")
+          sleep 5
+          merged=false
+          for attempt in {1..10}; do
+            if gh pr merge --merge --delete-branch "${BRANCH}"; then
+              merged=true
+              break
+            fi
+            echo "Bump PR not mergeable yet (attempt ${attempt}/10); retrying in 6s..."
+            sleep 6
+          done
+          if [ "${merged}" != "true" ]; then
+            echo "::error::Failed to merge bump PR ${PR_URL}."
+            exit 1
+          fi
+
+          COMMIT_SHA=""
+          for attempt in {1..10}; do
+            COMMIT_SHA=$(gh pr view "${PR_URL}" --json mergeCommit --jq '.mergeCommit.oid // empty')
+            [ -n "${COMMIT_SHA}" ] && break
+            echo "Merge commit not available yet (attempt ${attempt}/10); retrying in 3s..."
+            sleep 3
+          done
+          if [ -z "${COMMIT_SHA}" ]; then
+            echo "::error::Could not resolve merge commit for ${PR_URL}."
+            exit 1
+          fi
+
+          {
+            echo "version=${VERSION}"
+            echo "release_date=${DATE}"
+            echo "commit_sha=${COMMIT_SHA}"
+            echo "pr_url=${PR_URL}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Summary
+        env:
+          VERSION: ${{ steps.bump.outputs.version }}
+          DATE: ${{ steps.bump.outputs.release_date }}
+          PR_URL: ${{ steps.bump.outputs.pr_url }}
+          COMMIT_SHA: ${{ steps.bump.outputs.commit_sha }}
+        run: |
+          {
+            echo "## Version bump"
+            echo ""
+            echo "- Version: \`${VERSION}\`"
+            echo "- Release date: \`${DATE}\`"
+            echo "- Bump commit: \`${COMMIT_SHA}\`"
+            echo "- PR: ${PR_URL}"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  build-binaries:
+    name: Build ${{ matrix.target }}
+    needs: bump-version
+    if: ${{ inputs.create_release }}
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: macos-latest
+            target: aarch64-apple-darwin
+
+    steps:
+      - name: Checkout the bump commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.bump-version.outputs.commit_sha }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2.9.1
+
+      # The default build deliberately depends on nothing but Rust, which is
+      # what makes a downloadable binary worth publishing. OCR and the model
+      # need system libraries, so those stay a build-from-source choice.
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Package
+        shell: bash
+        env:
+          VERSION: ${{ needs.bump-version.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p release_assets
+          tar -czf "release_assets/oboro-${VERSION}-${{ matrix.target }}.tar.gz" \
+            -C "target/${{ matrix.target }}/release" oboro
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: binary-${{ matrix.target }}
+          path: release_assets/*.tar.gz
+          retention-days: 7
+
+  github-release:
+    name: Create GitHub Release
+    needs: [bump-version, build-binaries]
+    if: ${{ inputs.create_release }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    env:
+      VERSION: ${{ needs.bump-version.outputs.version }}
+      COMMIT_SHA: ${{ needs.bump-version.outputs.commit_sha }}
+      PR_URL: ${{ needs.bump-version.outputs.pr_url }}
+
+    steps:
+      - name: Create GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.APP_ID }}
+          private-key: ${{ secrets.APP_KEY }}
+
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Set up Git user
+        id: git-user
+        uses: ./.github/actions/setup-git-user
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          app-slug: ${{ steps.app-token.outputs.app-slug }}
+          gh-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Wait for the bump to land on main
+        env:
+          GH_TOKEN: ${{ steps.git-user.outputs.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          STATE=""
+          for attempt in {1..30}; do
+            STATE=$(gh pr view "${PR_URL}" --json state --jq .state)
+            if [ "${STATE}" = "MERGED" ]; then
+              echo "Bump PR merged."
+              break
+            fi
+            echo "PR state: ${STATE}. Waiting (attempt ${attempt}/30)..."
+            sleep 10
+          done
+          if [ "${STATE}" != "MERGED" ]; then
+            echo "::error::Bump PR ${PR_URL} did not merge (final state: ${STATE})."
+            exit 1
+          fi
+
+          git fetch origin main --quiet
+          if ! git log origin/main --format='%H' -n 20 | grep -qF "${COMMIT_SHA}"; then
+            echo "::error::Bump commit ${COMMIT_SHA} is not on origin/main."
+            exit 1
+          fi
+          git checkout main
+          git reset --hard origin/main
+
+      - name: Extract release notes from CHANGELOG
+        shell: bash
+        run: |
+          set -euo pipefail
+          HEADING="## ${VERSION}"
+          awk -v heading="${HEADING}" '
+            index($0, heading) == 1 { flag = 1; next }
+            /^## / && flag { flag = 0 }
+            flag
+          ' CHANGELOG.md | sed '/./,$!d' > "CHANGELOG-${VERSION}.md"
+          if [ ! -s "CHANGELOG-${VERSION}.md" ]; then
+            echo "::error::No release notes found for ${HEADING} in CHANGELOG.md."
+            exit 1
+          fi
+          echo "CHANGELOG_FILE=CHANGELOG-${VERSION}.md" >> "${GITHUB_ENV}"
+
+      - name: Download binaries
+        uses: actions/download-artifact@v8
+        with:
+          pattern: binary-*
+          merge-multiple: true
+          path: release_assets
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ steps.git-user.outputs.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "${VERSION}" \
+            release_assets/*.tar.gz \
+            --title "${VERSION}" \
+            --notes-file "${CHANGELOG_FILE}" \
+            --target "${COMMIT_SHA}"
+
+      - name: Restore the Unreleased heading
+        env:
+          GH_TOKEN: ${{ steps.git-user.outputs.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The next change needs somewhere to go, so put the heading back
+          # rather than making the first contributor after a release add it.
+          if grep -q '^## \[Unreleased\]' CHANGELOG.md; then
+            echo "Unreleased heading already present."
+            exit 0
+          fi
+          sed -i "0,/^## ${VERSION}/s//## [Unreleased]\n\n## ${VERSION}/" CHANGELOG.md
+          git add CHANGELOG.md
+          git commit -m "ci: reopen the changelog for the next version"
+          git push origin main
+
+      - name: Summary
+        env:
+          PAGE: https://github.com/${{ github.repository }}/releases/tag/${{ env.VERSION }}
+        run: |
+          {
+            echo "## Release"
+            echo ""
+            echo "- Version: \`${VERSION}\`"
+            echo "- Release: ${PAGE}"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  pages:
+    name: Deploy documentation
+    needs: [bump-version, github-release]
+    # Runs even when only the docs are being republished, so `deploy_pages`
+    # alone is a valid reason to dispatch this workflow.
+    if: ${{ always() && inputs.deploy_pages && !failure() && !cancelled() }}
+    uses: ./.github/workflows/deploy.yml
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    with:
+      ref: ${{ needs.bump-version.outputs.commit_sha || github.ref }}

@@ -1,0 +1,84 @@
+---
+title: "Development"
+---
+
+## The devcontainer
+
+Build in the devcontainer.
+It carries the pinned Rust toolchain, Tesseract and the OCR libraries, so the only thing your machine needs is Docker.
+
+In Visual Studio Code, reopen the folder in the container when prompted.
+Otherwise use the image directly:
+
+```bash
+docker build -f .devcontainer/Dockerfile -t oboro-dev .devcontainer
+docker run --rm -it -v "$PWD":/work -w /work -u vscode oboro-dev bash
+```
+
+The toolchain is pinned by `rust-toolchain.toml`, so the container, CI and a host build all use the same compiler.
+
+## Checks
+
+```bash
+cargo test
+cargo clippy --all-targets -- -D warnings
+cargo fmt --all --check
+```
+
+The lint configuration denies all of `clippy::all` and warns on `pedantic`, and CI treats warnings as errors.
+Run all three feature combinations before opening a pull request, since each compiles different code:
+
+```bash
+cargo clippy --all-targets --features ner -- -D warnings
+cargo clippy --all-targets --features ocr -- -D warnings
+```
+
+## The test that matters
+
+`tests/leak.rs` plants known values in fixtures and fails if any of them survives `clean`.
+It runs over every readable format, so a converter cannot be added without being covered.
+
+It has earned its place.
+It caught an unredacted SIRET, a SIREN mislabelled as a phone number, and a Word letterhead that was being silently dropped.
+
+Add to `DOCUMENTS` when you add a format, and to `PLANTED` when you add a recogniser.
+
+## Tests needing the model
+
+The calibration tests in `src/detect/ner.rs` are ignored by default because they need the downloaded weights:
+
+```bash
+oboro models pull
+cargo test --features ner -- --ignored
+```
+
+Run them after changing the labels, the threshold or the model.
+They assert recall, which is the guarantee this layer offers, rather than precision, which it cannot promise.
+
+## Layout
+
+| Path | Holds |
+| --- | --- |
+| `src/convert/` | Reading each format into text. |
+| `src/detect/` | Rules, the model, and the merge between them. |
+| `src/review/` | The review screen, decisions apart from drawing. |
+| `src/vault.rs` | The encrypted mapping. |
+| `src/pipeline.rs` | `detect`, `apply` and `restore`. |
+| `testdata/` | Fixtures, every value invented. |
+
+## Adding a recogniser
+
+1. Write the pattern and its validator in `src/detect/rules.rs`, with tests for both what it should and should not match.
+2. Give the kind a placeholder tag and a specificity in `src/detect/mod.rs`.
+3. Plant an example in `testdata/contract.txt` and add it to `PLANTED` in `tests/leak.rs`.
+
+Step three is the one that proves it works end to end.
+
+## Adding a format
+
+1. Add a module under `src/convert/`.
+2. Add its extensions to `FORMATS` in `src/convert/mod.rs`, which is the single source of truth for both dispatch and what `doctor` advertises.
+3. Add a fixture and list it in `DOCUMENTS` in `tests/leak.rs`.
+
+A converter either produces the document's real text or fails.
+Returning part of a document is the worst outcome available, because the result looks sanitised without ever having been read.

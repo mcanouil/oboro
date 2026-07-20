@@ -1,0 +1,92 @@
+---
+title: "Configuration"
+---
+
+`oboro` reads the nearest `oboro.toml`, searching upwards from the working directory.
+Without one it uses the defaults below.
+Every section is optional.
+
+```toml
+# Region used to interpret national phone number formats.
+default_region = "FR"
+
+# The local recognition model.
+ner_enabled = true
+ner_threshold = 0.15
+
+# Values that must never be redacted.
+allowlist = ["My Own Company Ltd", "Lille"]
+
+# Terms that must always be redacted.
+[[denylist]]
+term = "Acme Consulting SARL"
+kind = "provider"
+
+# Your own identifier formats.
+[[patterns]]
+name = "contract number"
+regex = "CT-[0-9]{6}"
+```
+
+## `default_region`
+
+A two-letter region code deciding how national phone numbers are read.
+With `FR`, `06 12 34 56 78` is a valid mobile number.
+With `GB` it is not, and would be left alone.
+
+## `ner_enabled` and `ner_threshold`
+
+`ner_enabled` turns the recognition model off without rebuilding.
+`ner_threshold` is the probability a detection must reach before it is acted on.
+
+Lower it to redact more, raise it to redact less.
+The default of `0.15` errs towards redacting, for reasons set out in [Limitations](limitations.qmd).
+
+## `allowlist`
+
+Values that must never be redacted, whatever finds them.
+Your own company name belongs here, and so does anything the model keeps misreading as a name.
+
+Matching ignores case and surrounding whitespace, and understands accents: an entry of `Société Générale` matches `SOCIÉTÉ GÉNÉRALE`.
+
+## `denylist`
+
+Terms that must always be redacted, whether or not anything else spots them.
+This is how you handle a client list you already know.
+
+```toml
+[[denylist]]
+term = "Globex Industries"
+kind = "company"
+```
+
+`kind` decides which placeholder the value gets, and defaults to `organisation`.
+Recognised values are `person`, `organisation`, `address`, `phone` and `email`, along with a few synonyms such as `client`, `provider` and `company`.
+Anything else becomes a placeholder of its own name.
+
+Matching ignores case and respects word boundaries, so `Acme` matches `ACME` but not `acmentioned`.
+
+## `patterns`
+
+Your own identifier formats, as regular expressions.
+
+```toml
+[[patterns]]
+name = "contract number"
+regex = "CT-[0-9]{6}"
+```
+
+The name becomes the placeholder tag, so this one produces `[[CONTRACT_NUMBER_1]]`.
+Patterns you declare are treated as the most specific kind there is, because you declared them deliberately.
+
+::: {.callout-tip}
+
+## Anchor your patterns
+
+A pattern such as `[0-9]{6}` matches any six digits anywhere, including inside longer numbers.
+Prefer something with a distinctive prefix, or anchor it with `\b`.
+
+:::
+
+The regular expression syntax is [Rust's `regex` crate](https://docs.rs/regex/latest/regex/#syntax), which has no backreferences and no lookaround.
+An invalid expression is reported with the name of the pattern that contains it, rather than being ignored.
