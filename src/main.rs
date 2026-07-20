@@ -63,6 +63,18 @@ enum Command {
         #[command(subcommand)]
         action: ModelAction,
     },
+    /// Review detections before writing, accepting or rejecting each
+    Review {
+        /// Files to review
+        #[arg(required = true, value_name = "FILE")]
+        files: Vec<PathBuf>,
+        /// Directory for the sanitised output (defaults to alongside each input)
+        #[arg(short, long, value_name = "DIR")]
+        output: Option<PathBuf>,
+        /// Configuration file (defaults to the nearest oboro.toml)
+        #[arg(long, value_name = "FILE")]
+        config: Option<PathBuf>,
+    },
     /// Report the tool's configuration and environment
     Doctor,
 }
@@ -152,6 +164,11 @@ fn run() -> Result<()> {
                 Ok(())
             }
         },
+        Command::Review {
+            files,
+            output,
+            config,
+        } => review(&files, output.as_deref(), store, config.as_deref()),
         Command::Doctor => doctor(store),
     }
 }
@@ -186,7 +203,7 @@ fn clean(
         if to_stdout {
             print!("{}", report.text);
         } else {
-            let destination = output_path(file, output)?;
+            let destination = oboro::review::output_path(file, output)?;
             std::fs::write(&destination, &report.text)
                 .with_context(|| format!("writing {}", destination.display()))?;
             eprintln!(
@@ -202,17 +219,25 @@ fn clean(
     Ok(())
 }
 
-/// Builds the sanitised output path, `report.docx` becoming `report.clean.md`.
-fn output_path(input: &Path, output_dir: Option<&Path>) -> Result<PathBuf> {
-    let stem = input
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .with_context(|| format!("{} has no usable file name", input.display()))?;
-    let name = format!("{stem}.clean.md");
-    Ok(match output_dir {
-        Some(dir) => dir.join(name),
-        None => input.with_file_name(name),
-    })
+fn review(
+    files: &[PathBuf],
+    output: Option<&Path>,
+    store: &StoreArgs,
+    config_path: Option<&Path>,
+) -> Result<()> {
+    let config_path = match config_path {
+        Some(path) => Some(path.to_path_buf()),
+        None => Config::discover_from_cwd(),
+    };
+    let config = Config::load(config_path.as_deref())?;
+    let mut vault = store.open()?;
+
+    if let Some(dir) = output {
+        std::fs::create_dir_all(dir)
+            .with_context(|| format!("creating output directory {}", dir.display()))?;
+    }
+
+    oboro::review::run(files, &config, &mut vault, output)
 }
 
 fn summarise(by_tag: &std::collections::BTreeMap<String, usize>) -> String {

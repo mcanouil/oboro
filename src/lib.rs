@@ -11,4 +11,5 @@ pub mod detect;
 #[cfg(feature = "ner")]
 pub mod models;
 pub mod pipeline;
+pub mod review;
 pub mod vault;

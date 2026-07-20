@@ -43,16 +43,39 @@ pub struct RestoreReport {
 /// Returns an error if the vault cannot allocate a placeholder, for instance
 /// when its database is unreadable.
 pub fn clean(text: &str, config: &Config, vault: &mut Vault) -> Result<CleanReport> {
-    let spans = merge::resolve(detect_all(text, config)?);
+    let spans = detect(text, config)?;
+    apply(text, &spans, vault)
+}
 
+/// Finds every entity in `text`, reconciled into a disjoint, ordered set.
+///
+/// Separate from [`apply`] so `review` can put the result in front of the
+/// user before anything is written or stored in the vault.
+///
+/// # Errors
+///
+/// Returns an error if a detection layer fails.
+pub fn detect(text: &str, config: &Config) -> Result<Vec<crate::detect::Span>> {
+    Ok(merge::resolve(detect_all(text, config)?))
+}
+
+/// Replaces `spans` in `text` with placeholders from the vault.
+///
+/// The spans must be disjoint and in source order, as [`detect`] returns
+/// them. Passing a subset is how `review` honours what the user rejected.
+///
+/// # Errors
+///
+/// Returns an error if the vault cannot allocate a placeholder.
+pub fn apply(text: &str, spans: &[crate::detect::Span], vault: &mut Vault) -> Result<CleanReport> {
     let mut output = String::with_capacity(text.len());
     let mut by_tag: BTreeMap<String, usize> = BTreeMap::new();
     let mut replaced = 0;
     let mut cursor = 0;
 
-    // `resolve` returns disjoint spans in source order, so one forward pass
-    // covers the text without ever revisiting what it has written.
-    for span in &spans {
+    // Disjoint spans in source order mean one forward pass covers the text
+    // without ever revisiting what it has written.
+    for span in spans {
         let placeholder = vault
             .placeholder_for(&span.kind, &span.text)
             .with_context(|| format!("allocating a placeholder for a {} entity", span.kind))?;
