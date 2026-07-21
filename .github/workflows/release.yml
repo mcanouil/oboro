@@ -285,7 +285,7 @@ jobs:
       # Lets anyone run `gh attestation verify` and learn which workflow and
       # which commit produced the file in front of them.
       - name: Attest the build provenance
-        uses: actions/attest-build-provenance@v3
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: release_assets/*.tar.gz
 
