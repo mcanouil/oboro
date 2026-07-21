@@ -1,0 +1,14 @@
+---
+title: "Changelog"
+subtitle: "What changed, and when."
+filters:
+  - path: gitlink
+    at: post-quarto
+# extensions:
+#   gitlink:
+#     platform: github
+#     base-url: https://github.com
+#     repository-name: mcanouil/oboro
+---
+
+{{< include ../CHANGELOG.md >}}
