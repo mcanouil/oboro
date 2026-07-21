@@ -3,11 +3,12 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use clap::{Args, Parser, Subcommand};
 
 use oboro::config::Config;
 use oboro::convert;
+use oboro::detect::Detector;
 use oboro::pipeline;
 use oboro::vault::{self, Vault};
 
@@ -176,6 +177,28 @@ fn run() -> Result<()> {
     }
 }
 
+/// Discovers and loads the configuration, opens the vault, and creates the
+/// output directory when one is given. Shared by `clean` and `review`, which
+/// otherwise repeated it verbatim.
+fn prepare(
+    store: &StoreArgs,
+    config_path: Option<&Path>,
+    output: Option<&Path>,
+) -> Result<(Config, Vault)> {
+    let config_path = match config_path {
+        Some(path) => Some(path.to_path_buf()),
+        None => Config::discover_from_cwd(),
+    };
+    let config = Config::load(config_path.as_deref())?;
+    let vault = store.open()?;
+
+    if let Some(dir) = output {
+        std::fs::create_dir_all(dir)
+            .with_context(|| format!("creating output directory {}", dir.display()))?;
+    }
+    Ok((config, vault))
+}
+
 fn clean(
     files: &[PathBuf],
     output: Option<&Path>,
@@ -187,21 +210,14 @@ fn clean(
         bail!("--stdout takes a single file; pass one file or use --output");
     }
 
-    let config_path = match config_path {
-        Some(path) => Some(path.to_path_buf()),
-        None => Config::discover_from_cwd(),
-    };
-    let config = Config::load(config_path.as_deref())?;
-    let mut vault = store.open()?;
-
-    if let Some(dir) = output {
-        std::fs::create_dir_all(dir)
-            .with_context(|| format!("creating output directory {}", dir.display()))?;
-    }
+    let (config, mut vault) = prepare(store, config_path, output)?;
+    // Built once, so a multi-file run loads the recognition model a single
+    // time instead of on every file.
+    let detector = Detector::new(&config)?;
 
     for file in files {
         let text = convert::to_text(file)?;
-        let report = pipeline::clean(&text, &config, &mut vault)?;
+        let report = pipeline::clean(&text, &detector, &mut vault)?;
 
         if to_stdout {
             print!("{}", report.text);
@@ -228,18 +244,7 @@ fn review(
     store: &StoreArgs,
     config_path: Option<&Path>,
 ) -> Result<()> {
-    let config_path = match config_path {
-        Some(path) => Some(path.to_path_buf()),
-        None => Config::discover_from_cwd(),
-    };
-    let config = Config::load(config_path.as_deref())?;
-    let mut vault = store.open()?;
-
-    if let Some(dir) = output {
-        std::fs::create_dir_all(dir)
-            .with_context(|| format!("creating output directory {}", dir.display()))?;
-    }
-
+    let (config, mut vault) = prepare(store, config_path, output)?;
     oboro::review::run(files, &config, &mut vault, output)
 }
 
@@ -263,7 +268,7 @@ fn restore(file: &Path, to_stdout: bool, store: &StoreArgs) -> Result<()> {
     if to_stdout {
         print!("{}", report.text);
     } else {
-        std::fs::write(file, &report.text)
+        write_atomic(file, report.text.as_bytes())
             .with_context(|| format!("writing {}", file.display()))?;
         eprintln!("{}: {} restored", file.display(), report.restored);
     }
@@ -288,22 +293,61 @@ fn map_list(reveal: bool, store: &StoreArgs) -> Result<()> {
     let stdout = std::io::stdout();
     let mut out = stdout.lock();
     for entry in entries {
-        if reveal {
-            let value = vault.value_for(&entry.tag, entry.seq)?.unwrap_or_default();
-            writeln!(
-                out,
-                "{}	{}	{}",
-                entry.placeholder(),
-                entry.created_at,
-                value
-            )?;
+        let line = if reveal {
+            // A listed placeholder with no stored value means the row was lost
+            // or the database was tampered with; an empty column would hide it.
+            let value = vault.value_for(&entry.tag, entry.seq)?.ok_or_else(|| {
+                anyhow!(
+                    "the vault lists {} but holds no value for it; the database may be corrupt",
+                    entry.placeholder()
+                )
+            })?;
+            format!("{}\t{}\t{}", entry.placeholder(), entry.created_at, value)
         } else {
-            writeln!(out, "{}	{}", entry.placeholder(), entry.created_at)?;
+            format!("{}\t{}", entry.placeholder(), entry.created_at)
+        };
+        // A reader such as `head` closing the pipe early is a normal way to
+        // stop, not an error to report.
+        if let Err(error) = writeln!(out, "{line}") {
+            if error.kind() == std::io::ErrorKind::BrokenPipe {
+                return Ok(());
+            }
+            return Err(error).context("writing the mapping listing");
         }
     }
     if !reveal {
         eprintln!("values hidden; pass --reveal to print them");
     }
+    Ok(())
+}
+
+/// Writes a file by writing a sibling temporary and renaming it into place.
+///
+/// `restore` overwrites the user's only copy of the answer, so a crash partway
+/// through a direct write would lose it. Renaming is atomic on the same
+/// filesystem, so the destination is either the old file or the whole new one.
+fn write_atomic(path: &Path, contents: &[u8]) -> Result<()> {
+    use std::io::Write as _;
+
+    let directory = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| anyhow!("{} has no usable file name", path.display()))?;
+    let temporary = directory.join(format!(".{file_name}.oboro-{}.tmp", std::process::id()));
+
+    let mut file = std::fs::File::create(&temporary)
+        .with_context(|| format!("creating a temporary file in {}", directory.display()))?;
+    file.write_all(contents)
+        .and_then(|()| file.sync_all())
+        .with_context(|| format!("writing {}", temporary.display()))?;
+    drop(file);
+
+    std::fs::rename(&temporary, path)
+        .with_context(|| format!("replacing {} with the new contents", path.display()))?;
     Ok(())
 }
 

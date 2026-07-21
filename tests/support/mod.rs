@@ -35,9 +35,14 @@ impl Workspace {
     }
 
     /// A `oboro` invocation bound to this workspace's vault.
+    ///
+    /// Run from inside the workspace so configuration discovery cannot walk up
+    /// into an ancestor `oboro.toml` on the developer's machine and change what
+    /// a test sees.
     pub fn command(&self) -> Command {
         let mut command = Command::cargo_bin("oboro").expect("the oboro binary must build");
         command
+            .current_dir(self.dir.path())
             .arg("--vault")
             .arg(self.dir.path().join("vault.db"))
             .arg("--key")

@@ -56,7 +56,7 @@ static IPV6: LazyLock<Regex> = LazyLock::new(|| {
 /// then the street name up to a line or clause break.
 static FR_STREET: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r"(?i)\b\d{1,4}\s*(?:bis|ter|quater)?[,]?\s+(?:rue|avenue|av\.|boulevard|bd\.?|chemin|place|impasse|all[ée]e|route|quai|cours|square|villa|passage|voie|sentier)\b[^\n,;.]{2,60}",
+        r"(?i)\b\d{1,4}\s*(?:bis|ter|quater)?[,]?\s+(?:rue|avenue|av\.|boulevard|bd\.?|chemin|place|impasse|all[ée]e|route|quai|cours|square|villa|passage|voie|sentier)\b[^\r\n,;.]{2,60}",
     )
     .expect("street pattern is valid")
 });
@@ -349,6 +349,25 @@ mod tests {
         assert!(
             found.iter().any(|f| f.contains("rue de la Paix")),
             "got {found:?}"
+        );
+    }
+
+    #[test]
+    fn a_street_address_stops_before_a_carriage_return() {
+        // A Windows-authored document uses CRLF; the address must end at the
+        // line break rather than trailing a literal carriage return into the
+        // stored value.
+        let found = kinds_of(
+            "Livraison au 12 rue de la Paix\r\nMerci.",
+            &EntityKind::Address,
+        );
+        assert!(
+            found.iter().any(|f| f.contains("rue de la Paix")),
+            "got {found:?}"
+        );
+        assert!(
+            found.iter().all(|f| !f.contains('\r')),
+            "an address must not include the carriage return: {found:?}"
         );
     }
 

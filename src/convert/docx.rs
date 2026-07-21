@@ -242,6 +242,22 @@ mod tests {
     }
 
     #[test]
+    fn the_five_predefined_entities_expand() {
+        assert_eq!(named_entity(b"amp").expect("amp"), "&");
+        assert_eq!(named_entity(b"lt").expect("lt"), "<");
+        assert_eq!(named_entity(b"apos").expect("apos"), "'");
+    }
+
+    #[test]
+    fn an_unknown_entity_fails_rather_than_dropping_characters() {
+        let error = named_entity(b"nbsp").expect_err("an undeclared entity must fail");
+        assert!(
+            format!("{error:#}").contains("nbsp"),
+            "the error must name the offending entity"
+        );
+    }
+
+    #[test]
     fn a_file_that_is_not_a_zip_is_reported_clearly() {
         let dir = tempfile::tempdir().expect("temporary directory");
         let path = dir.path().join("fake.docx");

@@ -11,6 +11,57 @@ pub mod rules;
 
 use std::fmt;
 
+use anyhow::Result;
+
+use crate::config::Config;
+
+/// The detection stack, built once per run.
+///
+/// Constructing this loads the recognition model a single time; reusing one
+/// `Detector` across a batch of files is what keeps a multi-file `clean` from
+/// paying that cost on every document.
+pub struct Detector<'a> {
+    config: &'a Config,
+    #[cfg(feature = "ner")]
+    recogniser: Option<ner::Recogniser>,
+}
+
+impl<'a> Detector<'a> {
+    /// Builds the detection stack, loading the recognition model if this build
+    /// has the feature, the model is installed, and the configuration enables
+    /// it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error only when the model is present but cannot be loaded.
+    pub fn new(config: &'a Config) -> Result<Self> {
+        Ok(Self {
+            config,
+            #[cfg(feature = "ner")]
+            recogniser: ner::load_if_available(config)?,
+        })
+    }
+
+    /// Runs every detection layer over `text`, returning the raw, possibly
+    /// overlapping spans for [`merge`] to reconcile.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the recognition layer fails.
+    // Without the ner feature there is only the infallible rules layer, so the
+    // wrap and the mutability are both unused. Both stay for the build with it.
+    #[cfg_attr(not(feature = "ner"), allow(clippy::unnecessary_wraps))]
+    pub fn detect(&self, text: &str) -> Result<Vec<Span>> {
+        #[cfg_attr(not(feature = "ner"), allow(unused_mut))]
+        let mut spans = rules::Rules::new(self.config).detect(text);
+        #[cfg(feature = "ner")]
+        if let Some(recogniser) = &self.recogniser {
+            spans.extend(recogniser.detect(text)?);
+        }
+        Ok(spans)
+    }
+}
+
 /// A category of sensitive information.
 ///
 /// The variant determines the placeholder tag written into sanitised output,

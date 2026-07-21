@@ -90,6 +90,60 @@ fn clean_reports_a_missing_file() {
 }
 
 #[test]
+fn clean_reports_a_missing_config_file() {
+    let workspace = Workspace::new();
+    let input = workspace.path().join("note.txt");
+    std::fs::write(&input, "Call 06 12 34 56 78.\n").expect("writing the input");
+
+    workspace
+        .command()
+        .arg("clean")
+        .arg(&input)
+        .arg("--config")
+        .arg(workspace.path().join("absent.toml"))
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("absent.toml"));
+}
+
+#[test]
+fn restore_reports_a_missing_file() {
+    let workspace = Workspace::new();
+    workspace
+        .command()
+        .arg("restore")
+        .arg(workspace.path().join("absent.md"))
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("absent.md"));
+}
+
+/// A batch that fails on a later file must still report the failure and exit
+/// non-zero, having written the outputs for the files that did succeed.
+#[test]
+fn clean_stops_and_reports_when_a_later_file_fails() {
+    let workspace = Workspace::new();
+    let good = workspace.path().join("good.txt");
+    let bad = workspace.path().join("bad.docx");
+    std::fs::write(&good, "Call 06 12 34 56 78.\n").expect("writing");
+    std::fs::write(&bad, "not really a docx").expect("writing");
+
+    workspace
+        .command()
+        .arg("clean")
+        .arg(&good)
+        .arg(&bad)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("docx"));
+
+    assert!(
+        workspace.path().join("good.clean.md").is_file(),
+        "the file processed before the failure must still be written"
+    );
+}
+
+#[test]
 fn map_list_hides_values_unless_asked() {
     let workspace = Workspace::new();
     workspace.clean_fixture("contract.txt");

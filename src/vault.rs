@@ -71,6 +71,9 @@ impl Vault {
             .with_context(|| format!("opening vault at {}", db_path.display()))?;
         restrict_permissions(db_path)?;
         initialise_schema(&connection)?;
+        // WAL mode creates -wal and -shm sidecars next to the database; left to
+        // the umask they would be world-readable, so tighten them to match.
+        restrict_sidecars(db_path)?;
 
         Ok(Self {
             connection,
@@ -98,18 +101,15 @@ impl Vault {
 
         if let Some(seq) = self
             .connection
-            .query_row(
-                "SELECT seq FROM mappings WHERE index_hash = ?1",
-                params![index.as_slice()],
-                |row| row.get::<_, i64>(0),
-            )
+            .prepare_cached("SELECT seq FROM mappings WHERE index_hash = ?1")
+            .context("preparing the mapping lookup")?
+            .query_row(params![index.as_slice()], |row| row.get::<_, i64>(0))
             .optional()
             .context("looking up an existing mapping")?
         {
             return Ok(placeholder(&tag, seq));
         }
 
-        let (nonce, ciphertext) = self.seal(&tag, value)?;
         let transaction = self
             .connection
             .transaction()
@@ -121,6 +121,11 @@ impl Vault {
                 |row| row.get(0),
             )
             .context("allocating the next placeholder number")?;
+        // Sealed only once the sequence is known, so the ciphertext is bound to
+        // the exact (tag, seq) it will be read back under. Borrowing the cipher
+        // field directly keeps it disjoint from the transaction's borrow of the
+        // connection field.
+        let (nonce, ciphertext) = seal(&self.cipher, &tag, seq, value)?;
         transaction
             .execute(
                 "INSERT INTO mappings (tag, seq, index_hash, nonce, ciphertext, created_at)
@@ -145,16 +150,16 @@ impl Vault {
     pub fn value_for(&self, tag: &str, seq: i64) -> Result<Option<String>> {
         let row = self
             .connection
-            .query_row(
-                "SELECT nonce, ciphertext FROM mappings WHERE tag = ?1 AND seq = ?2",
-                params![tag, seq],
-                |row| Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, Vec<u8>>(1)?)),
-            )
+            .prepare_cached("SELECT nonce, ciphertext FROM mappings WHERE tag = ?1 AND seq = ?2")
+            .context("preparing the placeholder lookup")?
+            .query_row(params![tag, seq], |row| {
+                Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, Vec<u8>>(1)?))
+            })
             .optional()
             .context("looking up a placeholder")?;
 
         match row {
-            Some((nonce, ciphertext)) => self.open_sealed(tag, &nonce, &ciphertext).map(Some),
+            Some((nonce, ciphertext)) => self.open_sealed(tag, seq, &nonce, &ciphertext).map(Some),
             None => Ok(None),
         }
     }
@@ -211,25 +216,7 @@ impl Vault {
         *hasher.finalize().as_bytes()
     }
 
-    /// Encrypts `value`, binding the ciphertext to its tag so a row cannot be
-    /// silently moved to another entity kind.
-    fn seal(&self, tag: &str, value: &str) -> Result<([u8; NONCE_LEN], Vec<u8>)> {
-        let mut nonce_bytes = [0u8; NONCE_LEN];
-        rand::rng().fill_bytes(&mut nonce_bytes);
-        let ciphertext = self
-            .cipher
-            .encrypt(
-                &Nonce::from(nonce_bytes),
-                Payload {
-                    msg: value.as_bytes(),
-                    aad: tag.as_bytes(),
-                },
-            )
-            .map_err(|_| anyhow!("encrypting a vault value failed"))?;
-        Ok((nonce_bytes, ciphertext))
-    }
-
-    fn open_sealed(&self, tag: &str, nonce: &[u8], ciphertext: &[u8]) -> Result<String> {
+    fn open_sealed(&self, tag: &str, seq: i64, nonce: &[u8], ciphertext: &[u8]) -> Result<String> {
         let nonce: [u8; NONCE_LEN] = nonce
             .try_into()
             .map_err(|_| anyhow!("vault row has a malformed nonce; the database may be corrupt"))?;
@@ -239,7 +226,7 @@ impl Vault {
                 &Nonce::from(nonce),
                 Payload {
                     msg: ciphertext,
-                    aad: tag.as_bytes(),
+                    aad: associated_data(tag, seq).as_bytes(),
                 },
             )
             .map_err(|_| {
@@ -249,6 +236,38 @@ impl Vault {
             })?;
         String::from_utf8(plaintext).context("a vault value is not valid UTF-8")
     }
+}
+
+/// Encrypts `value`, binding the ciphertext to its `(tag, seq)` so a row
+/// cannot be silently moved to another entity kind or swapped with another
+/// sequence under the same tag.
+///
+/// A free function rather than a method so the caller can hold a transaction on
+/// the connection field while borrowing only the cipher field here.
+fn seal(
+    cipher: &Aes256Gcm,
+    tag: &str,
+    seq: i64,
+    value: &str,
+) -> Result<([u8; NONCE_LEN], Vec<u8>)> {
+    let mut nonce_bytes = [0u8; NONCE_LEN];
+    rand::rng().fill_bytes(&mut nonce_bytes);
+    let ciphertext = cipher
+        .encrypt(
+            &Nonce::from(nonce_bytes),
+            Payload {
+                msg: value.as_bytes(),
+                aad: associated_data(tag, seq).as_bytes(),
+            },
+        )
+        .map_err(|_| anyhow!("encrypting a vault value failed"))?;
+    Ok((nonce_bytes, ciphertext))
+}
+
+/// The associated data a value is sealed under: its tag and sequence, so
+/// neither can be changed without the decryption failing.
+fn associated_data(tag: &str, seq: i64) -> String {
+    format!("{tag}\0{seq}")
 }
 
 /// Formats a placeholder. Double brackets survive markdown rendering and
@@ -361,6 +380,22 @@ fn restrict_permissions(path: &Path) -> Result<()> {
     }
     #[cfg(not(unix))]
     let _ = path;
+    Ok(())
+}
+
+/// Tightens the WAL sidecars to owner-only.
+///
+/// A sidecar only exists once WAL has work to persist, so one that is absent is
+/// expected rather than a failure.
+fn restrict_sidecars(db_path: &Path) -> Result<()> {
+    for suffix in ["-wal", "-shm"] {
+        let mut name = db_path.as_os_str().to_owned();
+        name.push(suffix);
+        let sidecar = PathBuf::from(name);
+        if sidecar.exists() {
+            restrict_permissions(&sidecar)?;
+        }
+    }
     Ok(())
 }
 
@@ -585,6 +620,63 @@ mod tests {
                 .value_for("PERSON", 1)
                 .expect("reading back")
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn swapping_two_rows_under_one_tag_is_detected() {
+        let fixture = TestVault::new();
+        let mut vault = fixture.vault;
+        vault
+            .placeholder_for(&EntityKind::Person, "Jean Dupont")
+            .expect("allocating");
+        vault
+            .placeholder_for(&EntityKind::Person, "Marie Curie")
+            .expect("allocating");
+
+        // Swap the sealed payloads of seq 1 and seq 2. Binding the sequence
+        // into the associated data means each now decrypts under the wrong
+        // seq, so both must fail rather than silently returning the other name.
+        vault
+            .connection
+            .execute_batch(
+                "UPDATE mappings SET seq = 0 WHERE tag = 'PERSON' AND seq = 1;
+                 UPDATE mappings SET seq = 1 WHERE tag = 'PERSON' AND seq = 2;
+                 UPDATE mappings SET seq = 2 WHERE tag = 'PERSON' AND seq = 0;",
+            )
+            .expect("swapping rows");
+
+        assert!(
+            vault.value_for("PERSON", 1).is_err(),
+            "a row moved to another sequence must not decrypt"
+        );
+        assert!(vault.value_for("PERSON", 2).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_wal_sidecars_are_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let fixture = TestVault::new();
+        let mut vault = fixture.vault;
+        vault
+            .placeholder_for(&EntityKind::Person, "Jean Dupont")
+            .expect("allocating");
+
+        let wal = {
+            let mut name = fixture.dir.path().join("vault.db").into_os_string();
+            name.push("-wal");
+            PathBuf::from(name)
+        };
+        assert!(wal.exists(), "WAL mode must create the sidecar");
+        assert_eq!(
+            std::fs::metadata(&wal)
+                .expect("reading")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600,
+            "the WAL sidecar must be owner-only, not left to the umask"
         );
     }
 

@@ -13,8 +13,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-use crate::config::Config;
-use crate::detect::Span;
+use crate::detect::{Detector, Span};
 use crate::vault::Vault;
 
 pub use ui::run;
@@ -34,7 +33,7 @@ pub struct Document {
 }
 
 impl Document {
-    /// Reads and analyses `path`.
+    /// Reads and analyses `path` with a detector shared across the batch.
     ///
     /// Every detection starts accepted, so confirming without touching
     /// anything gives exactly what `clean` would have produced.
@@ -42,9 +41,9 @@ impl Document {
     /// # Errors
     ///
     /// Returns an error if the file cannot be read or detection fails.
-    pub fn open(path: &Path, config: &Config) -> Result<Self> {
+    pub fn open(path: &Path, detector: &Detector) -> Result<Self> {
         let text = crate::convert::to_text(path)?;
-        let decisions = crate::pipeline::detect(&text, config)?
+        let decisions = crate::pipeline::detect(&text, detector)?
             .into_iter()
             .map(|span| Decision {
                 span,
@@ -135,8 +134,12 @@ mod tests {
     use super::*;
 
     fn document(text: &str) -> Document {
-        let config = Config::default();
-        let decisions = crate::pipeline::detect(text, &config)
+        // Rules-only, so the decisions under test do not depend on whether the
+        // recognition model happens to be installed.
+        let mut config = crate::config::Config::default();
+        config.ner_enabled = false;
+        let detector = Detector::new(&config).expect("detector");
+        let decisions = crate::pipeline::detect(text, &detector)
             .expect("detecting")
             .into_iter()
             .map(|span| Decision {
@@ -167,8 +170,10 @@ mod tests {
 
         let dir2 = tempfile::tempdir().expect("temporary directory");
         let mut vault2 = open_vault(&dir2);
-        let cleaned =
-            crate::pipeline::clean(&doc.text, &Config::default(), &mut vault2).expect("cleaning");
+        let mut config = crate::config::Config::default();
+        config.ner_enabled = false;
+        let detector = Detector::new(&config).expect("detector");
+        let cleaned = crate::pipeline::clean(&doc.text, &detector, &mut vault2).expect("cleaning");
         assert_eq!(reviewed.text, cleaned.text);
     }
 

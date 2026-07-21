@@ -3,6 +3,7 @@
 //! The file is optional: without one, the deterministic recognisers run with
 //! French defaults and no user patterns.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
@@ -13,6 +14,13 @@ use crate::detect::EntityKind;
 
 /// The file name looked up in the working directory and its ancestors.
 pub const CONFIG_FILE: &str = "oboro.toml";
+
+/// Region used when a file does not set one.
+const DEFAULT_REGION: &str = "FR";
+/// Whether the recognition model runs when installed, absent configuration.
+const DEFAULT_NER_ENABLED: bool = true;
+/// Minimum model probability acted on, absent configuration.
+const DEFAULT_NER_THRESHOLD: f32 = 0.15;
 
 /// A user-defined pattern, such as a contract number format.
 pub struct CustomPattern {
@@ -46,6 +54,9 @@ pub struct Config {
     pub ner_threshold: f32,
     /// Values that must never be redacted, such as the user's own company.
     pub allowlist: Vec<String>,
+    /// The allowlist folded once for lookup, so [`Config::is_allowlisted`] does
+    /// not trim and lowercase every entry on every candidate span.
+    allowlist_folded: HashSet<String>,
     pub denylist: Vec<DenyTerm>,
     pub patterns: Vec<CustomPattern>,
 }
@@ -53,10 +64,11 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            default_region: "FR".to_owned(),
-            ner_enabled: true,
-            ner_threshold: 0.15,
+            default_region: DEFAULT_REGION.to_owned(),
+            ner_enabled: DEFAULT_NER_ENABLED,
+            ner_threshold: DEFAULT_NER_THRESHOLD,
             allowlist: Vec::new(),
+            allowlist_folded: HashSet::new(),
             denylist: Vec::new(),
             patterns: Vec::new(),
         }
@@ -108,11 +120,14 @@ impl Config {
     /// French text this tool targets.
     #[must_use]
     pub fn is_allowlisted(&self, text: &str) -> bool {
-        let needle = text.trim().to_lowercase();
-        self.allowlist
-            .iter()
-            .any(|entry| entry.trim().to_lowercase() == needle)
+        self.allowlist_folded.contains(&fold(text))
     }
+}
+
+/// Folds a value for allowlist comparison: trimmed and lowercased, Unicode
+/// aware so accented French text folds correctly.
+fn fold(text: &str) -> String {
+    text.trim().to_lowercase()
 }
 
 #[derive(Deserialize)]
@@ -133,15 +148,15 @@ struct RawConfig {
 }
 
 fn default_region() -> String {
-    "FR".to_owned()
+    DEFAULT_REGION.to_owned()
 }
 
 fn default_ner_enabled() -> bool {
-    true
+    DEFAULT_NER_ENABLED
 }
 
 fn default_ner_threshold() -> f32 {
-    0.15
+    DEFAULT_NER_THRESHOLD
 }
 
 #[derive(Deserialize)]
@@ -205,11 +220,14 @@ impl RawConfig {
             );
         }
 
+        let allowlist_folded = self.allowlist.iter().map(|entry| fold(entry)).collect();
+
         Ok(Config {
             default_region: self.default_region,
             ner_enabled: self.ner_enabled,
             ner_threshold: self.ner_threshold,
             allowlist: self.allowlist,
+            allowlist_folded,
             denylist,
             patterns,
         })

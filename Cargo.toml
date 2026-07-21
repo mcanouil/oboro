@@ -1,6 +1,6 @@
 [package]
 name = "oboro"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2024"
 rust-version = "1.90"
 description = "Local anonymisation layer between raw files and large language models"
@@ -42,7 +42,6 @@ rand = "0.10.2"
 regex = "1.13.1"
 rusqlite = { version = "0.40.1", features = ["bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }
-thiserror = "2.0.19"
 toml = "1.1.3"
 zeroize = { version = "1.9.0", features = ["derive"] }
 

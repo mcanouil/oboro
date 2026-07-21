@@ -23,6 +23,11 @@ use anyhow::{Context, Result, anyhow, bail};
 const REPOSITORY: &str = "onnx-community/gliner_multi_pii-v1";
 const REVISION: &str = "main";
 
+/// On-disk names of the two artefacts, shared between the manifest below and
+/// [`paths`], so the two cannot drift apart.
+const MODEL_FILE: &str = "model.onnx";
+const TOKENIZER_FILE: &str = "tokenizer.json";
+
 /// A file to fetch, with the hash it must have once downloaded.
 struct Artefact {
     /// Path within the model repository.
@@ -36,13 +41,13 @@ struct Artefact {
 const ARTEFACTS: &[Artefact] = &[
     Artefact {
         remote: "onnx/model_quantized.onnx",
-        local: "model.onnx",
+        local: MODEL_FILE,
         sha256: "3efb3b91aef91ae11cd781126133063a33a2ffd7787ec73057bbd57a9781a7ab",
         bytes: 349_120_924,
     },
     Artefact {
         remote: "tokenizer.json",
-        local: "tokenizer.json",
+        local: TOKENIZER_FILE,
         sha256: "914bd3c8fb7b525af9e23b60d0ec7b1248ddb2b99014efd9c02ebeb022f8cab7",
         bytes: 16_331_948,
     },
@@ -84,8 +89,8 @@ pub fn is_installed() -> Result<bool> {
 /// Returns an error if the model is not installed.
 pub fn paths() -> Result<(PathBuf, PathBuf)> {
     let dir = directory()?;
-    let model = dir.join("model.onnx");
-    let tokenizer = dir.join("tokenizer.json");
+    let model = dir.join(MODEL_FILE);
+    let tokenizer = dir.join(TOKENIZER_FILE);
     if !model.is_file() || !tokenizer.is_file() {
         bail!(
             "the recognition model is not installed; run `oboro models pull` to fetch it \
@@ -160,7 +165,7 @@ pub fn pull() -> Result<()> {
             artefact.local,
             artefact.bytes / 1_048_576
         );
-        download(&url, &path)
+        download(&url, &path, artefact.bytes)
             .with_context(|| format!("downloading {} from {url}", artefact.local))?;
 
         verify(&path, artefact.sha256).with_context(|| {
@@ -180,14 +185,21 @@ pub fn pull() -> Result<()> {
 /// Writing in place would leave a half-finished file behind if the transfer
 /// is interrupted, which the next run would have to distinguish from a real
 /// one.
-fn download(url: &str, destination: &Path) -> Result<()> {
+fn download(url: &str, destination: &Path, expected: u64) -> Result<()> {
     let partial = destination.with_extension("partial");
     let response = ureq::get(url).call().context("the request failed")?;
 
-    let mut reader = response.into_body().into_reader();
+    // Capped one byte past the pinned size so a compromised or misbehaving
+    // endpoint cannot stream unbounded data and fill the disk before the hash
+    // is ever checked. A short file is caught by the hash afterwards.
+    let mut reader = response.into_body().into_reader().take(expected + 1);
     let mut file = std::fs::File::create(&partial)
         .with_context(|| format!("creating {}", partial.display()))?;
-    std::io::copy(&mut reader, &mut file).context("the transfer was interrupted")?;
+    let written = std::io::copy(&mut reader, &mut file).context("the transfer was interrupted")?;
+    if written > expected {
+        let _ = std::fs::remove_file(&partial);
+        bail!("the download exceeded its pinned size of {expected} bytes and was discarded");
+    }
     file.sync_all().context("flushing the download to disk")?;
     drop(file);
 
