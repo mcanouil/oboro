@@ -67,7 +67,7 @@ oboro clean report.txt --stdout | pbcopy
 | Format | How |
 | --- | --- |
 | `.txt`, `.md` | Read directly |
-| `.docx` | Text runs pulled from the document body |
+| `.docx` | Text runs from the body, headers, footers, footnotes and comments |
 | `.xlsx`, `.xlsm` | Every sheet flattened to tab-separated rows |
 | `.pdf` | Embedded text; scanned PDFs are refused, not half-read |
 | `.png`, `.jpg`, `.tif` | Tesseract, with a build compiled `--features ocr` |

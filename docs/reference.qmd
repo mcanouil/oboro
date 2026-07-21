@@ -28,6 +28,11 @@ Shows every detection and lets you accept or reject each one before anything is 
 oboro review <FILE>... [OPTIONS]
 ```
 
+| Option | Effect |
+| --- | --- |
+| `-o`, `--output <DIR>` | Write outputs into this directory instead of beside each input. |
+| `--config <FILE>` | Use this configuration instead of the nearest `oboro.toml`. |
+
 | Key | Action |
 | --- | --- |
 | `j`, `k`, or arrows | Move through the list. |

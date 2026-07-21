@@ -11,3 +11,11 @@ updates:
       interval: "monthly"
     labels:
       - "Type: Dependencies :arrow_up:"
+
+  # Keeps the digest-pinned base images in the Dockerfile current.
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    labels:
+      - "Type: Dependencies :arrow_up:"

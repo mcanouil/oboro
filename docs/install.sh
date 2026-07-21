@@ -18,6 +18,16 @@
 #   OBORO_INSTALL_DIR         Install here instead of the resolved default.
 #   OBORO_SKIP_CHECKSUM=1     Skip SHA256 verification (not recommended).
 #   OBORO_VERIFY_PROVENANCE=1 Also verify build provenance with the gh CLI.
+#
+# This installer needs bash. On a minimal distribution such as Alpine, which
+# ships only busybox, install it first: `apk add bash curl`.
+
+# POSIX-syntax guard so `sh install.sh` fails clearly rather than mis-parsing
+# the bash below. It runs before `set -o pipefail`, which dash rejects.
+if [ -z "${BASH_VERSION:-}" ]; then
+	echo "This installer needs bash. Run: bash install.sh (or: curl -fsSL https://m.canouil.dev/oboro/install.sh | bash)" >&2
+	exit 1
+fi
 
 set -euo pipefail
 
@@ -74,7 +84,9 @@ detect_target() {
 
 find_install_dir() {
 	if [ -n "${OBORO_INSTALL_DIR:-}" ]; then
-		mkdir -p "${OBORO_INSTALL_DIR}"
+		# Creating it is left to the install step, which can fall back to sudo
+		# for a root-owned path such as /opt/oboro; an eager mkdir here would
+		# abort under `set -e` before that fallback is reached.
 		echo "${OBORO_INSTALL_DIR}"
 	elif [ -w "/usr/local/bin" ]; then
 		echo "/usr/local/bin"
@@ -237,6 +249,10 @@ main() {
 		warn "${install_dir} is not writable; using sudo."
 		sudo_cmd="sudo"
 	fi
+	# Create the directory now, with sudo when it or its parent is root-owned,
+	# so a custom OBORO_INSTALL_DIR that does not yet exist is handled here.
+	# shellcheck disable=SC2086
+	${sudo_cmd} mkdir -p "${install_dir}"
 	# shellcheck disable=SC2086
 	${sudo_cmd} mv "${tmpdir}/${BINARY_NAME}" "${install_dir}/"
 	# shellcheck disable=SC2086

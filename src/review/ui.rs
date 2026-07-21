@@ -21,6 +21,7 @@ use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wra
 
 use super::Document;
 use crate::config::Config;
+use crate::detect::Detector;
 use crate::vault::Vault;
 
 /// What the user asked for on leaving a document.
@@ -45,57 +46,89 @@ pub fn run(
     vault: &mut Vault,
     output_dir: Option<&Path>,
 ) -> Result<()> {
-    let mut written = Vec::new();
+    // Built once: this loads the recognition model a single time rather than
+    // per file.
+    let detector = Detector::new(config).context("preparing the detector")?;
 
+    // Detection happens before the screen opens, so a file with nothing to
+    // review reports it on the ordinary terminal rather than flashing an
+    // alternate screen up and straight back down.
+    let mut documents = Vec::new();
     for path in files {
-        let mut document = Document::open(path, config)?;
-
+        let document = Document::open(path, &detector)?;
         if document.decisions.is_empty() {
             eprintln!("{}: nothing detected, skipped", path.display());
-            continue;
+        } else {
+            documents.push(document);
         }
+    }
+    if documents.is_empty() {
+        return Ok(());
+    }
 
-        let mut terminal = start().context("preparing the terminal")?;
-        let outcome = review_one(&mut terminal, &mut document);
-        stop(&mut terminal).context("restoring the terminal")?;
-
-        match outcome? {
-            Outcome::Write => {
-                let destination = document.write(vault, output_dir)?;
-                written.push(destination);
-            }
-            Outcome::Skip => eprintln!("{}: skipped, nothing written", path.display()),
-            Outcome::Quit => {
-                eprintln!("stopped; {} file(s) written", written.len());
-                return Ok(());
+    let mut written = Vec::new();
+    let mut skipped = Vec::new();
+    let mut quit = false;
+    {
+        // One alternate screen for the whole batch, restored by the guard's
+        // Drop even if a draw or a write below fails or panics.
+        let mut guard = TerminalGuard::new().context("preparing the terminal")?;
+        for document in &mut documents {
+            match review_one(guard.terminal(), document)? {
+                Outcome::Write => written.push(document.write(vault, output_dir)?),
+                Outcome::Skip => skipped.push(document.path.clone()),
+                Outcome::Quit => {
+                    quit = true;
+                    break;
+                }
             }
         }
     }
 
+    for path in &skipped {
+        eprintln!("{}: skipped, nothing written", path.display());
+    }
     for path in &written {
         eprintln!("wrote {}", path.display());
+    }
+    if quit {
+        eprintln!("stopped; {} file(s) written", written.len());
     }
     Ok(())
 }
 
 type Screen = Terminal<CrosstermBackend<Stdout>>;
 
-fn start() -> Result<Screen> {
-    enable_raw_mode()?;
-    let mut stdout = std::io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
-    Ok(Terminal::new(CrosstermBackend::new(stdout))?)
+/// Owns the raw/alternate-screen state and restores it on drop.
+///
+/// Leaving raw mode on would make the user's shell unusable, so the terminal
+/// must be put back whatever happens: a normal exit, an error propagated with
+/// `?`, or a panic unwinding through the review loop.
+struct TerminalGuard {
+    terminal: Screen,
 }
 
-/// Puts the terminal back, whatever happened.
-///
-/// Leaving raw mode on would make the user's shell unusable, so this runs
-/// even when the review loop failed.
-fn stop(terminal: &mut Screen) -> Result<()> {
-    disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-    terminal.show_cursor()?;
-    Ok(())
+impl TerminalGuard {
+    fn new() -> Result<Self> {
+        enable_raw_mode()?;
+        let mut stdout = std::io::stdout();
+        execute!(stdout, EnterAlternateScreen)?;
+        Ok(Self {
+            terminal: Terminal::new(CrosstermBackend::new(stdout))?,
+        })
+    }
+
+    fn terminal(&mut self) -> &mut Screen {
+        &mut self.terminal
+    }
+}
+
+impl Drop for TerminalGuard {
+    fn drop(&mut self) {
+        let _ = disable_raw_mode();
+        let _ = execute!(self.terminal.backend_mut(), LeaveAlternateScreen);
+        let _ = self.terminal.show_cursor();
+    }
 }
 
 fn review_one(terminal: &mut Screen, document: &mut Document) -> Result<Outcome> {
@@ -241,7 +274,12 @@ mod tests {
     use ratatui::backend::TestBackend;
 
     fn document(text: &str) -> Document {
-        let decisions = crate::pipeline::detect(text, &Config::default())
+        // Rules-only, so the drawn detections do not depend on whether the
+        // recognition model happens to be installed.
+        let mut config = Config::default();
+        config.ner_enabled = false;
+        let detector = Detector::new(&config).expect("detector");
+        let decisions = crate::pipeline::detect(text, &detector)
             .expect("detecting")
             .into_iter()
             .map(|span| Decision {

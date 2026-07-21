@@ -54,9 +54,10 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all --check
 
-      # Every feature combination compiles different code, so releasing on the
-      # default build alone would ship an untested one.
-      - name: Lint every feature combination
+      # The released artefacts are the default and ner builds, so both are
+      # linted here. The ocr build needs the Tesseract system libraries and is
+      # covered by the Check workflow rather than installed again for a release.
+      - name: Lint the released builds
         run: |
           set -euo pipefail
           cargo clippy --all-targets -- -D warnings
@@ -255,7 +256,8 @@ jobs:
         if: ${{ endsWith(matrix.target, '-musl') }}
         run: |
           set -euo pipefail
-          docker run --rm -v "${PWD}":/src -w /src rust:1-alpine sh -c '
+          docker run --rm -v "${PWD}":/src -w /src \
+            rust:1-alpine@sha256:3c38f3f82c2f3d73da3b38e18d279393a04cb43ddded0e35088a8c3324d40900 sh -c '
             set -e
             apk add --no-cache musl-dev
             cargo build --release --locked

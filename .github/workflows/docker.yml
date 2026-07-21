@@ -145,27 +145,30 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Resolve the tags
-        id: tags
-        shell: bash
-        run: |
-          set -euo pipefail
-          tags="--tag ${IMAGE}:${GITHUB_SHA}"
-          if [ "${GITHUB_EVENT_NAME}" = "release" ]; then
-            version="${GITHUB_REF_NAME}"
-            tags="${tags} --tag ${IMAGE}:${version} --tag ${IMAGE}:latest"
-          else
-            tags="${tags} --tag ${IMAGE}:main"
-          fi
-          echo "tags=${tags}" >> "${GITHUB_OUTPUT}"
-
       - name: Create and push the manifest
         working-directory: ${{ runner.temp }}/digests
         shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
+          # The tag list is built here from environment variables rather than
+          # interpolated into the script, and a release ref is validated, so a
+          # ref name carrying shell metacharacters cannot run as code.
+          tags=(--tag "${IMAGE}:${SHA}")
+          if [ "${EVENT_NAME}" = "release" ]; then
+            if ! printf '%s' "${REF_NAME}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+              echo "::error::unexpected release tag: ${REF_NAME}"
+              exit 1
+            fi
+            tags+=(--tag "${IMAGE}:${REF_NAME}" --tag "${IMAGE}:latest")
+          else
+            tags+=(--tag "${IMAGE}:main")
+          fi
           # shellcheck disable=SC2046
-          docker buildx imagetools create ${{ steps.tags.outputs.tags }} \
+          docker buildx imagetools create "${tags[@]}" \
             $(printf "${IMAGE}@sha256:%s " *)
 
       - name: Summary

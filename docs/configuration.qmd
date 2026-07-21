@@ -3,6 +3,7 @@ title: "Configuration"
 ---
 
 `oboro` reads the nearest `oboro.toml`, searching upwards from the working directory.
+The name is matched exactly, in lower case, so a case-insensitive filesystem does not disagree with a case-sensitive one.
 Without one it uses the defaults below.
 Every section is optional.
 
