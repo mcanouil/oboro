@@ -9,19 +9,24 @@ website:
   repo-url: "https://github.com/mcanouil/oboro"
   repo-actions: [issue, edit]
   navbar:
+    # Pinned to the night palette in both schemes: the navbar-scoped tokens in
+    # theme.scss are then identical in the light and dark compiles, so the
+    # widget menu and the toggle cannot invert or go invisible.
+    background: dark
+    foreground: light
     left:
       - href: index.qmd
-        text: Home
+        text: "{{< iconify octicon:home-16 title='Home' label='Home' >}} Home"
       - href: quickstart.qmd
-        text: Quickstart
+        text: "{{< iconify octicon:rocket-16 title='Quickstart' label='Quickstart' >}} Quickstart"
       - href: docker.qmd
-        text: Docker
+        text: "{{< iconify octicon:container-16 title='Docker' label='Docker' >}} Docker"
       - href: reference.qmd
-        text: Reference
+        text: "{{< iconify octicon:book-16 title='Reference' label='Reference' >}} Reference"
       - href: how-it-works.qmd
-        text: How it works
+        text: "{{< iconify octicon:gear-16 title='How it works' label='How it works' >}} How it works"
     right:
-      - text: "{{< iconify octicon:mark-github-16 >}}"
+      - text: "{{< iconify octicon:mark-github-16 title='GitHub' label='GitHub' >}}"
         href: "#github-widget"
         aria-label: GitHub repository
   sidebar:
@@ -53,14 +58,15 @@ website:
 
 format:
   html:
+    # brand drives the per-mode palette from _brand.yml, so the light and dark
+    # stylesheets compile with different $body-bg/$body-color; theme.scss reads
+    # those through body-mix(). The same list serves both modes, via an anchor.
     theme:
-      light: [cosmo, assets/theme.scss]
-      dark: [cosmo, assets/theme.scss]
-    # Pinned rather than left to the default, which is tuned for a white code
-    # background and loses contrast against a tinted one.
-    syntax-highlighting:
-      light: github-light
-      dark: github-dark
+      light: &theme [brand, assets/theme.scss]
+      dark: *theme
+    respect-user-color-scheme: true
+    # A single style Quarto compiles for both modes; no hand-pinned tokens.
+    highlight-style: github
     include-after-body:
       - file: assets/scripts/placeholders.html
       - file: assets/scripts/github-widget.html
