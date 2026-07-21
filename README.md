@@ -23,6 +23,17 @@ contract.txt ──► oboro clean ──► contract.clean.md ──► paste i
 The same value always becomes the same placeholder within a vault, so a
 model still sees that two documents mention the same client.
 
+## Install
+
+Download the prebuilt binary for macOS or Linux, verified against the release checksums:
+
+```bash
+curl -fsSL https://m.canouil.dev/oboro/install.sh | bash
+```
+
+The prebuilt binary is the default feature set.
+Optical character recognition (`ocr`) and name recognition (`ner`) need system libraries, so those stay a source build with `cargo build --release --features ...`.
+
 ## Usage
 
 ```bash
