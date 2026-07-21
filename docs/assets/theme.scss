@@ -362,6 +362,32 @@ $oboro-icon-moon: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg
   border: none;
 }
 
+// Code Window extension: its style.css uses the CSS system colour `Canvas`,
+// which follows the OS scheme rather than the [data-bs-theme] toggle. Re-skin
+// the container and title bar with body-mix() so the block follows the page
+// scheme. A leading `div` keeps these authoritative over the extension's
+// class-only rules regardless of load order.
+div.code-with-filename {
+  background-color: body-mix(95%);
+  border-color: body-mix(85%);
+}
+
+div.code-with-filename .code-with-filename-file {
+  background-color: body-mix(90%);
+  border-bottom-color: body-mix(85%);
+}
+
+div.code-with-filename .code-with-filename-file pre {
+  color: rgba($body-color, 0.6);
+}
+
+div.code-with-filename div.sourceCode,
+div.code-with-filename pre.sourceCode {
+  border: none;
+  border-radius: 0;
+  background-color: transparent;
+}
+
 code:not(.sourceCode):not(pre code) {
   color: var(--oboro-moon);
   background-color: var(--oboro-moon-soft);
