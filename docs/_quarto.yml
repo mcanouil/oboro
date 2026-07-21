@@ -43,8 +43,13 @@ website:
         contents:
           - development.qmd
   page-footer:
-    left: "MIT licensed."
-    right: "Nothing on this site is sent anywhere. Neither is anything oboro reads."
+    border: true
+    left: |
+      Powered by [{{< iconify simple-icons:quarto title="Quarto" label="Quarto" >}} Quarto](https://quarto.org).
+    center: |
+      &copy; []{#current-year} [Mickaël Canouil](https://mickael.canouil.fr). [{{< iconify octicon:heart-fill-16 title="Heart" label="Heart" >}} Sponsor](https://github.com/sponsors/mcanouil?o=esb).
+    right: |
+      Licence: [MIT](https://github.com/mcanouil/oboro?tab=MIT-1-ov-file#readme).
 
 format:
   html:
@@ -59,6 +64,7 @@ format:
     include-after-body:
       - file: assets/scripts/placeholders.html
       - file: assets/scripts/github-widget.html
+      - file: assets/scripts/current-year.html
     toc: true
     toc-depth: 3
     code-copy: true
