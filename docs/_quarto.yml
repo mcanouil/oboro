@@ -62,11 +62,14 @@ format:
     # stylesheets compile with different $body-bg/$body-color; theme.scss reads
     # those through body-mix(). The same list serves both modes, via an anchor.
     theme:
-      light: &theme [brand, assets/theme.scss]
+      light: &theme
+        - brand
+        - assets/theme.scss
       dark: *theme
     respect-user-color-scheme: true
-    # A single style Quarto compiles for both modes; no hand-pinned tokens.
-    highlight-style: github
+    syntax-highlighting:
+      light: github-light
+      dark: github-dark
     include-after-body:
       - file: assets/scripts/placeholders.html
       - file: assets/scripts/github-widget.html
@@ -76,3 +79,15 @@ format:
     code-copy: true
     code-overflow: wrap
     anchor-sections: true
+
+filters:
+  - at: pre-quarto
+    path: code-window
+
+extensions:
+  code-window:
+    style: "macos"
+    # Blocks here are either a command to run or the output it produced, and
+    # both are labelled explicitly, so a language-derived label would only add
+    # noise.
+    auto-filename: false
