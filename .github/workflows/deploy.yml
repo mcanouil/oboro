@@ -4,16 +4,10 @@
 
 name: Deploy Documentation
 
+# The site publishes only at a release (through the Release workflow's call
+# below) or on a manual dispatch, not on every push to main. Pull requests
+# still render it, so a broken page is caught before it lands.
 on:
-  push:
-    branches: [main]
-    paths:
-      - "docs/**"
-      - "README.md"
-      - "CHANGELOG.md"
-      - ".github/workflows/deploy.yml"
-  # Build on pull requests without deploying, so a broken page is caught before
-  # it lands rather than after it is already published.
   pull_request:
     paths:
       - "docs/**"
@@ -43,11 +37,6 @@ jobs:
   build:
     name: Render site
     runs-on: ubuntu-latest
-    # The Release workflow deploys the docs itself, so skip the bump commit
-    # rather than deploying the same content twice.
-    if: >-
-      ${{ github.event_name != 'push'
-        || !startsWith(github.event.head_commit.message, 'ci: bump version to') }}
 
     steps:
       - name: Checkout repository

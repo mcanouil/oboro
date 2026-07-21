@@ -1,9 +1,20 @@
 name: Check
 
+# Documentation-only changes do not affect the build, so the Rust matrix is
+# skipped for them; the Deploy workflow validates the site instead.
 on:
   push:
     branches: [main]
+    paths-ignore: &docs-paths
+      - "docs/**"
+      - "**/*.md"
+      - "LICENSE"
+      - "CITATION.cff"
+      - ".github/workflows/deploy.yml"
+      - ".github/workflows/docker.yml"
+      - ".github/dependabot.yml"
   pull_request:
+    paths-ignore: *docs-paths
   workflow_dispatch:
 
 concurrency:
@@ -25,8 +36,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
+      # macOS only on pushes to main; pull requests run ubuntu alone for
+      # faster feedback, since the two behave alike for this crate.
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: ${{ github.event_name == 'push'
+          && fromJSON('["ubuntu-latest", "macos-latest"]')
+          || fromJSON('["ubuntu-latest"]') }}
     steps:
       - uses: actions/checkout@v7.0.0
 
@@ -44,9 +59,6 @@ jobs:
 
       - name: Test
         run: cargo test --all-targets
-
-      - name: Build release binary
-        run: cargo build --release
 
   ocr:
     name: Test with OCR

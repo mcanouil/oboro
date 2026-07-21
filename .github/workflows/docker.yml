@@ -46,14 +46,13 @@ jobs:
 
     strategy:
       fail-fast: false
+      # Native runners rather than QEMU: emulating a Rust build costs more time
+      # than the whole rest of this workflow. Pull requests validate the
+      # Dockerfile on amd64 alone; pushes and releases build both architectures.
       matrix:
-        include:
-          # Native runners rather than QEMU: emulating a Rust build costs
-          # more time than the whole rest of this workflow.
-          - platform: linux/amd64
-            runner: ubuntu-latest
-          - platform: linux/arm64
-            runner: ubuntu-24.04-arm
+        include: ${{ github.event_name == 'pull_request'
+          && fromJSON('[{"platform":"linux/amd64","runner":"ubuntu-latest"}]')
+          || fromJSON('[{"platform":"linux/amd64","runner":"ubuntu-latest"},{"platform":"linux/arm64","runner":"ubuntu-24.04-arm"}]') }}
 
     permissions:
       contents: read
