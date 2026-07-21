@@ -1,0 +1,30 @@
+# The moonlit-mist palette, expressed as brand colours so Quarto compiles
+# genuinely different light and dark stylesheets. The single theme.scss then
+# derives its surfaces from these per-mode values through body-mix(), which is
+# what makes one stylesheet correct in both schemes.
+#
+# Palette names deliberately avoid a trailing -light or -dark: brand reads
+# those as its own colour-scheme keys, and names like `haze-dark` were being
+# mistaken for a scheme selector, which silently swapped the light and dark
+# backgrounds.
+#
+# Fonts are deliberately absent: they stay self-hosted through @font-face in
+# theme.scss, so the site fetches no typeface from a third party.
+
+color:
+  palette:
+    mist: "#f2f4f6"
+    ink: "#16202a"
+    nightfall: "#10161c"
+    moonglow: "#e8edf2"
+    slate: "#3e6076"
+    haze: "#7fa8c4"
+  background:
+    light: mist
+    dark: nightfall
+  foreground:
+    light: ink
+    dark: moonglow
+  primary:
+    light: slate
+    dark: haze
