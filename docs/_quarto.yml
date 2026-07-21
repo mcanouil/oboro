@@ -15,8 +15,8 @@ website:
     background: dark
     foreground: light
     left:
-      - href: index.qmd
-        text: "{{< iconify octicon:home-16 title='Home' label='Home' >}} Home"
+      # - href: index.qmd
+      #   text: "{{< iconify octicon:home-16 title='Home' label='Home' >}} Home"
       - href: quickstart.qmd
         text: "{{< iconify octicon:rocket-16 title='Quickstart' label='Quickstart' >}} Quickstart"
       - href: docker.qmd
