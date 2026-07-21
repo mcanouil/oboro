@@ -21,6 +21,7 @@ All notable changes to this project will be documented in this file.
 - feat: Add `review`, a terminal screen for accepting or rejecting each detection before anything is written (#7).
 - feat: Publish a Docker image, one static binary on `distroless/static` with no shell and no network capability, so the tool can be tried without a Rust toolchain (#10).
 - feat: Read the vault and key paths from `OBORO_VAULT` and `OBORO_KEY_FILE`, so a container can point them at a mounted volume without repeating the flags (#10).
+- feat: Add an install script that downloads the prebuilt binary and verifies it against the release checksums: `curl -fsSL https://m.canouil.dev/oboro/install.sh | bash`.
 
 ### Bug Fixes
 
