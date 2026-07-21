@@ -1,5 +1,17 @@
 ## Install
 
+### Quick install (script)
+
+```bash
+curl -fsSL https://m.canouil.dev/oboro/install.sh | bash
+
+# or pin this exact release
+curl -fsSL https://m.canouil.dev/oboro/install.sh | bash -s -- --version %%VERSION%%
+```
+
+The script picks the archive for your machine, verifies it against `SHA256SUMS`, and installs into `/usr/local/bin` when writable, otherwise `~/.local/bin`.
+It needs `bash` and `curl`; on a minimal distribution such as Alpine, install them first with `apk add bash curl`.
+
 ### Docker
 
 ```bash
