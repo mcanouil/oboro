@@ -21,9 +21,9 @@ website:
       - href: how-it-works.qmd
         text: How it works
     right:
-      - icon: github
-        href: https://github.com/mcanouil/oboro
-        aria-label: Source on GitHub
+      - text: "{{< iconify octicon:mark-github-16 >}}"
+        href: "#github-widget"
+        aria-label: GitHub repository
   sidebar:
     style: floating
     contents:
@@ -49,14 +49,16 @@ website:
 format:
   html:
     theme:
-      light: [cosmo, assets/theme-light.scss]
-      dark: [cosmo, assets/theme-dark.scss]
+      light: [cosmo, assets/theme.scss]
+      dark: [cosmo, assets/theme.scss]
     # Pinned rather than left to the default, which is tuned for a white code
     # background and loses contrast against a tinted one.
     syntax-highlighting:
       light: github-light
       dark: github-dark
-    include-after-body: assets/placeholders.js
+    include-after-body:
+      - file: assets/scripts/placeholders.html
+      - file: assets/scripts/github-widget.html
     toc: true
     toc-depth: 3
     code-copy: true
