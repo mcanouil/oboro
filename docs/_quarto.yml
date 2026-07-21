@@ -1,6 +1,6 @@
 project:
   type: website
-  output-dir: ../_site
+  output-dir: _site
   resources:
     # Published verbatim so `curl -fsSL .../install.sh | bash` works.
     - install.sh

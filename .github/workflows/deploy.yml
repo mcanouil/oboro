@@ -68,7 +68,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: site
-          path: _site
+          path: docs/_site
           retention-days: 1
 
   deploy:
