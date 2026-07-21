@@ -200,9 +200,13 @@ h2 {
   gap: 0.4rem;
 }
 
+// Search and the tools group each carry the same left margin, so the whole
+// navbar-right set is evenly spaced. Without it on search, the button sat
+// tight against the nav items while the tools kept their gap.
 .navbar #quarto-search {
   display: inline-flex;
   align-items: center;
+  margin-left: 0.4rem;
 }
 
 .navbar .quarto-navbar-tools {
