@@ -12,6 +12,7 @@ curl -fsSL https://m.canouil.dev/oboro/install.sh | bash
 
 It installs into `/usr/local/bin` when writable, otherwise `~/.local/bin`.
 Pin a version with `--version`, choose a directory with `--dir`, and pass `--help` for the rest.
+The script needs `bash` and `curl`; on a minimal distribution such as Alpine, install them first with `apk add bash curl`.
 
 The prebuilt binary is the default feature set: it reads txt, md, docx, xlsx and pdf, and touches no network.
 The two capabilities below need system libraries, so they stay a source build.

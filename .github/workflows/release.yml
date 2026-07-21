@@ -54,9 +54,10 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all --check
 
-      # Every feature combination compiles different code, so releasing on the
-      # default build alone would ship an untested one.
-      - name: Lint every feature combination
+      # The released artefacts are the default and ner builds, so both are
+      # linted here. The ocr build needs the Tesseract system libraries and is
+      # covered by the Check workflow rather than installed again for a release.
+      - name: Lint the released builds
         run: |
           set -euo pipefail
           cargo clippy --all-targets -- -D warnings

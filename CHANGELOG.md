@@ -23,8 +23,18 @@ All notable changes to this project will be documented in this file.
 - feat: Read the vault and key paths from `OBORO_VAULT` and `OBORO_KEY_FILE`, so a container can point them at a mounted volume without repeating the flags (#10).
 - feat: Add an install script that downloads the prebuilt binary and verifies it against the release checksums: `curl -fsSL https://m.canouil.dev/oboro/install.sh | bash`.
 
+### Refactoring
+
+- refactor: Load the recognition model once per run rather than once per file, so cleaning many files at once no longer reloads it each time.
+
 ### Bug Fixes
 
+- fix: Restore custom placeholders whose tag begins with a digit, such as a pattern named `2fa code`, instead of leaving them in the output.
+- fix: Write `restore` output through a temporary file and rename, so a crash partway through cannot lose the answer it rewrites in place.
+- fix: Report a missing value in `map list --reveal` as possible corruption rather than printing a blank column, and stop cleanly when the reader closes the pipe.
+- fix: Keep a carriage return out of detected street addresses in documents saved with Windows line endings.
+- fix: Bind the placeholder sequence into the vault encryption, so a row swapped with another under the same tag is detected rather than silently returning the wrong value.
+- fix: Cap the recognition model download at its pinned size, and make the vault write-ahead-log sidecars owner-only.
 - fix: Create the vault key file with owner-only permissions from the outset, rather than restricting them after writing.
 - fix: Read Word headers, footers, footnotes and comments, not only the document body, so a letterhead is no longer silently dropped (#5).
 - fix: Stop refusing short but genuine PDFs; only a page yielding essentially nothing is treated as scanned (#5).
