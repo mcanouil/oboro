@@ -6,39 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 
-- feat: Store the mapping in a local vault encrypted with AES-256-GCM, indexed by keyed hash so the database alone reveals nothing (#2).
-- feat: Add `clean` to replace sensitive values in `.txt` and `.md` files with stable placeholders (#2).
-- feat: Add `restore` to put real values back into a model's answer (#2).
-- feat: Add `map list` and `map purge` to inspect and wipe the placeholder mapping (#2).
-- feat: Add `doctor` to report the vault, configuration and supported formats (#2).
-- feat: Detect emails, phone numbers, IBANs, payment cards, SIREN, SIRET, IP addresses and French addresses, each confirmed by a checksum or parser where one exists (#2).
-- feat: Support `oboro.toml` for an allowlist, a denylist and custom identifier patterns (#2).
-- feat: Read `.docx`, `.xlsx` and text-based `.pdf` documents, not just `.txt` and `.md`.
-- feat: Read images through Tesseract when built with `--features ocr`, which `doctor` reports on.
-- feat: Refuse a PDF that yields almost no text for its page count, rather than producing output that looks sanitised but was never read.
-- feat: Find names, organisations and addresses with a local recognition model, built with `--features ner`, so they no longer have to be listed by hand (#6).
-- feat: Add `models pull` and `models status` to fetch and inspect that model, verifying downloads against pinned hashes (#6).
-- feat: Add `review`, a terminal screen for accepting or rejecting each detection before anything is written (#7).
-- feat: Publish a Docker image, one static binary on `distroless/static` with no shell and no network capability, so the tool can be tried without a Rust toolchain (#10).
-- feat: Read the vault and key paths from `OBORO_VAULT` and `OBORO_KEY_FILE`, so a container can point them at a mounted volume without repeating the flags (#10).
-- feat: Add an install script that downloads the prebuilt binary and verifies it against the release checksums: `curl -fsSL https://m.canouil.dev/oboro/install.sh | bash`.
-
-### Refactoring
-
-- refactor: Load the recognition model once per run rather than once per file, so cleaning many files at once no longer reloads it each time.
-
-### Bug Fixes
-
-- fix: Restore custom placeholders whose tag begins with a digit, such as a pattern named `2fa code`, instead of leaving them in the output.
-- fix: Write `restore` output through a temporary file and rename, so a crash partway through cannot lose the answer it rewrites in place.
-- fix: Report a missing value in `map list --reveal` as possible corruption rather than printing a blank column, and stop cleanly when the reader closes the pipe.
-- fix: Keep a carriage return out of detected street addresses in documents saved with Windows line endings.
-- fix: Bind the placeholder sequence into the vault encryption, so a row swapped with another under the same tag is detected rather than silently returning the wrong value.
-- fix: Cap the recognition model download at its pinned size, and make the vault write-ahead-log sidecars owner-only.
-- fix: Create the vault key file with owner-only permissions from the outset, rather than restricting them after writing.
-- fix: Read Word headers, footers, footnotes and comments, not only the document body, so a letterhead is no longer silently dropped (#5).
-- fix: Stop refusing short but genuine PDFs; only a page yielding essentially nothing is treated as scanned (#5).
-- fix: Fold accented case in the allowlist, so an entry such as `Société Générale` matches `SOCIÉTÉ GÉNÉRALE` instead of being silently ignored.
-- fix: Build the devcontainer against a pinned current toolchain, so the project compiles inside it.
-- fix: Open a vault in a directory the tool did not create, instead of failing when it cannot change that directory's permissions. This made the vault unusable on a mounted volume.
-- fix: Report `network: never contacted` in `doctor` for builds without the recognition model, which have no command that can open a socket.
+- Replace sensitive values in a document with stable placeholders, so the same value always becomes the same placeholder within a vault.
+- Keep the mapping in a local vault encrypted with AES-256-GCM and indexed by a keyed hash, so the database alone reveals neither the values nor whether a guessed value is present.
+- Bind each placeholder's sequence into the encryption, and create the vault, key and write-ahead-log sidecars owner-only, so a swapped row is detected and the files stay readable only by you.
+- Clean a document to placeholders with `clean`, and put the real values back into a model's answer with `restore`, both reading and writing standard input and output.
+- Step through every detection with `review`, a terminal screen for accepting or rejecting each one before anything is written.
+- Inspect and wipe the mapping with `map list` and `map purge`, and report the vault, configuration, supported formats and network use with `doctor`.
+- Detect emails, phone numbers, IBANs, payment cards, SIREN, SIRET, IP addresses and French addresses, each confirmed by a checksum or parser rather than a pattern alone.
+- Find names, organisations and addresses with a local multilingual recognition model, built with `--features ner` and fetched by `models pull`, which verifies downloads against pinned hashes.
+- Configure an allowlist, a denylist and custom identifier patterns through `oboro.toml`, with accented case folded so an entry such as `Société Générale` matches `SOCIÉTÉ GÉNÉRALE`.
+- Read `.txt`, `.md`, `.docx` including its headers, footers, footnotes and comments, `.xlsx`, and text-based `.pdf`, plus images through Tesseract when built with `--features ocr`.
+- Refuse a PDF whose pages yield almost no text, rather than producing output that looks sanitised but was never read.
+- Publish a Docker image, a single static binary on `distroless/static` with no shell and no network capability, and read the vault and key paths from `OBORO_VAULT` and `OBORO_KEY_FILE` so a container can point them at a mounted volume.
+- Install with a script that downloads the prebuilt binary and verifies it against the release checksums, or with prebuilt binaries that carry build provenance you can check with `gh attestation verify`.
