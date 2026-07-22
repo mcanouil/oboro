@@ -113,23 +113,12 @@ impl Document {
     /// Returns an error if the vault fails or the file cannot be written.
     pub fn write(
         &self,
-        detector: &Detector,
         vault: &mut Vault,
         output_dir: Option<&Path>,
-        redact_filenames: bool,
+        stem_override: Option<&str>,
     ) -> Result<PathBuf> {
         let report = self.apply(vault)?;
-        let stem = if redact_filenames {
-            Some(redacted_stem(&self.path, detector, vault)?)
-        } else {
-            None
-        };
-        let destination = output_path(
-            &self.path,
-            output_dir,
-            self.root.as_deref(),
-            stem.as_deref(),
-        )?;
+        let destination = output_path(&self.path, output_dir, self.root.as_deref(), stem_override)?;
         if let Some(parent) = destination.parent() {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("creating output directory {}", parent.display()))?;
@@ -163,10 +152,7 @@ pub fn output_path(
 ) -> Result<PathBuf> {
     let stem = match stem_override {
         Some(stem) => stem,
-        None => input
-            .file_stem()
-            .and_then(|name| name.to_str())
-            .with_context(|| format!("{} has no usable file name", input.display()))?,
+        None => file_stem_str(input)?,
     };
     let name = format!("{stem}.clean.md");
     Ok(match (output_dir, root) {
@@ -191,11 +177,15 @@ pub fn output_path(
 /// Returns an error if the input has no usable file name, or detection or the
 /// vault fails.
 pub fn redacted_stem(input: &Path, detector: &Detector, vault: &mut Vault) -> Result<String> {
-    let stem = input
+    crate::pipeline::clean_stem(file_stem_str(input)?, detector, vault)
+}
+
+/// Extracts `input`'s file stem as UTF-8, the part reused for the output name.
+fn file_stem_str(input: &Path) -> Result<&str> {
+    input
         .file_stem()
         .and_then(|name| name.to_str())
-        .with_context(|| format!("{} has no usable file name", input.display()))?;
-    crate::pipeline::clean_stem(stem, detector, vault)
+        .with_context(|| format!("{} has no usable file name", input.display()))
 }
 
 #[cfg(test)]

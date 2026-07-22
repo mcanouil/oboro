@@ -80,12 +80,14 @@ pub fn run(
         let mut guard = TerminalGuard::new().context("preparing the terminal")?;
         for document in &mut documents {
             match review_one(guard.terminal(), document)? {
-                Outcome::Write => written.push(document.write(
-                    &detector,
-                    vault,
-                    output_dir,
-                    config.redact_filenames,
-                )?),
+                Outcome::Write => {
+                    let stem = if config.redact_filenames {
+                        Some(super::redacted_stem(&document.path, &detector, vault)?)
+                    } else {
+                        None
+                    };
+                    written.push(document.write(vault, output_dir, stem.as_deref())?);
+                }
                 Outcome::Skip => skipped.push(document.path.clone()),
                 Outcome::Quit => {
                     quit = true;
