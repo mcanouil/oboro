@@ -79,6 +79,9 @@ detect_target() {
 	aarch64 | arm64) arch="aarch64" ;;
 	*) error "Unsupported architecture: $(uname -m)." ;;
 	esac
+	if [ "${os}" = "apple-darwin" ] && [ "${arch}" = "x86_64" ]; then
+		error "oboro no longer ships an Intel macOS binary. Build from source with 'cargo install'."
+	fi
 	echo "${arch}-${os}"
 }
 

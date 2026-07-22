@@ -97,7 +97,6 @@ It would be inconsistent to ask you to trust its own binaries on sight.
 | `x86_64-unknown-linux-musl` | Linux on Intel or AMD. Statically linked, so any distribution, glibc version or Alpine. |
 | `aarch64-unknown-linux-musl` | Linux on ARM, including most cloud instances. Statically linked. |
 | `aarch64-apple-darwin` | macOS on Apple silicon. |
-| `x86_64-apple-darwin` | macOS on Intel. |
 
 There is no Windows build.
 The code that creates the vault key readable only by you is Unix-specific, and shipping a build where that quietly does nothing would misrepresent what the tool guarantees.
