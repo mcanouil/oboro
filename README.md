@@ -54,7 +54,7 @@ cargo build --release                        # default build
 cargo build --release --features "ner,ocr"   # names and image OCR
 ```
 
-**Devcontainer** — for building or contributing with only Docker on the host; it carries the pinned toolchain, Tesseract and the OCR libraries. Reopen the folder in the container in Visual Studio Code or a GitHub Codespace; see [Development](#development).
+**Devcontainer** — for building or contributing with only Docker on the host; it carries the pinned toolchain, Tesseract and the OCR libraries. Reopen the folder in the container in Visual Studio Code or a GitHub Codespace; see [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 The prebuilt binary and the Docker image are the default feature set. Optical character recognition (`ocr`) and name recognition (`ner`) need system libraries, so those stay a source build.
 
@@ -221,34 +221,17 @@ Read them before trusting the output with anything that matters.
 - **Read the sanitised output before you share it.** No tool of this kind
   catches everything.
 
-## Development
+## Contributing
 
-Build in the devcontainer. It carries the pinned Rust toolchain, Tesseract
-and the OCR libraries the converter phases need, so the only thing your
-machine needs is Docker.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for bug reporting, development setup, and commit conventions.
 
-In Visual Studio Code, reopen the folder in the container when prompted.
-Otherwise use the image directly:
+## Citation
 
-```bash
-docker build -f .devcontainer/Dockerfile -t oboro-dev .devcontainer
-docker run --rm -it -v "$PWD":/work -w /work -u vscode oboro-dev bash
-```
+If you use _oboro_ in your work, please cite it.
+Citation metadata is provided in [`CITATION.cff`](CITATION.cff).
+GitHub renders it via the "Cite this repository" widget on the repository sidebar.
 
-Then, inside the container:
+## License
 
-```bash
-cargo test
-cargo clippy --all-targets -- -D warnings
-cargo fmt --all --check
-```
-
-The toolchain is pinned by `rust-toolchain.toml`, so the container, CI and a
-host build all use the same compiler.
-
-The test that matters most is `tests/leak.rs`: it plants known values in a
-fixture and fails if any of them survives `clean`.
-
-## Licence
-
-MIT
+This project is licensed under the MIT License.
+See the [LICENSE](LICENSE) file for details.
