@@ -11,9 +11,11 @@ body:
 
   - type: checkboxes
     attributes:
-      label: "I Have checked the following"
+      label: "I have checked the following"
       options:
         - label: I have searched the issue tracker for similar issues
+          required: true
+        - label: I am not pasting any real sensitive value; I reproduced this with invented data
           required: true
 
   - type: textarea
@@ -21,31 +23,44 @@ body:
       label: Bug description
       description: Description of the bug.
       placeholder: Please describe the bug here.
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: Command and input
+      description: |
+        The command you ran and the input format (`.txt`, `.md`, `.docx`, `.xlsx`, `.pdf`, an image, standard input).
+      placeholder: |
+        oboro clean contract.docx
+        Input: .docx exported from LibreOffice Writer
+    validations:
+      required: true
 
   - type: textarea
     attributes:
       label: Steps to reproduce
-      description: |
-        Tell us how to reproduce this bug.
+      description: Tell us how to reproduce this bug, using invented data.
 
   - type: textarea
     attributes:
-      label: Actual behavior
+      label: Actual behaviour
       description: Tell us what happens instead.
 
   - type: textarea
     attributes:
-      label: Expected behavior
+      label: Expected behaviour
       description: Tell us what should happen.
 
   - type: textarea
     attributes:
       label: Your environment
       description: |
-        Please document the IDE (_e.g._ RStudio, Positron, VSCode, NVim), its version, and the operating system you're running (_e.g., MacOS Ventura 13.4, Windows 11, Linux Debian 11, _etc._).
+        Paste the output of `oboro doctor` (it reports the version and which features are compiled in), and tell us your operating system.
       placeholder: |
-        - IDE: RStudio 2023.03.1+446 | VSCode | Positron
-        - OS: MacOS Ventura 13.4 | Windows | Ubuntu
+        oboro doctor
+        OS: macOS 15 | Windows 11 | Ubuntu 24.04
+      render: text
 
   - type: markdown
     attributes:
