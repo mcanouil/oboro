@@ -25,14 +25,38 @@ model still sees that two documents mention the same client.
 
 ## Install
 
-Download the prebuilt binary for macOS or Linux, verified against the release checksums:
+Several ways in, quickest first; the [Quickstart](https://m.canouil.dev/oboro/quickstart.html) has the detail.
+
+**Install script** — the prebuilt binary for macOS or Linux, verified against the release checksums:
 
 ```bash
 curl -fsSL https://m.canouil.dev/oboro/install.sh | bash
 ```
 
-The prebuilt binary is the default feature set.
-Optical character recognition (`ocr`) and name recognition (`ner`) need system libraries, so those stay a source build with `cargo build --release --features ...`.
+**Docker** — no toolchain, one static binary; the vault volume holds the mapping, so it is not optional:
+
+```bash
+docker volume create oboro-vault
+docker run --rm -v oboro-vault:/vault -v "$PWD":/work -w /work \
+  --user "$(id -u):$(id -g)" ghcr.io/mcanouil/oboro:latest clean contract.docx
+```
+
+**Prebuilt binary, by hand** — download the archive for your machine and `SHA256SUMS` from the [releases page](https://github.com/mcanouil/oboro/releases), verify, and put `oboro` on your `PATH`.
+
+**With Rust** — `cargo install --git https://github.com/mcanouil/oboro`.
+
+**From source** — required for the optional features, which the prebuilt binary and the image do not carry:
+
+```bash
+git clone https://github.com/mcanouil/oboro.git
+cd oboro
+cargo build --release                        # default build
+cargo build --release --features "ner,ocr"   # names and image OCR
+```
+
+**Devcontainer** — for building or contributing with only Docker on the host; it carries the pinned toolchain, Tesseract and the OCR libraries. Reopen the folder in the container in Visual Studio Code or a GitHub Codespace; see [Development](#development).
+
+The prebuilt binary and the Docker image are the default feature set. Optical character recognition (`ocr`) and name recognition (`ner`) need system libraries, so those stay a source build.
 
 ## Usage
 

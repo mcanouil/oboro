@@ -4,7 +4,11 @@ title: "Quickstart"
 
 ## Install
 
-The quickest path downloads the prebuilt binary for macOS or Linux and verifies it against the release checksums:
+Pick whichever fits; the install script is the quickest.
+
+### Install script
+
+Downloads the prebuilt binary for macOS or Linux and verifies it against the release checksums:
 
 ```bash
 curl -fsSL https://m.canouil.dev/oboro/install.sh | bash
@@ -14,10 +18,46 @@ It installs into `/usr/local/bin` when writable, otherwise `~/.local/bin`.
 Pin a version with `--version`, choose a directory with `--dir`, and pass `--help` for the rest.
 The script needs `bash` and `curl`; on a minimal distribution such as Alpine, install them first with `apk add bash curl`.
 
-The prebuilt binary is the default feature set: it reads txt, md, docx, xlsx and pdf, and touches no network.
-The two capabilities below need system libraries, so they stay a source build.
+### Docker
 
-Prefer to build from source in every case:
+No toolchain needed; the image is one static binary on `distroless`.
+The vault volume is not optional, because the placeholder mapping lives in it:
+
+```bash
+docker volume create oboro-vault
+docker run --rm \
+  -v oboro-vault:/vault \
+  -v "$PWD":/work -w /work \
+  --user "$(id -u):$(id -g)" \
+  ghcr.io/mcanouil/oboro:latest clean contract.docx
+```
+
+The [Docker](docker.qmd) page covers `restore` and the volume in full.
+
+### Prebuilt binary, by hand
+
+Download the archive for your machine and `SHA256SUMS` from the [releases page](https://github.com/mcanouil/oboro/releases), then verify and install it:
+
+```bash
+VERSION=0.1.0
+TARGET=x86_64-unknown-linux-musl   # or the row that matches your machine
+
+curl -fsSLO "https://github.com/mcanouil/oboro/releases/download/${VERSION}/oboro-${VERSION}-${TARGET}.tar.gz"
+curl -fsSLO "https://github.com/mcanouil/oboro/releases/download/${VERSION}/SHA256SUMS"
+sha256sum --ignore-missing --check SHA256SUMS   # shasum -a 256 on macOS
+tar -xzf "oboro-${VERSION}-${TARGET}.tar.gz"
+install -m 0755 oboro /usr/local/bin/oboro
+```
+
+### With Rust already installed
+
+```bash
+cargo install --git https://github.com/mcanouil/oboro
+```
+
+### From source
+
+Required for the optional features, which the prebuilt binary and the image do not carry:
 
 ```bash
 git clone https://github.com/mcanouil/oboro.git
@@ -65,6 +105,12 @@ cargo build --release --features "ner,ocr"
 ```
 
 :::
+
+### In a devcontainer
+
+For building or contributing with nothing on the host but Docker.
+The container carries the pinned Rust toolchain, Tesseract and the OCR libraries, so every feature builds without setting up a host toolchain.
+In Visual Studio Code or a GitHub Codespace, reopen the folder in the container when prompted; [Development](development.qmd) has the manual `docker` invocation.
 
 Check what your build can do:
 
