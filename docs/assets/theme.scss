@@ -324,6 +324,12 @@ $oboro-icon-moon: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg
   --bs-nav-tabs-link-active-border-color: transparent;
 }
 
+// Quarto hard-codes #dee2e6 on the panel's left/right/bottom edges, which does
+// not adapt to dark; re-derive them from body-mix() so all four edges match.
+[data-bs-theme] .panel-tabset > .tab-content {
+  border-color: body-mix(85%);
+}
+
 .panel-tabset .nav-tabs .nav-link {
   color: var(--bs-secondary-color);
   transition: color 0.15s ease-in-out;
@@ -557,8 +563,6 @@ div.callout-important {
 // ===========================================================================
 // A left-aligned wrapping row rather than a full-width vertical stack, so each
 // link hugs its content and the underline anchors to the link, not the bar.
-// gribouille only neutralises the scroll clip and so still stacks vertically;
-// this follows quarto-wizard.
 
 @media (max-width: 991.98px) {
   .navbar .navbar-collapse .navbar-nav {
@@ -600,6 +604,114 @@ div.callout-important {
     left: 0;
     right: auto;
   }
+}
+
+// ===========================================================================
+// TOOLTIPS (navbar controls — dark surface in both schemes)
+// ===========================================================================
+
+// Quarto leaves Bootstrap's default translucent grey tooltip regardless of
+// scheme; pin it to the navbar tokens so it matches the dark-pinned navbar.
+.tooltip {
+  --bs-tooltip-bg: var(--oboro-navbar-bg);
+  --bs-tooltip-color: var(--oboro-navbar-fg);
+  --bs-tooltip-opacity: 1;
+  --bs-tooltip-border-radius: #{$border-radius-sm};
+}
+
+.tooltip .tooltip-inner {
+  border: 1px solid var(--oboro-navbar-accent);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.35);
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+// Tippy theme used by navbar-tooltips.html for the navbar controls. Quarto
+// ships no styling for these tooltips, so the navbar tokens drive a dark chip
+// that matches the dark-pinned navbar in both schemes.
+.tippy-box[data-theme~="ob"] {
+  background-color: var(--oboro-navbar-bg);
+  color: var(--oboro-navbar-fg);
+  border: 1px solid var(--oboro-navbar-accent);
+  border-radius: $border-radius-sm;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.35);
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.tippy-box[data-theme~="ob"] .tippy-content {
+  padding: 0.2rem 0.55rem;
+}
+
+// ===========================================================================
+// ACCESSIBILITY HELPERS
+// ===========================================================================
+
+// Quarto leaves interactive controls with only the browser default focus ring,
+// which is invisible on some surfaces; give every control a visible outline.
+a:focus-visible,
+button:focus-visible,
+.btn:focus-visible,
+.nav-link:focus-visible {
+  outline: 2px solid $primary;
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+// Quarto/Bootstrap ships the skip link visually-hidden-focusable but unstyled,
+// so it is near-invisible when focused; give it a visible chip on focus.
+.skip-link:focus {
+  position: fixed;
+  top: 0.5rem;
+  left: 0.5rem;
+  z-index: 2000;
+  padding: 0.5rem 0.9rem;
+  border-radius: $border-radius-sm;
+  background-color: var(--oboro-navbar-accent);
+  color: var(--oboro-navbar-bg);
+  font-weight: 600;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.35);
+}
+
+// Quarto renders dates as plain text, so the ordinal-dates script wraps the
+// suffix in <sup class="ordinal-suffix">; style it as a small superscript.
+.ordinal-suffix {
+  font-size: 0.55em;
+  font-style: italic;
+  vertical-align: super;
+}
+
+// ===========================================================================
+// SCROLLBARS
+// ===========================================================================
+// Quarto leaves the browser default scrollbar, a light-grey bar that clashes
+// with the dark navbar and the tinted code surfaces; derive it from the page so
+// it tracks the active scheme, with $primary on hover. The global rules cover
+// the code blocks, tables, and TOC that scroll, so no default bar reappears.
+$scrollbar-track: body-mix(94%);
+$scrollbar-thumb: body-mix(72%);
+
+:root {
+  scrollbar-width: thin;
+  scrollbar-color: #{$scrollbar-thumb} #{$scrollbar-track};
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: $scrollbar-track;
+}
+
+::-webkit-scrollbar-thumb {
+  background: $scrollbar-thumb;
+  border-radius: $border-radius-sm;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: $primary;
 }
 
 // ===========================================================================

@@ -5,18 +5,32 @@ project:
     # Published verbatim so `curl -fsSL .../install.sh | bash` works.
     - install.sh
 
+lang: en-GB
+date-format: "dddd[, the] Do [of] MMMM, YYYY"
+
 website:
-  title: "oboro"
+  title: "Oboro"
   description: "An anonymisation layer between your files and a language model."
   site-url: "https://m.canouil.dev/oboro/"
   repo-url: "https://github.com/mcanouil/oboro"
-  repo-actions: [issue, edit]
+  repo-actions: [edit, issue]
+  repo-link-target: _blank
+  repo-link-rel: noopener noreferrer
+  open-graph: true
+  page-navigation: true
+  back-to-top-navigation: true
+  llms-txt: true
+  search:
+    location: navbar
+    type: overlay
   navbar:
+    title: "Oboro"
     # Pinned to the night palette in both schemes: the navbar-scoped tokens in
     # theme.scss are then identical in the light and dark compiles, so the
     # widget menu and the toggle cannot invert or go invisible.
     background: dark
     foreground: light
+    search: true
     left:
       # - href: index.qmd
       #   text: "{{< iconify octicon:home-16 title='Home' label='Home' >}} Home"
@@ -56,6 +70,8 @@ website:
       - changelog.qmd
   page-footer:
     border: true
+    background: dark
+    foreground: light
     left: |
       Powered by [{{< iconify simple-icons:quarto title="Quarto" label="Quarto" >}} Quarto](https://quarto.org).
     center: |
@@ -79,15 +95,22 @@ format:
     syntax-highlighting:
       light: github-light
       dark: github-dark
+    include-before-body:
+      - file: assets/scripts/skip-link.html
     include-after-body:
       - file: assets/scripts/placeholders.html
-      - file: assets/scripts/github-widget.html
       - file: assets/scripts/current-year.html
+      - file: assets/scripts/external-links.html
+      - file: assets/scripts/ordinal-dates.html
+      - file: assets/scripts/a11y-fixes.html
+      - file: assets/scripts/navbar-tooltips.html
+      - file: assets/scripts/github-widget.html
     toc: true
     toc-depth: 3
     code-copy: true
     code-overflow: wrap
     anchor-sections: true
+    link-external-newwindow: true
 
 filters:
   - at: pre-quarto
