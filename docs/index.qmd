@@ -71,7 +71,10 @@ Structured values are matched by rules and confirmed by a real check, not just a
 | Your own formats | Regular expressions you supply. |
 
 Names, companies and addresses have no structure to match on.
-Those are found by a recognition model that runs on your machine, described in [How it works](how-it-works.qmd).
+Those are found by a multilingual recognition model that runs on your machine, described in [How it works](how-it-works.qmd).
+
+Detection does not depend on the document's language, and a file that mixes languages is handled in one pass.
+Street addresses are matched with French patterns only, and phone numbers are read against one region, `FR` by default; see [Limitations](limitations.qmd#languages).
 
 ::: {.callout-warning}
 

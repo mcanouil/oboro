@@ -82,7 +82,8 @@ cargo build --release --features ocr
 
 ### What gets detected
 
-This build recognises, in French and English documents:
+Detection does not depend on the document's language, and a file that mixes languages is handled in one pass.
+This build recognises:
 
 | Kind | How it is verified |
 | --- | --- |
@@ -96,8 +97,13 @@ This build recognises, in French and English documents:
 | French street addresses and postcodes | Pattern |
 | Anything you list yourself | Your regular expressions and terms |
 
-Personal and company names are found by a local recognition model, built
-with `--features ner`:
+Two of these are single-locale rather than language-neutral: street addresses
+are matched with French patterns only, and phone numbers are read against one
+`default_region` (`FR` by default), so a national-format number from another
+country may be missed while an international `+` number is always caught.
+
+Personal and company names are found by a local, multilingual recognition
+model, built with `--features ner`:
 
 ```bash
 cargo build --release --features ner
