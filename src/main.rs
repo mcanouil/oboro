@@ -228,7 +228,8 @@ fn prepare(
 fn ensure_distinct_outputs(inputs: &[oboro::walk::Input], output: Option<&Path>) -> Result<()> {
     let mut seen = std::collections::HashSet::new();
     for input in inputs {
-        let destination = oboro::review::output_path(&input.path, output, input.root.as_deref())?;
+        let destination =
+            oboro::review::output_path(&input.path, output, input.root.as_deref(), None)?;
         if !seen.insert(destination.clone()) {
             bail!(
                 "two inputs would both be written to {}; clean them separately \
@@ -272,7 +273,13 @@ fn clean(
         if to_stdout {
             print!("{}", report.text);
         } else {
-            let destination = oboro::review::output_path(file, output, input.root.as_deref())?;
+            let stem = if config.redact_filenames {
+                Some(oboro::review::redacted_stem(file, &detector, &mut vault)?)
+            } else {
+                None
+            };
+            let destination =
+                oboro::review::output_path(file, output, input.root.as_deref(), stem.as_deref())?;
             if let Some(parent) = destination.parent() {
                 std::fs::create_dir_all(parent)
                     .with_context(|| format!("creating output directory {}", parent.display()))?;
@@ -457,6 +464,14 @@ fn doctor(store: &StoreArgs) -> Result<()> {
     println!("allowlist:  {} entr(y/ies)", config.allowlist.len());
     println!("denylist:   {} term(s)", config.denylist.len());
     println!("patterns:   {} custom", config.patterns.len());
+    println!(
+        "filenames:  {}",
+        if config.redact_filenames {
+            "redacted"
+        } else {
+            "kept"
+        }
+    );
     println!("formats:    {}", convert::supported().join(", "));
     println!(
         "ocr:        {}",

@@ -25,6 +25,52 @@ fn clean_writes_a_sanitised_file_next_to_the_input() {
 }
 
 #[test]
+fn clean_redacts_pii_in_the_output_filename() {
+    let workspace = Workspace::new();
+    let input = workspace.path().join("jean@example.com.txt");
+    std::fs::write(&input, "Nothing sensitive in the body.\n").expect("writing the input");
+
+    workspace
+        .command()
+        .arg("clean")
+        .arg(&input)
+        .assert()
+        .success();
+
+    assert!(
+        workspace.path().join("EMAIL_1.clean.md").is_file(),
+        "the redacted name must be used"
+    );
+    assert!(
+        !workspace.path().join("jean@example.com.clean.md").exists(),
+        "the original PII filename must not survive"
+    );
+}
+
+#[test]
+fn clean_keeps_the_filename_when_redaction_is_disabled() {
+    let workspace = Workspace::new();
+    let input = workspace.path().join("jean@example.com.txt");
+    std::fs::write(&input, "Nothing sensitive in the body.\n").expect("writing the input");
+    let config = workspace.path().join("oboro.toml");
+    std::fs::write(&config, "redact_filenames = false\n").expect("writing the configuration");
+
+    workspace
+        .command()
+        .arg("clean")
+        .arg(&input)
+        .arg("--config")
+        .arg(&config)
+        .assert()
+        .success();
+
+    assert!(
+        workspace.path().join("jean@example.com.clean.md").is_file(),
+        "the original name must be kept when redaction is off"
+    );
+}
+
+#[test]
 fn clean_honours_an_output_directory() {
     let workspace = Workspace::new();
     let input = workspace.path().join("note.txt");

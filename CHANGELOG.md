@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 ### Features
 
 - feat: Accept a directory argument to `clean` and `review`, cleaning every supported file it holds; `--recursive` descends into subdirectories, unsupported files are skipped and counted, and `--output` mirrors the input tree.
+- feat: Redact PII found in the input filename so it no longer leaks into the output name (`jean@example.com.txt` becomes `EMAIL_1.clean.md`), sharing placeholders with the document body; on by default and disabled with `redact_filenames = false` in `oboro.toml`.
 
 ## 0.1.0 (2026-07-22)
 

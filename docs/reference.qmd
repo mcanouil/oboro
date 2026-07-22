@@ -122,6 +122,7 @@ region:     FR
 allowlist:  1 entr(y/ies)
 denylist:   3 term(s)
 patterns:   1 custom
+filenames:  redacted
 formats:    txt, text, md, markdown, docx, xlsx, xlsm, pdf
 ocr:        not compiled in; images cannot be read
 model:      installed

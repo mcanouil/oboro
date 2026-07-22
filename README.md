@@ -185,6 +185,9 @@ default_region = "FR"
 ner_enabled = true
 ner_threshold = 0.15
 
+# Redact PII in the input filename too, not just the contents.
+redact_filenames = true
+
 # Values that must never be redacted.
 allowlist = ["My Own Company Ltd"]
 
