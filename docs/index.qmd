@@ -1,5 +1,5 @@
 ---
-title: "oboro"
+title: "Oboro"
 subtitle: "An anonymisation layer between your files and a language model."
 ---
 

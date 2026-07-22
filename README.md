@@ -1,4 +1,4 @@
-# oboro
+# Oboro
 
 An anonymisation layer between your files and a language model.
 
@@ -227,7 +227,7 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md) for bug reporting, development setup, a
 
 ## Citation
 
-If you use _oboro_ in your work, please cite it.
+If you use _Oboro_ in your work, please cite it.
 Citation metadata is provided in [`CITATION.cff`](CITATION.cff).
 GitHub renders it via the "Cite this repository" widget on the repository sidebar.
 
