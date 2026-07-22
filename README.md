@@ -88,13 +88,13 @@ oboro clean report.txt --stdout | pbcopy
 
 ### What it reads
 
-| Format | How |
-| --- | --- |
-| `.txt`, `.md` | Read directly |
-| `.docx` | Text runs from the body, headers, footers, footnotes and comments |
-| `.xlsx`, `.xlsm` | Every sheet flattened to tab-separated rows |
-| `.pdf` | Embedded text; scanned PDFs are refused, not half-read |
-| `.png`, `.jpg`, `.tif` | Tesseract, with a build compiled `--features ocr` |
+| Format                 | How                                                               |
+| ---------------------- | ----------------------------------------------------------------- |
+| `.txt`, `.md`          | Read directly                                                     |
+| `.docx`                | Text runs from the body, headers, footers, footnotes and comments |
+| `.xlsx`, `.xlsm`       | Every sheet flattened to tab-separated rows                       |
+| `.pdf`                 | Embedded text; scanned PDFs are refused, not half-read            |
+| `.png`, `.jpg`, `.tif` | Tesseract, with a build compiled `--features ocr`                 |
 
 Optical character recognition is optional because it needs the Tesseract
 system libraries. Without it the binary depends on nothing but Rust, and
@@ -109,17 +109,17 @@ cargo build --release --features ocr
 Detection does not depend on the document's language, and a file that mixes languages is handled in one pass.
 This build recognises:
 
-| Kind | How it is verified |
-| --- | --- |
-| Email addresses | Pattern |
-| Phone numbers | `libphonenumber` |
-| IBANs | ISO 13616 mod-97 checksum |
-| Payment cards | Luhn checksum, 13 to 19 digits |
-| SIRET | Luhn on both the SIREN prefix and the whole number |
-| SIREN | Luhn checksum |
-| IP addresses | Parsed as IPv4 or IPv6 |
-| French street addresses and postcodes | Pattern |
-| Anything you list yourself | Your regular expressions and terms |
+| Kind                                  | How it is verified                                 |
+| ------------------------------------- | -------------------------------------------------- |
+| Email addresses                       | Pattern                                            |
+| Phone numbers                         | `libphonenumber`                                   |
+| IBANs                                 | ISO 13616 mod-97 checksum                          |
+| Payment cards                         | Luhn checksum, 13 to 19 digits                     |
+| SIRET                                 | Luhn on both the SIREN prefix and the whole number |
+| SIREN                                 | Luhn checksum                                      |
+| IP addresses                          | Parsed as IPv4 or IPv6                             |
+| French street addresses and postcodes | Pattern                                            |
+| Anything you list yourself            | Your regular expressions and terms                 |
 
 Two of these are single-locale rather than language-neutral: street addresses
 are matched with French patterns only, and phone numbers are read against one
@@ -187,10 +187,10 @@ regex = "CT-[0-9]{6}"
 
 ## Where your data lives
 
-| Path | Contents |
-| --- | --- |
+| Path                | Contents                                               |
+| ------------------- | ------------------------------------------------------ |
 | `~/.oboro/vault.db` | Placeholder mapping, values encrypted with AES-256-GCM |
-| `~/.oboro/key` | The 32-byte key, created on first use |
+| `~/.oboro/key`      | The 32-byte key, created on first use                  |
 
 Both are created with owner-only permissions. Values are looked up through a
 keyed hash rather than the plaintext, so the database on its own reveals
