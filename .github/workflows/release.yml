@@ -397,7 +397,7 @@ jobs:
           fi
           sed -i "0,/^## ${VERSION}/s//## [Unreleased]\n\n## ${VERSION}/" CHANGELOG.md
           git add CHANGELOG.md
-          git commit -m "ci: reopen the changelog for the next version"
+          git commit -m "ci: reopen the changelog for the next version" -m "[skip ci]"
           # HEAD is detached at the bump commit (the current main tip), so name
           # the destination branch explicitly rather than pushing a local main.
           git push origin HEAD:main
