@@ -142,7 +142,7 @@ jobs:
           cargo update --workspace --quiet
 
           git add Cargo.toml Cargo.lock CITATION.cff CHANGELOG.md
-          git commit -m "ci: bump version to ${VERSION} :rocket:"
+          git commit -m "ci: bump version to ${VERSION} :rocket:" -m "[skip ci]"
           git push --force origin "${BRANCH}"
 
           sleep 5
@@ -154,7 +154,7 @@ jobs:
           sleep 5
           merged=false
           for attempt in {1..10}; do
-            if gh pr merge --merge --delete-branch "${BRANCH}"; then
+            if gh pr merge --squash --delete-branch "${BRANCH}"; then
               merged=true
               break
             fi
