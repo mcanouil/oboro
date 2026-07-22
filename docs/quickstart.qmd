@@ -68,7 +68,7 @@ cargo build --release
 The binary lands in `target/release/oboro`.
 
 That plain build depends on nothing but Rust.
-Two capabilities need system libraries and are therefore optional.
+Two capabilities are optional and compiled in rather than shipped: reading images needs the Tesseract system libraries, and recognising names links ONNX Runtime, which the build fetches over the network.
 
 ::: {.panel-tabset}
 
@@ -77,12 +77,13 @@ Two capabilities need system libraries and are therefore optional.
 Finding names nobody told the tool about needs the recognition model:
 
 ```bash
-cargo build --release --features ner
+cargo build --release --features ner   # downloads ONNX Runtime while building
 oboro models pull
 ```
 
-`models pull` fetches about 348 MB once and checks it against pinned hashes.
-It is the only command that ever touches the network.
+The build downloads ONNX Runtime, so `--features ner` needs network access and a fully offline build fails here.
+`models pull` then fetches the model, about 348 MB once, checked against pinned hashes.
+Once built, it is the only command that touches the network.
 
 ## Images
 
@@ -109,7 +110,7 @@ cargo build --release --features "ner,ocr"
 ### In a devcontainer
 
 For building or contributing with nothing on the host but Docker.
-The container carries the pinned Rust toolchain, Tesseract and the OCR libraries, so every feature builds without setting up a host toolchain.
+The container carries the pinned Rust toolchain, Tesseract and the OCR libraries, so `cargo build --release --features "ner,ocr"` runs inside it without setting up a host toolchain, and the binary lands in `target/release/oboro` as usual.
 In Visual Studio Code or a GitHub Codespace, reopen the folder in the container when prompted; [Development](development.qmd) has the manual `docker` invocation.
 
 Check what your build can do:

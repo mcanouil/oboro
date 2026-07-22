@@ -5,7 +5,7 @@ title: "Development"
 ## The devcontainer
 
 Build in the devcontainer.
-It carries the pinned Rust toolchain, Tesseract and the OCR libraries, so the only thing your machine needs is Docker.
+It carries the pinned Rust toolchain, Tesseract and the OCR libraries, so the only thing your machine needs is Docker, and `cargo build --release --features "ner,ocr"` builds every feature inside it with nothing extra to install.
 
 In Visual Studio Code, reopen the folder in the container when prompted.
 Otherwise use the image directly:

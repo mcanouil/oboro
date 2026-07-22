@@ -89,7 +89,7 @@ After that, `oboro clean contract.docx` behaves as though it were installed.
 
 ## What the image cannot do
 
-Optical character recognition and the recognition model both need system libraries, and the model needs a 348 MB download.
+Optical character recognition needs the Tesseract system libraries, and the recognition model links ONNX Runtime, which has no musl build and so cannot sit in this static image; the model also needs a 348 MB download.
 Putting either in the image would cost every user the weight of a capability most of them will not enable, so neither is included.
 
 The image therefore reads `.txt`, `.md`, `.docx`, `.xlsx` and text-based `.pdf`, and finds structured values along with anything on your denylist.
@@ -108,3 +108,28 @@ The `Dockerfile` is in the repository root and is short enough to read in a minu
 ```bash
 docker build -t oboro .
 ```
+
+That builds the default feature set on a static `musl` base.
+The optional features cannot be added on top of it: ONNX Runtime, which `ner` links, has no `musl` build, and `ocr` needs the Tesseract shared libraries at run time, not only while building.
+
+The supported way to get a features build in a container is the [devcontainer](development.qmd), which already carries the toolchain, Tesseract and the OCR libraries.
+If you want a standalone image with the features, build your own on a `glibc` base rather than extending the shipped one:
+
+```dockerfile
+FROM rust:1-bookworm AS build
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      libtesseract-dev libleptonica-dev pkg-config clang
+WORKDIR /src
+COPY . .
+RUN cargo build --release --features "ner,ocr"
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      tesseract-ocr tesseract-ocr-fra \
+  && rm -rf /var/lib/apt/lists/*
+COPY --from=build /src/target/release/oboro /usr/local/bin/oboro
+ENTRYPOINT ["oboro"]
+```
+
+The runtime stage keeps `tesseract-ocr` because OCR loads it at run time; `ner` still needs `oboro models pull` on first use.
+This is an advanced, unsupported path: the published image and binary stay the default build for the reasons above.

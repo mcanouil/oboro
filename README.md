@@ -56,7 +56,7 @@ cargo build --release --features "ner,ocr"   # names and image OCR
 
 **Devcontainer** — for building or contributing with only Docker on the host; it carries the pinned toolchain, Tesseract and the OCR libraries. Reopen the folder in the container in Visual Studio Code or a GitHub Codespace; see [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
-The prebuilt binary and the Docker image are the default feature set. Optical character recognition (`ocr`) and name recognition (`ner`) need system libraries, so those stay a source build.
+The prebuilt binary and the Docker image are the default feature set. Optical character recognition (`ocr`) needs the Tesseract system libraries. Name recognition (`ner`) links ONNX Runtime, which is fetched over the network while you build and has no musl build, so it cannot go in the static release binary. Both therefore stay a source build.
 
 ## Usage
 
@@ -142,12 +142,14 @@ Personal and company names are found by a local, multilingual recognition
 model, built with `--features ner`:
 
 ```bash
-cargo build --release --features ner
+cargo build --release --features ner   # downloads ONNX Runtime while building
 oboro models pull   # about 348 MB, once, verified against pinned hashes
 ```
 
-The model runs on your machine. `models pull` is the only command that ever
-touches the network, and only when you run it.
+The build fetches ONNX Runtime, so `--features ner` needs network access at
+build time and a fully offline build fails there. The model itself runs on
+your machine. Once built, `models pull` is the only command that touches the
+network, and only when you run it.
 
 Without the model, names are matched from the denylist in `oboro.toml`
 instead.

@@ -58,7 +58,7 @@ The published binaries are the default build.
 They read `.txt`, `.md`, `.docx`, `.xlsx` and text-based `.pdf`, and find structured values and anything on your denylist.
 
 They do **not** find names nobody told them about, and they do not read images.
-Both need system libraries, so they are compiled in rather than shipped:
+Names link ONNX Runtime, fetched over the network while building; images need the Tesseract system libraries. Both are compiled in rather than shipped:
 
 ```bash
 cargo build --release --features ner   # names and organisations, then: oboro models pull
