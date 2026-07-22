@@ -48,6 +48,28 @@ pub fn clean(text: &str, detector: &Detector, vault: &mut Vault) -> Result<Clean
     apply(text, &spans, vault)
 }
 
+/// Redacts PII in a filename stem, rendering placeholders filesystem-safe:
+/// `[[PERSON_1]]` becomes `PERSON_1`.
+///
+/// Sharing `vault` with [`clean`] means a value appearing in both the name and
+/// the document body maps to the same placeholder. Unlike [`clean`], this is
+/// deliberately one-way: [`restore`] only rewrites content, and the bare
+/// `PERSON_1` form no longer matches [`struct@PLACEHOLDER`], so a filename is
+/// never reverse-substituted. The real value stays recoverable from the vault
+/// by its tag and sequence.
+///
+/// # Errors
+///
+/// Returns an error if a detection layer fails or the vault cannot allocate a
+/// placeholder.
+pub fn clean_stem(stem: &str, detector: &Detector, vault: &mut Vault) -> Result<String> {
+    let spans = detect(stem, detector)?;
+    let report = apply(stem, &spans, vault)?;
+    Ok(PLACEHOLDER
+        .replace_all(&report.text, "${1}_${2}")
+        .into_owned())
+}
+
 /// Finds every entity in `text`, reconciled into a disjoint, ordered set.
 ///
 /// Separate from [`apply`] so `review` can put the result in front of the
@@ -226,6 +248,38 @@ mod tests {
         let report = clean(text, &detector, &mut fixture.vault).expect("cleaning");
         assert_eq!(report.replaced, 2);
         assert_eq!(report.text.matches("[[EMAIL_1]]").count(), 2);
+    }
+
+    #[test]
+    fn clean_stem_unwraps_placeholders_for_the_filesystem() {
+        let mut fixture = Fixture::new();
+        let detector = Detector::new(&fixture.config).expect("detector");
+        let stem = clean_stem("invoice for a@example.com", &detector, &mut fixture.vault)
+            .expect("cleaning the stem");
+        assert_eq!(stem, "invoice for EMAIL_1");
+        assert!(!stem.contains('@'));
+        assert!(!stem.contains('['));
+        assert!(!stem.contains(']'));
+    }
+
+    #[test]
+    fn clean_stem_leaves_a_clean_name_untouched() {
+        let mut fixture = Fixture::new();
+        let detector = Detector::new(&fixture.config).expect("detector");
+        let stem = clean_stem("quarterly-report", &detector, &mut fixture.vault)
+            .expect("cleaning the stem");
+        assert_eq!(stem, "quarterly-report");
+    }
+
+    #[test]
+    fn a_filename_and_the_body_share_one_placeholder() {
+        let mut fixture = Fixture::new();
+        let detector = Detector::new(&fixture.config).expect("detector");
+        let report = clean("mail a@example.com", &detector, &mut fixture.vault).expect("cleaning");
+        assert!(report.text.contains("[[EMAIL_1]]"));
+        let stem =
+            clean_stem("a@example.com", &detector, &mut fixture.vault).expect("cleaning the stem");
+        assert_eq!(stem, "EMAIL_1");
     }
 
     /// The rules layer alone must not touch text with nothing in it. The

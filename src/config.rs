@@ -21,6 +21,8 @@ const DEFAULT_REGION: &str = "FR";
 const DEFAULT_NER_ENABLED: bool = true;
 /// Minimum model probability acted on, absent configuration.
 const DEFAULT_NER_THRESHOLD: f32 = 0.15;
+/// Whether output filenames are redacted, absent configuration.
+const DEFAULT_REDACT_FILENAMES: bool = true;
 
 /// A user-defined pattern, such as a contract number format.
 pub struct CustomPattern {
@@ -59,6 +61,8 @@ pub struct Config {
     allowlist_folded: HashSet<String>,
     pub denylist: Vec<DenyTerm>,
     pub patterns: Vec<CustomPattern>,
+    /// Whether PII detected in the input filename is redacted in the output name.
+    pub redact_filenames: bool,
 }
 
 impl Default for Config {
@@ -71,6 +75,7 @@ impl Default for Config {
             allowlist_folded: HashSet::new(),
             denylist: Vec::new(),
             patterns: Vec::new(),
+            redact_filenames: DEFAULT_REDACT_FILENAMES,
         }
     }
 }
@@ -139,6 +144,8 @@ struct RawConfig {
     ner_enabled: bool,
     #[serde(default = "default_ner_threshold")]
     ner_threshold: f32,
+    #[serde(default = "default_redact_filenames")]
+    redact_filenames: bool,
     #[serde(default)]
     allowlist: Vec<String>,
     #[serde(default)]
@@ -157,6 +164,10 @@ fn default_ner_enabled() -> bool {
 
 fn default_ner_threshold() -> f32 {
     DEFAULT_NER_THRESHOLD
+}
+
+fn default_redact_filenames() -> bool {
+    DEFAULT_REDACT_FILENAMES
 }
 
 #[derive(Deserialize)]
@@ -230,6 +241,7 @@ impl RawConfig {
             allowlist_folded,
             denylist,
             patterns,
+            redact_filenames: self.redact_filenames,
         })
     }
 }

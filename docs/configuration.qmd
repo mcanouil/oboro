@@ -15,6 +15,9 @@ default_region = "FR"
 ner_enabled = true
 ner_threshold = 0.15
 
+# Redact PII found in the input filename, not just the contents.
+redact_filenames = true
+
 # Values that must never be redacted.
 allowlist = ["My Own Company Ltd", "Lille"]
 
@@ -42,6 +45,15 @@ With `GB` it is not, and would be left alone.
 
 Lower it to redact more, raise it to redact less.
 The default of `0.15` errs towards redacting, for reasons set out in [Limitations](limitations.qmd).
+
+## `redact_filenames`
+
+Whether PII in the input filename is redacted in the output name, on by default.
+With it on, `jean@example.com.txt` is written as `EMAIL_1.clean.md` rather than leaking the address into the name.
+
+The filename shares placeholders with the document body, so a name appearing in both gets the same tag.
+Placeholders are rendered without their brackets in the name (`EMAIL_1`, not `[[EMAIL_1]]`) to stay shell-safe.
+Set it to `false` to keep the original filename.
 
 ## `allowlist`
 

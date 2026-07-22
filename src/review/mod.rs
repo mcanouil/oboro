@@ -111,9 +111,25 @@ impl Document {
     /// # Errors
     ///
     /// Returns an error if the vault fails or the file cannot be written.
-    pub fn write(&self, vault: &mut Vault, output_dir: Option<&Path>) -> Result<PathBuf> {
+    pub fn write(
+        &self,
+        detector: &Detector,
+        vault: &mut Vault,
+        output_dir: Option<&Path>,
+        redact_filenames: bool,
+    ) -> Result<PathBuf> {
         let report = self.apply(vault)?;
-        let destination = output_path(&self.path, output_dir, self.root.as_deref())?;
+        let stem = if redact_filenames {
+            Some(redacted_stem(&self.path, detector, vault)?)
+        } else {
+            None
+        };
+        let destination = output_path(
+            &self.path,
+            output_dir,
+            self.root.as_deref(),
+            stem.as_deref(),
+        )?;
         if let Some(parent) = destination.parent() {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("creating output directory {}", parent.display()))?;
@@ -131,6 +147,10 @@ impl Document {
 /// different subdirectories do not collide. Otherwise the file lands directly
 /// in `output_dir`, or beside the input when there is none.
 ///
+/// `stem_override` supplies a redacted stem in place of the input's own, so PII
+/// in the filename does not survive into the output name; `None` keeps the
+/// input stem verbatim.
+///
 /// # Errors
 ///
 /// Returns an error if the input has no usable file name, or is not below the
@@ -139,11 +159,15 @@ pub fn output_path(
     input: &Path,
     output_dir: Option<&Path>,
     root: Option<&Path>,
+    stem_override: Option<&str>,
 ) -> Result<PathBuf> {
-    let stem = input
-        .file_stem()
-        .and_then(|name| name.to_str())
-        .with_context(|| format!("{} has no usable file name", input.display()))?;
+    let stem = match stem_override {
+        Some(stem) => stem,
+        None => input
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .with_context(|| format!("{} has no usable file name", input.display()))?,
+    };
     let name = format!("{stem}.clean.md");
     Ok(match (output_dir, root) {
         (Some(dir), Some(root)) => {
@@ -155,6 +179,23 @@ pub fn output_path(
         (Some(dir), None) => dir.join(name),
         (None, _) => input.with_file_name(name),
     })
+}
+
+/// Redacts PII in `input`'s file stem, ready to pass to [`output_path`].
+///
+/// Sharing `vault` with the document's own redaction keeps placeholders
+/// consistent between the name and the body.
+///
+/// # Errors
+///
+/// Returns an error if the input has no usable file name, or detection or the
+/// vault fails.
+pub fn redacted_stem(input: &Path, detector: &Detector, vault: &mut Vault) -> Result<String> {
+    let stem = input
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .with_context(|| format!("{} has no usable file name", input.display()))?;
+    crate::pipeline::clean_stem(stem, detector, vault)
 }
 
 #[cfg(test)]
@@ -274,12 +315,29 @@ mod tests {
 
     #[test]
     fn output_is_named_after_the_input() {
-        let path = output_path(Path::new("/tmp/report.docx"), None, None).expect("naming");
+        let path = output_path(Path::new("/tmp/report.docx"), None, None, None).expect("naming");
         assert_eq!(path, Path::new("/tmp/report.clean.md"));
 
-        let path = output_path(Path::new("/tmp/report.docx"), Some(Path::new("/out")), None)
-            .expect("naming");
+        let path = output_path(
+            Path::new("/tmp/report.docx"),
+            Some(Path::new("/out")),
+            None,
+            None,
+        )
+        .expect("naming");
         assert_eq!(path, Path::new("/out/report.clean.md"));
+    }
+
+    #[test]
+    fn output_uses_the_redacted_stem_when_given() {
+        let path = output_path(
+            Path::new("/tmp/jean-dupont.docx"),
+            None,
+            None,
+            Some("PERSON_1"),
+        )
+        .expect("naming");
+        assert_eq!(path, Path::new("/tmp/PERSON_1.clean.md"));
     }
 
     #[test]
@@ -288,6 +346,7 @@ mod tests {
             Path::new("/a/sub/report.docx"),
             Some(Path::new("/out")),
             Some(Path::new("/a")),
+            None,
         )
         .expect("naming");
         assert_eq!(path, Path::new("/out/sub/report.clean.md"));
