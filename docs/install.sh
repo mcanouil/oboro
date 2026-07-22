@@ -46,6 +46,16 @@ error() {
 	exit 1
 }
 
+# mktemp output lives in a global so the EXIT trap, which runs after main()
+# returns and its locals are gone, can still see and remove it. Guarded so an
+# exit before mktemp (empty tmpdir) does not trip `set -u`.
+tmpdir=""
+cleanup() {
+	[ -n "${tmpdir}" ] && rm -rf "${tmpdir}"
+	return 0
+}
+trap cleanup EXIT
+
 usage() {
 	cat <<EOF
 oboro installer
@@ -220,9 +230,7 @@ main() {
 	local filename="${BINARY_NAME}-${version}-${target}.tar.gz"
 	local base_url="https://github.com/${REPO}/releases/download/${version}"
 
-	local tmpdir
 	tmpdir=$(mktemp -d)
-	trap 'rm -rf "${tmpdir}"' EXIT
 
 	info "Downloading ${filename}..."
 	download "${base_url}/${filename}" "${tmpdir}/${filename}" ||
