@@ -305,7 +305,6 @@ jobs:
     env:
       VERSION: ${{ needs.bump-version.outputs.version }}
       COMMIT_SHA: ${{ needs.bump-version.outputs.commit_sha }}
-      PR_URL: ${{ needs.bump-version.outputs.pr_url }}
 
     steps:
       - name: Create GitHub App token
@@ -315,9 +314,10 @@ jobs:
           client-id: ${{ vars.APP_ID }}
           private-key: ${{ secrets.APP_KEY }}
 
-      - name: Checkout repository
+      - name: Checkout the bump commit
         uses: actions/checkout@v7
         with:
+          ref: ${{ needs.bump-version.outputs.commit_sha }}
           fetch-depth: 0
           token: ${{ steps.app-token.outputs.token }}
 
@@ -328,35 +328,6 @@ jobs:
           token: ${{ steps.app-token.outputs.token }}
           app-slug: ${{ steps.app-token.outputs.app-slug }}
           gh-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Wait for the bump to land on main
-        env:
-          GH_TOKEN: ${{ steps.git-user.outputs.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          STATE=""
-          for attempt in {1..30}; do
-            STATE=$(gh pr view "${PR_URL}" --json state --jq .state)
-            if [ "${STATE}" = "MERGED" ]; then
-              echo "Bump PR merged."
-              break
-            fi
-            echo "PR state: ${STATE}. Waiting (attempt ${attempt}/30)..."
-            sleep 10
-          done
-          if [ "${STATE}" != "MERGED" ]; then
-            echo "::error::Bump PR ${PR_URL} did not merge (final state: ${STATE})."
-            exit 1
-          fi
-
-          git fetch origin main --quiet
-          if ! git log origin/main --format='%H' -n 20 | grep -qF "${COMMIT_SHA}"; then
-            echo "::error::Bump commit ${COMMIT_SHA} is not on origin/main."
-            exit 1
-          fi
-          git checkout main
-          git reset --hard origin/main
 
       # The changelog says what changed; on its own it never says how to get
       # the thing. The template carries the install and verification steps,
@@ -427,7 +398,9 @@ jobs:
           sed -i "0,/^## ${VERSION}/s//## [Unreleased]\n\n## ${VERSION}/" CHANGELOG.md
           git add CHANGELOG.md
           git commit -m "ci: reopen the changelog for the next version"
-          git push origin main
+          # HEAD is detached at the bump commit (the current main tip), so name
+          # the destination branch explicitly rather than pushing a local main.
+          git push origin HEAD:main
 
       - name: Summary
         env:
