@@ -31,9 +31,12 @@ struct Cli {
 enum Command {
     /// Anonymise files into sanitised markdown
     Clean {
-        /// Files to anonymise
-        #[arg(required = true, value_name = "FILE")]
+        /// Files or directories to anonymise
+        #[arg(required = true, value_name = "PATH")]
         files: Vec<PathBuf>,
+        /// Descend into subdirectories of any directory argument
+        #[arg(short, long)]
+        recursive: bool,
         /// Directory for the sanitised output (defaults to alongside each input)
         #[arg(short, long, value_name = "DIR")]
         output: Option<PathBuf>,
@@ -66,9 +69,12 @@ enum Command {
     },
     /// Review detections before writing, accepting or rejecting each
     Review {
-        /// Files to review
-        #[arg(required = true, value_name = "FILE")]
+        /// Files or directories to review
+        #[arg(required = true, value_name = "PATH")]
         files: Vec<PathBuf>,
+        /// Descend into subdirectories of any directory argument
+        #[arg(short, long)]
+        recursive: bool,
         /// Directory for the sanitised output (defaults to alongside each input)
         #[arg(short, long, value_name = "DIR")]
         output: Option<PathBuf>,
@@ -151,10 +157,18 @@ fn run() -> Result<()> {
     match cli.command {
         Command::Clean {
             files,
+            recursive,
             output,
             stdout,
             config,
-        } => clean(&files, output.as_deref(), stdout, store, config.as_deref()),
+        } => clean(
+            &files,
+            recursive,
+            output.as_deref(),
+            stdout,
+            store,
+            config.as_deref(),
+        ),
         Command::Restore { file, stdout } => restore(&file, stdout, store),
         Command::Map { action } => match action {
             MapAction::List { reveal } => map_list(reveal, store),
@@ -170,9 +184,10 @@ fn run() -> Result<()> {
         },
         Command::Review {
             files,
+            recursive,
             output,
             config,
-        } => review(&files, output.as_deref(), store, config.as_deref()),
+        } => review(&files, recursive, output.as_deref(), store, config.as_deref()),
         Command::Doctor => doctor(store),
     }
 }
@@ -199,15 +214,43 @@ fn prepare(
     Ok((config, vault))
 }
 
+/// Guards against two inputs sharing one output.
+///
+/// The output is named after the stem, so `contract.txt` and `contract.docx`
+/// both want `contract.clean.md`; writing both would silently lose one. Caught
+/// before anything is written so nothing is half-done.
+fn ensure_distinct_outputs(inputs: &[oboro::walk::Input], output: Option<&Path>) -> Result<()> {
+    let mut seen = std::collections::HashSet::new();
+    for input in inputs {
+        let destination = oboro::review::output_path(&input.path, output, input.root.as_deref())?;
+        if !seen.insert(destination.clone()) {
+            bail!(
+                "two inputs would both be written to {}; clean them separately \
+                 or into different output directories",
+                destination.display()
+            );
+        }
+    }
+    Ok(())
+}
+
 fn clean(
     files: &[PathBuf],
+    recursive: bool,
     output: Option<&Path>,
     to_stdout: bool,
     store: &StoreArgs,
     config_path: Option<&Path>,
 ) -> Result<()> {
-    if to_stdout && files.len() > 1 {
+    let resolved = oboro::walk::resolve(files, recursive)?;
+    if to_stdout && resolved.inputs.len() > 1 {
         bail!("--stdout takes a single file; pass one file or use --output");
+    }
+    if !to_stdout {
+        ensure_distinct_outputs(&resolved.inputs, output)?;
+    }
+    if resolved.skipped > 0 {
+        eprintln!("{} unsupported file(s) skipped", resolved.skipped);
     }
 
     let (config, mut vault) = prepare(store, config_path, output)?;
@@ -215,14 +258,19 @@ fn clean(
     // time instead of on every file.
     let detector = Detector::new(&config)?;
 
-    for file in files {
+    for input in &resolved.inputs {
+        let file = &input.path;
         let text = convert::to_text(file)?;
         let report = pipeline::clean(&text, &detector, &mut vault)?;
 
         if to_stdout {
             print!("{}", report.text);
         } else {
-            let destination = oboro::review::output_path(file, output)?;
+            let destination = oboro::review::output_path(file, output, input.root.as_deref())?;
+            if let Some(parent) = destination.parent() {
+                std::fs::create_dir_all(parent)
+                    .with_context(|| format!("creating output directory {}", parent.display()))?;
+            }
             std::fs::write(&destination, &report.text)
                 .with_context(|| format!("writing {}", destination.display()))?;
             eprintln!(
@@ -240,12 +288,15 @@ fn clean(
 
 fn review(
     files: &[PathBuf],
+    recursive: bool,
     output: Option<&Path>,
     store: &StoreArgs,
     config_path: Option<&Path>,
 ) -> Result<()> {
+    let resolved = oboro::walk::resolve(files, recursive)?;
+    ensure_distinct_outputs(&resolved.inputs, output)?;
     let (config, mut vault) = prepare(store, config_path, output)?;
-    oboro::review::run(files, &config, &mut vault, output)
+    oboro::review::run(&resolved.inputs, resolved.skipped, &config, &mut vault, output)
 }
 
 fn summarise(by_tag: &std::collections::BTreeMap<String, usize>) -> String {

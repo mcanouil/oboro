@@ -132,6 +132,12 @@ contract.docx -> contract.clean.md (7 replaced: ADDRESS 2, EMAIL 1, IBAN 1, ORG 
 
 Read it, then paste it into whichever model you are using.
 
+Point `clean` at a directory to do a whole folder at once; add `--recursive` to include its subfolders:
+
+```bash
+oboro clean contracts/ --recursive
+```
+
 ## Decide for yourself what gets hidden
 
 `clean` redacts everything it finds.

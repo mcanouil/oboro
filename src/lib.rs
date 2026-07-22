@@ -13,3 +13,4 @@ pub mod models;
 pub mod pipeline;
 pub mod review;
 pub mod vault;
+pub mod walk;

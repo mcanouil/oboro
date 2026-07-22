@@ -44,6 +44,74 @@ fn clean_honours_an_output_directory() {
 }
 
 #[test]
+fn clean_walks_a_directory_of_mixed_files() {
+    let workspace = Workspace::new();
+    let dir = workspace.path().join("docs");
+    std::fs::create_dir_all(dir.join("sub")).expect("creating the tree");
+    std::fs::write(dir.join("note.txt"), "Call 06 12 34 56 78.\n").expect("writing");
+    std::fs::write(dir.join("archive.zip"), "binary").expect("writing");
+    std::fs::write(dir.join("sub/deep.txt"), "Call 07 98 76 54 32.\n").expect("writing");
+    let out_dir = workspace.path().join("sanitised");
+
+    // Without --recursive the nested file is left untouched and the
+    // unsupported archive is reported, not fatal.
+    workspace
+        .command()
+        .arg("clean")
+        .arg(&dir)
+        .arg("--output")
+        .arg(&out_dir)
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("1 unsupported file(s) skipped"));
+
+    assert!(out_dir.join("note.clean.md").is_file());
+    assert!(!out_dir.join("sub/deep.clean.md").exists());
+}
+
+#[test]
+fn clean_recurses_and_mirrors_the_tree() {
+    let workspace = Workspace::new();
+    let dir = workspace.path().join("docs");
+    std::fs::create_dir_all(dir.join("sub")).expect("creating the tree");
+    std::fs::write(dir.join("note.txt"), "Call 06 12 34 56 78.\n").expect("writing");
+    std::fs::write(dir.join("sub/deep.txt"), "Call 07 98 76 54 32.\n").expect("writing");
+    let out_dir = workspace.path().join("sanitised");
+
+    workspace
+        .command()
+        .arg("clean")
+        .arg(&dir)
+        .arg("--recursive")
+        .arg("--output")
+        .arg(&out_dir)
+        .assert()
+        .success();
+
+    assert!(out_dir.join("note.clean.md").is_file());
+    assert!(
+        out_dir.join("sub/deep.clean.md").is_file(),
+        "the input subdirectory must be mirrored under the output directory"
+    );
+}
+
+#[test]
+fn clean_refuses_inputs_that_share_an_output_name() {
+    let workspace = Workspace::new();
+    std::fs::write(workspace.path().join("contract.txt"), "one").expect("writing");
+    std::fs::write(workspace.path().join("contract.docx"), "two").expect("writing");
+
+    // Both would become contract.clean.md; refusing beats silently losing one.
+    workspace
+        .command()
+        .arg("clean")
+        .arg(workspace.path())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("both be written to"));
+}
+
+#[test]
 fn clean_refuses_stdout_for_several_files() {
     let workspace = Workspace::new();
     let first = workspace.path().join("a.txt");

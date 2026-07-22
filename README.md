@@ -86,6 +86,18 @@ Both `clean` and `restore` accept `--stdout`, so they compose in a pipeline:
 oboro clean report.txt --stdout | pbcopy
 ```
 
+`clean` and `review` also take a directory, cleaning every supported file it
+holds; unsupported files are skipped and counted rather than stopping the run:
+
+```bash
+# Every readable file in the folder, then its subfolders too.
+oboro clean contracts/
+oboro clean contracts/ --recursive --output sanitised/
+```
+
+With `--output` a directory's subfolders are mirrored under it, so files sharing
+a name in different subfolders do not collide.
+
 ### What it reads
 
 | Format                 | How                                                               |

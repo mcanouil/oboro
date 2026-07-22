@@ -28,6 +28,10 @@ pub struct Decision {
 /// A document under review.
 pub struct Document {
     pub path: PathBuf,
+    /// The directory the file was discovered under, mirrored into the output
+    /// directory on write. `None` for a file named directly on the command
+    /// line. See [`crate::walk::Input`].
+    pub root: Option<PathBuf>,
     pub text: String,
     pub decisions: Vec<Decision>,
 }
@@ -35,13 +39,16 @@ pub struct Document {
 impl Document {
     /// Reads and analyses `path` with a detector shared across the batch.
     ///
+    /// `root` is the directory the file was discovered under, used to mirror
+    /// the tree on write; it is `None` for a directly named file.
+    ///
     /// Every detection starts accepted, so confirming without touching
     /// anything gives exactly what `clean` would have produced.
     ///
     /// # Errors
     ///
     /// Returns an error if the file cannot be read or detection fails.
-    pub fn open(path: &Path, detector: &Detector) -> Result<Self> {
+    pub fn open(path: &Path, root: Option<&Path>, detector: &Detector) -> Result<Self> {
         let text = crate::convert::to_text(path)?;
         let decisions = crate::pipeline::detect(&text, detector)?
             .into_iter()
@@ -52,6 +59,7 @@ impl Document {
             .collect();
         Ok(Self {
             path: path.to_path_buf(),
+            root: root.map(Path::to_path_buf),
             text,
             decisions,
         })
@@ -105,7 +113,11 @@ impl Document {
     /// Returns an error if the vault fails or the file cannot be written.
     pub fn write(&self, vault: &mut Vault, output_dir: Option<&Path>) -> Result<PathBuf> {
         let report = self.apply(vault)?;
-        let destination = output_path(&self.path, output_dir)?;
+        let destination = output_path(&self.path, output_dir, self.root.as_deref())?;
+        if let Some(parent) = destination.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("creating output directory {}", parent.display()))?;
+        }
         std::fs::write(&destination, &report.text)
             .with_context(|| format!("writing {}", destination.display()))?;
         Ok(destination)
@@ -114,18 +126,34 @@ impl Document {
 
 /// Builds the sanitised output path, `report.docx` becoming `report.clean.md`.
 ///
+/// When `output_dir` and `root` are both given, the input's location relative
+/// to `root` is mirrored under `output_dir`, so files sharing a name in
+/// different subdirectories do not collide. Otherwise the file lands directly
+/// in `output_dir`, or beside the input when there is none.
+///
 /// # Errors
 ///
-/// Returns an error if the input has no usable file name.
-pub fn output_path(input: &Path, output_dir: Option<&Path>) -> Result<PathBuf> {
+/// Returns an error if the input has no usable file name, or is not below the
+/// root it was discovered under.
+pub fn output_path(
+    input: &Path,
+    output_dir: Option<&Path>,
+    root: Option<&Path>,
+) -> Result<PathBuf> {
     let stem = input
         .file_stem()
         .and_then(|name| name.to_str())
         .with_context(|| format!("{} has no usable file name", input.display()))?;
     let name = format!("{stem}.clean.md");
-    Ok(match output_dir {
-        Some(dir) => dir.join(name),
-        None => input.with_file_name(name),
+    Ok(match (output_dir, root) {
+        (Some(dir), Some(root)) => {
+            let relative = input.strip_prefix(root).with_context(|| {
+                format!("{} is not below {}", input.display(), root.display())
+            })?;
+            dir.join(relative).with_file_name(name)
+        }
+        (Some(dir), None) => dir.join(name),
+        (None, _) => input.with_file_name(name),
     })
 }
 
@@ -149,6 +177,7 @@ mod tests {
             .collect();
         Document {
             path: PathBuf::from("note.txt"),
+            root: None,
             text: text.to_owned(),
             decisions,
         }
@@ -245,12 +274,23 @@ mod tests {
 
     #[test]
     fn output_is_named_after_the_input() {
-        let path = output_path(Path::new("/tmp/report.docx"), None).expect("naming");
+        let path = output_path(Path::new("/tmp/report.docx"), None, None).expect("naming");
         assert_eq!(path, Path::new("/tmp/report.clean.md"));
 
-        let path =
-            output_path(Path::new("/tmp/report.docx"), Some(Path::new("/out"))).expect("naming");
+        let path = output_path(Path::new("/tmp/report.docx"), Some(Path::new("/out")), None)
+            .expect("naming");
         assert_eq!(path, Path::new("/out/report.clean.md"));
+    }
+
+    #[test]
+    fn output_mirrors_the_input_tree_under_the_root() {
+        let path = output_path(
+            Path::new("/a/sub/report.docx"),
+            Some(Path::new("/out")),
+            Some(Path::new("/a")),
+        )
+        .expect("naming");
+        assert_eq!(path, Path::new("/out/sub/report.clean.md"));
     }
 
     #[test]

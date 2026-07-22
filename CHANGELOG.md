@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Features
+
+- feat: Accept a directory argument to `clean` and `review`, cleaning every supported file it holds; `--recursive` descends into subdirectories, unsupported files are skipped and counted, and `--output` mirrors the input tree.
+
 ## 0.1.0 (2026-07-22)
 
 ### Features
