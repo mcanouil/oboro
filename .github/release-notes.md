@@ -68,6 +68,16 @@ cargo build --release --features ocr   # images and scanned pages, needs Tessera
 If names are not being redacted, this is almost certainly why.
 `oboro doctor` reports what any build can do.
 
+To build the optional features without setting up the system libraries on your machine, use the devcontainer, which carries the pinned toolchain, Tesseract and the OCR libraries:
+
+```bash
+docker build -f .devcontainer/Dockerfile -t oboro-dev .devcontainer
+docker run --rm -it -v "$PWD":/work -w /work -u vscode oboro-dev \
+  cargo build --release --features "ner,ocr"
+```
+
+In Visual Studio Code or a GitHub Codespace, reopen the folder in the container instead.
+
 ## Verify what you downloaded
 
 Beyond the checksum, every archive carries build provenance, so you can confirm it came from this repository's workflow and not from somewhere else:
