@@ -187,7 +187,13 @@ fn run() -> Result<()> {
             recursive,
             output,
             config,
-        } => review(&files, recursive, output.as_deref(), store, config.as_deref()),
+        } => review(
+            &files,
+            recursive,
+            output.as_deref(),
+            store,
+            config.as_deref(),
+        ),
         Command::Doctor => doctor(store),
     }
 }
@@ -296,7 +302,13 @@ fn review(
     let resolved = oboro::walk::resolve(files, recursive)?;
     ensure_distinct_outputs(&resolved.inputs, output)?;
     let (config, mut vault) = prepare(store, config_path, output)?;
-    oboro::review::run(&resolved.inputs, resolved.skipped, &config, &mut vault, output)
+    oboro::review::run(
+        &resolved.inputs,
+        resolved.skipped,
+        &config,
+        &mut vault,
+        output,
+    )
 }
 
 fn summarise(by_tag: &std::collections::BTreeMap<String, usize>) -> String {

@@ -147,9 +147,9 @@ pub fn output_path(
     let name = format!("{stem}.clean.md");
     Ok(match (output_dir, root) {
         (Some(dir), Some(root)) => {
-            let relative = input.strip_prefix(root).with_context(|| {
-                format!("{} is not below {}", input.display(), root.display())
-            })?;
+            let relative = input
+                .strip_prefix(root)
+                .with_context(|| format!("{} is not below {}", input.display(), root.display()))?;
             dir.join(relative).with_file_name(name)
         }
         (Some(dir), None) => dir.join(name),

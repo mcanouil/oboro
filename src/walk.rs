@@ -50,8 +50,8 @@ pub fn resolve(args: &[PathBuf], recursive: bool) -> Result<Resolved> {
         skipped: 0,
     };
     for arg in args {
-        let metadata = std::fs::metadata(arg)
-            .with_context(|| format!("inspecting {}", arg.display()))?;
+        let metadata =
+            std::fs::metadata(arg).with_context(|| format!("inspecting {}", arg.display()))?;
         if metadata.is_dir() {
             walk(arg, arg, recursive, &mut resolved)?;
         } else {
@@ -176,7 +176,10 @@ mod tests {
     fn recursive_descends_into_subdirectories() {
         let dir = tree();
         let resolved = resolve(&[dir.path().to_path_buf()], true).expect("resolving");
-        assert_eq!(names(&resolved), vec!["nested.txt", "note.txt", "report.md"]);
+        assert_eq!(
+            names(&resolved),
+            vec!["nested.txt", "note.txt", "report.md"]
+        );
         // The hidden directory is skipped whole, so its file is not counted.
         assert_eq!(resolved.skipped, 1);
     }
