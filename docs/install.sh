@@ -270,8 +270,9 @@ main() {
 	if ! download "${base_url}/${filename}" "${tmpdir}/${filename}"; then
 		if [ "${features}" = "ner" ]; then
 			error "Download failed. Releases up to 0.2.0 carry no ner archives; see https://github.com/${REPO}/releases for available builds."
+		else
+			error "Download failed. See https://github.com/${REPO}/releases for available builds."
 		fi
-		error "Download failed. See https://github.com/${REPO}/releases for available builds."
 	fi
 
 	if [ "${OBORO_SKIP_CHECKSUM:-0}" = "1" ]; then
