@@ -1,6 +1,6 @@
-# Contributing to oboro
+# Contributing to Oboro
 
-Thank you for helping to improve oboro.
+Thank you for helping to improve Oboro.
 
 ## Reporting a bug
 
@@ -11,7 +11,7 @@ Open an issue on [GitHub](https://github.com/mcanouil/oboro/issues) and include:
 - The output of `oboro doctor`, so the enabled features are known.
 
 Never paste real sensitive values into an issue.
-oboro exists to keep exactly those values off other people's machines.
+Oboro exists to keep exactly those values off other people's machines.
 Reproduce the problem with invented data, as the fixtures in `testdata/` do.
 
 ## Development setup

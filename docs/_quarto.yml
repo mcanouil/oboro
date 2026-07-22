@@ -52,7 +52,7 @@ website:
   sidebar:
     style: floating
     contents:
-      - section: "Using oboro"
+      - section: "Using Oboro"
         contents:
           - index.qmd
           - quickstart.qmd
