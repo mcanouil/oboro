@@ -9,29 +9,37 @@ Every command accepts `--vault` and `--key` to point at a store other than the d
 Anonymises files into sanitised markdown.
 
 ```bash
-oboro clean <FILE>... [OPTIONS]
+oboro clean <PATH>... [OPTIONS]
 ```
 
 | Option | Effect |
 | --- | --- |
+| `-r`, `--recursive` | Descend into subdirectories of any directory argument. |
 | `-o`, `--output <DIR>` | Write outputs into this directory instead of beside each input. |
 | `--stdout` | Write to standard output. Takes a single file. |
 | `--config <FILE>` | Use this configuration instead of the nearest `oboro.toml`. |
 
+A `<PATH>` is a file or a directory.
+A directory is walked for the formats this build reads, skipping hidden entries, symlinks and existing `.clean.md` outputs, and reporting how many files it could not read.
+
 Output is named after the input, so `report.docx` becomes `report.clean.md`.
+With `--output`, a directory's subfolders are mirrored under it.
 
 ## `review`
 
 Shows every detection and lets you accept or reject each one before anything is written.
 
 ```bash
-oboro review <FILE>... [OPTIONS]
+oboro review <PATH>... [OPTIONS]
 ```
 
 | Option | Effect |
 | --- | --- |
+| `-r`, `--recursive` | Descend into subdirectories of any directory argument. |
 | `-o`, `--output <DIR>` | Write outputs into this directory instead of beside each input. |
 | `--config <FILE>` | Use this configuration instead of the nearest `oboro.toml`. |
+
+A `<PATH>` is a file or a directory, walked as for `clean`.
 
 | Key | Action |
 | --- | --- |

@@ -4,7 +4,7 @@
 //! can be tested without a terminal to draw into.
 
 use std::io::Stdout;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::{Context, Result};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
@@ -41,7 +41,8 @@ enum Outcome {
 /// Returns an error if the terminal cannot be prepared, a file cannot be
 /// read, or a confirmed document cannot be written.
 pub fn run(
-    files: &[PathBuf],
+    inputs: &[crate::walk::Input],
+    skipped: usize,
     config: &Config,
     vault: &mut Vault,
     output_dir: Option<&Path>,
@@ -50,14 +51,18 @@ pub fn run(
     // per file.
     let detector = Detector::new(config).context("preparing the detector")?;
 
+    if skipped > 0 {
+        eprintln!("{skipped} unsupported file(s) skipped");
+    }
+
     // Detection happens before the screen opens, so a file with nothing to
     // review reports it on the ordinary terminal rather than flashing an
     // alternate screen up and straight back down.
     let mut documents = Vec::new();
-    for path in files {
-        let document = Document::open(path, &detector)?;
+    for input in inputs {
+        let document = Document::open(&input.path, input.root.as_deref(), &detector)?;
         if document.decisions.is_empty() {
-            eprintln!("{}: nothing detected, skipped", path.display());
+            eprintln!("{}: nothing detected, skipped", input.path.display());
         } else {
             documents.push(document);
         }
@@ -272,6 +277,7 @@ mod tests {
     use super::*;
     use crate::review::Decision;
     use ratatui::backend::TestBackend;
+    use std::path::PathBuf;
 
     fn document(text: &str) -> Document {
         // Rules-only, so the drawn detections do not depend on whether the
@@ -289,6 +295,7 @@ mod tests {
             .collect();
         Document {
             path: PathBuf::from("note.txt"),
+            root: None,
             text: text.to_owned(),
             decisions,
         }
