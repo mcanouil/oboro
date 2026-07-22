@@ -8,14 +8,17 @@
 #   curl -fsSL https://m.canouil.dev/oboro/install.sh | bash
 #
 # Downloads the prebuilt release binary for this machine, verifies it against
-# the release SHA256SUMS, and installs it. The prebuilt binary is the default
-# feature set: it reads txt, md, docx, xlsx and pdf, and touches no network.
-# Reading images (ocr) and finding untold names (ner) need system libraries
-# and a model download, so those stay a `cargo build --features ...` choice.
+# the release SHA256SUMS, and installs it. The default binary reads txt, md,
+# docx, xlsx and pdf, and touches no network. Passing `--features ner` picks
+# the ner build instead, which also finds untold names once the model is
+# fetched with `oboro models pull`; on Linux it needs glibc 2.39 or newer.
+# Reading images (ocr) needs the Tesseract system libraries, so that stays a
+# `cargo build --features ocr` choice.
 #
 # Environment variables:
 #   OBORO_VERSION             Install this version instead of the latest.
 #   OBORO_INSTALL_DIR         Install here instead of the resolved default.
+#   OBORO_FEATURES            Pick a feature build; `ner` is the only value.
 #   OBORO_SKIP_CHECKSUM=1     Skip SHA256 verification (not recommended).
 #   OBORO_VERIFY_PROVENANCE=1 Also verify build provenance with the gh CLI.
 #
@@ -62,26 +65,38 @@ oboro installer
 
 Usage:
   curl -fsSL https://m.canouil.dev/oboro/install.sh | bash
-  ./install.sh [--version <version>] [--dir <path>] [--help]
+  ./install.sh [--version <version>] [--dir <path>] [--features ner] [--help]
 
 Options:
   --version <version>  Install this version instead of the latest.
   --dir <path>         Install into this directory.
+  --features ner       Install the ner build, which also finds untold names.
+                       Linux: needs glibc 2.39+. Fetch the model afterwards
+                       with 'oboro models pull' (about 348 MB, once).
   --help               Show this help and exit.
 
 Environment variables:
-  OBORO_VERSION, OBORO_INSTALL_DIR, OBORO_SKIP_CHECKSUM,
+  OBORO_VERSION, OBORO_INSTALL_DIR, OBORO_FEATURES, OBORO_SKIP_CHECKSUM,
   OBORO_VERIFY_PROVENANCE. See the script header for details.
 EOF
 }
 
 # oboro publishes one archive per Rust target triple. Map the running machine
 # onto the triple the release job built, so the filename lines up exactly.
+# The ner build links ONNX Runtime, which has no musl build, so on Linux it
+# is a glibc archive where the default is static musl.
 detect_target() {
+	local features="$1"
 	local os arch
 	case "$(uname -s)" in
 	Darwin) os="apple-darwin" ;;
-	Linux) os="unknown-linux-musl" ;;
+	Linux)
+		if [ "${features}" = "ner" ]; then
+			os="unknown-linux-gnu"
+		else
+			os="unknown-linux-musl"
+		fi
+		;;
 	*) error "Unsupported OS: $(uname -s). oboro ships binaries for macOS and Linux." ;;
 	esac
 	case "$(uname -m)" in
@@ -184,6 +199,7 @@ verify_provenance() {
 main() {
 	local version="${OBORO_VERSION:-}"
 	local install_dir_override=""
+	local features="${OBORO_FEATURES:-}"
 
 	while [ "$#" -gt 0 ]; do
 		case "$1" in
@@ -197,6 +213,11 @@ main() {
 			install_dir_override="$2"
 			shift 2
 			;;
+		--features)
+			[ "$#" -ge 2 ] || error "--features needs a value."
+			features="$2"
+			shift 2
+			;;
 		--help | -h)
 			usage
 			exit 0
@@ -205,11 +226,16 @@ main() {
 		esac
 	done
 
+	case "${features}" in
+	"" | ner) ;;
+	*) error "Unsupported feature build: ${features}. The only prebuilt feature build is 'ner'; ocr needs a source build." ;;
+	esac
+
 	info "Installing ${BINARY_NAME}..."
 	echo
 
 	local target
-	target=$(detect_target)
+	target=$(detect_target "${features}")
 
 	if [ -z "${version}" ]; then
 		info "Resolving the latest release..."
@@ -224,17 +250,29 @@ main() {
 
 	info "Version:           ${version}"
 	info "Target:            ${target}"
+	if [ "${features}" = "ner" ]; then
+		info "Features:          ner"
+	fi
 	info "Install directory: ${install_dir}"
 	echo
 
-	local filename="${BINARY_NAME}-${version}-${target}.tar.gz"
+	# The ner archives carry the feature in the filename, after the target.
+	local variant_suffix=""
+	if [ "${features}" = "ner" ]; then
+		variant_suffix="-ner"
+	fi
+	local filename="${BINARY_NAME}-${version}-${target}${variant_suffix}.tar.gz"
 	local base_url="https://github.com/${REPO}/releases/download/${version}"
 
 	tmpdir=$(mktemp -d)
 
 	info "Downloading ${filename}..."
-	download "${base_url}/${filename}" "${tmpdir}/${filename}" ||
+	if ! download "${base_url}/${filename}" "${tmpdir}/${filename}"; then
+		if [ "${features}" = "ner" ]; then
+			error "Download failed. Releases up to 0.2.0 carry no ner archives; see https://github.com/${REPO}/releases for available builds."
+		fi
 		error "Download failed. See https://github.com/${REPO}/releases for available builds."
+	fi
 
 	if [ "${OBORO_SKIP_CHECKSUM:-0}" = "1" ]; then
 		warn "Checksum verification skipped (OBORO_SKIP_CHECKSUM=1)."
@@ -291,12 +329,23 @@ main() {
 	esac
 
 	echo "Next steps:"
+	if [ "${features}" = "ner" ]; then
+		echo "  ${BINARY_NAME} models pull   # Fetch the recognition model (about 348 MB, once)"
+	fi
 	echo "  ${BINARY_NAME} doctor   # Report what this build can do"
 	echo "  ${BINARY_NAME} --help   # List the commands"
 	echo
-	echo "The prebuilt binary is the default feature set. Reading images (ocr) or"
-	echo "finding untold names (ner) needs a source build; see"
-	echo "https://m.canouil.dev/oboro/quickstart.html"
+	if [ "${features}" = "ner" ]; then
+		if [ "$(uname -s)" = "Linux" ]; then
+			echo "The ner binary links glibc: it needs glibc 2.39 or newer (Ubuntu 24.04+,"
+			echo "Debian 13+). On older distributions, build from source instead."
+			echo
+		fi
+	else
+		echo "This is the default feature set. Finding untold names (ner) is also"
+		echo "prebuilt: rerun with --features ner. Reading images (ocr) needs a"
+		echo "source build; see https://m.canouil.dev/oboro/quickstart.html"
+	fi
 }
 
 # Guard: run main only when executed directly, not when sourced. A curl | bash

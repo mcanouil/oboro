@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Features
+
+- feat: Publish prebuilt ner binaries (`x86_64-unknown-linux-gnu-ner`, `aarch64-unknown-linux-gnu-ner`, `aarch64-apple-darwin-ner`), installable with `install.sh --features ner`; the Linux ones need glibc 2.39+ since ONNX Runtime has no musl build.
+- feat: Publish a ner Docker image under `-ner` suffixed tags (`ner`, `<version>-ner`, `main-ner`) with the recognition model baked in and hash-verified at image build, so untold names are found with no download and no network at run time.
+
 ## 0.2.0 (2026-07-22)
 
 ### Features

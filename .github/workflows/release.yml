@@ -202,7 +202,7 @@ jobs:
           } >> "${GITHUB_STEP_SUMMARY}"
 
   build-binaries:
-    name: Build ${{ matrix.target }}
+    name: Build ${{ matrix.target }}${{ matrix.suffix }}
     needs: bump-version
     if: ${{ inputs.create_release }}
     runs-on: ${{ matrix.os }}
@@ -221,10 +221,33 @@ jobs:
           # whatever its glibc version, Alpine included.
           - os: ubuntu-latest
             target: x86_64-unknown-linux-musl
+            features: ""
+            suffix: ""
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
+            features: ""
+            suffix: ""
           - os: macos-latest
             target: aarch64-apple-darwin
+            features: ""
+            suffix: ""
+          # The ner build links ONNX Runtime, whose prebuilt library is
+          # glibc-only, so these are glibc targets rather than musl. The
+          # Ubuntu runners are pinned to 24.04 rather than latest so the
+          # binaries' documented glibc floor (2.39) cannot rise silently
+          # when the alias repoints.
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            features: ner
+            suffix: -ner
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            features: ner
+            suffix: -ner
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            features: ner
+            suffix: -ner
 
     steps:
       - name: Checkout the bump commit
@@ -237,12 +260,19 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      # The cache action does not key on cargo features, so without an
+      # explicit key the default and ner jobs sharing a target would fight
+      # over one cache entry.
       - uses: Swatinem/rust-cache@v2.9.1
         if: ${{ !endsWith(matrix.target, '-musl') }}
+        with:
+          key: ${{ matrix.features }}
 
       # The default build deliberately depends on nothing but Rust, which is
-      # what makes a downloadable binary worth publishing. OCR and the model
-      # need system libraries, so those stay a build-from-source choice.
+      # what makes a downloadable binary worth publishing. The ner build is
+      # published too, as glibc archives, since ONNX Runtime has no musl
+      # build. OCR needs the Tesseract shared libraries at run time, so it
+      # stays a build-from-source choice.
 
       # musl is built inside Alpine, where it is the native target, rather
       # than cross-compiled from Debian. Debian's musl-gcc is a specs wrapper
@@ -268,7 +298,7 @@ jobs:
 
       - name: Build release binary
         if: ${{ !endsWith(matrix.target, '-musl') }}
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --release --locked --target ${{ matrix.target }} ${{ matrix.features && format('--features {0}', matrix.features) || '' }}
 
       - name: Package
         shell: bash
@@ -277,7 +307,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release_assets
-          tar -czf "release_assets/oboro-${VERSION}-${{ matrix.target }}.tar.gz" \
+          tar -czf "release_assets/oboro-${VERSION}-${{ matrix.target }}${{ matrix.suffix }}.tar.gz" \
             -C "target/${{ matrix.target }}/release" oboro
 
       # Lets anyone run `gh attestation verify` and learn which workflow and
@@ -290,7 +320,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: binary-${{ matrix.target }}
+          name: binary-${{ matrix.target }}${{ matrix.suffix }}
           path: release_assets/*.tar.gz
           retention-days: 7
 

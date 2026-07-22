@@ -13,6 +13,8 @@ The image therefore has no capacity to make a network request, whatever it is as
 docker pull ghcr.io/mcanouil/oboro:latest
 ```
 
+A second variant, [the ner image](#the-ner-image), trades that minimalism for name recognition with the model already inside.
+
 ## The vault has to outlive the container
 
 ::: {.callout-important}
@@ -87,13 +89,13 @@ oboro() {
 
 After that, `oboro clean contract.docx` behaves as though it were installed.
 
-## What the image cannot do
+## What the default image cannot do
 
 Optical character recognition needs the Tesseract system libraries, and the recognition model links ONNX Runtime, which has no musl build and so cannot sit in this static image; the model also needs a 348 MB download.
-Putting either in the image would cost every user the weight of a capability most of them will not enable, so neither is included.
+Putting either in this image would cost every user the weight of a capability most of them will not enable, so neither is included.
 
-The image therefore reads `.txt`, `.md`, `.docx`, `.xlsx` and text-based `.pdf`, and finds structured values along with anything on your denylist.
-Names it has not been told about need a build with `--features ner`, described in the [quickstart](quickstart.qmd).
+The default image therefore reads `.txt`, `.md`, `.docx`, `.xlsx` and text-based `.pdf`, and finds structured values along with anything on your denylist.
+Names it has not been told about need the [ner image](#the-ner-image) below, or a binary built with `--features ner` as described in the [quickstart](quickstart.qmd).
 
 Run `doctor` to see what any given build can do:
 
@@ -101,19 +103,36 @@ Run `doctor` to see what any given build can do:
 docker run --rm -v oboro-vault:/vault ghcr.io/mcanouil/oboro:latest doctor
 ```
 
-## Building it yourself
+## The ner image
 
-The `Dockerfile` is in the repository root and is short enough to read in a minute:
+The `ner` tags carry the same tool built with `--features ner`, with the recognition model already inside the image, hash-verified when the image was built:
 
 ```bash
-docker build -t oboro .
+docker pull ghcr.io/mcanouil/oboro:ner
 ```
 
-That builds the default feature set on a static `musl` base.
-The optional features cannot be added on top of it: ONNX Runtime, which `ner` links, has no `musl` build, and `ocr` needs the Tesseract shared libraries at run time, not only while building.
+Every command works exactly as above; only the tag changes.
+Names and organisations nobody listed are found out of the box, and nothing is downloaded on first use.
 
-The supported way to get a features build in a container is the [devcontainer](development.qmd), which already carries the toolchain, Tesseract and the OCR libraries.
-If you want a standalone image with the features, build your own on a `glibc` base rather than extending the shipped one:
+The trade-offs invert.
+This image is glibc on `distroless/cc` rather than static musl, weighs about 450 MB rather than 19, and the binary carries a TLS stack because the `ner` feature depends on an HTTP client for `models pull`.
+The container still has no shell, no package manager and no interpreter, and the baked-in model means it never needs to reach the network: run it with `--network none` to make that a guarantee rather than a promise.
+
+Pinned tags exist alongside the floating one: each release is also published as `<version>-ner`, and the tip of `main` as `main-ner`.
+
+## Building it yourself
+
+Both Dockerfiles are in the repository root and are short enough to read in a minute:
+
+```bash
+docker build -t oboro .                            # default, static musl
+docker build -f Dockerfile.ner -t oboro:ner .      # ner, model baked in
+```
+
+`ocr` cannot be added on top of either: it needs the Tesseract shared libraries at run time, not only while building.
+
+The supported way to get an `ocr` build in a container is the [devcontainer](development.qmd), which already carries the toolchain, Tesseract and the OCR libraries.
+If you want a standalone image with every feature, build your own on a `glibc` base rather than extending the shipped ones:
 
 ```dockerfile
 FROM rust:1-bookworm AS build
@@ -131,5 +150,5 @@ COPY --from=build /src/target/release/oboro /usr/local/bin/oboro
 ENTRYPOINT ["oboro"]
 ```
 
-The runtime stage keeps `tesseract-ocr` because OCR loads it at run time; `ner` still needs `oboro models pull` on first use.
-This is an advanced, unsupported path: the published image and binary stay the default build for the reasons above.
+The runtime stage keeps `tesseract-ocr` because OCR loads it at run time; `ner` built this way still needs `oboro models pull` on first use.
+This is an advanced, unsupported path: the published images stay the default and ner builds for the reasons above.

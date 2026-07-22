@@ -13,6 +13,7 @@ on:
       - "Cargo.lock"
       - "rust-toolchain.toml"
       - "Dockerfile"
+      - "Dockerfile.ner"
       - ".dockerignore"
       - ".github/workflows/docker.yml"
   # Build without pushing, so a broken Dockerfile is caught before it lands.
@@ -23,6 +24,7 @@ on:
       - "Cargo.lock"
       - "rust-toolchain.toml"
       - "Dockerfile"
+      - "Dockerfile.ner"
       - ".dockerignore"
       - ".github/workflows/docker.yml"
   release:
@@ -41,18 +43,19 @@ env:
 
 jobs:
   build:
-    name: Build ${{ matrix.platform }}
+    name: Build ${{ matrix.variant }} ${{ matrix.platform }}
     runs-on: ${{ matrix.runner }}
 
     strategy:
       fail-fast: false
       # Native runners rather than QEMU: emulating a Rust build costs more time
-      # than the whole rest of this workflow. Pull requests validate the
-      # Dockerfile on amd64 alone; pushes and releases build both architectures.
+      # than the whole rest of this workflow. Pull requests validate both
+      # Dockerfiles on amd64 alone; pushes and releases build both variants on
+      # both architectures.
       matrix:
         include: ${{ github.event_name == 'pull_request'
-          && fromJSON('[{"platform":"linux/amd64","runner":"ubuntu-latest"}]')
-          || fromJSON('[{"platform":"linux/amd64","runner":"ubuntu-latest"},{"platform":"linux/arm64","runner":"ubuntu-24.04-arm"}]') }}
+          && fromJSON('[{"variant":"default","dockerfile":"Dockerfile","platform":"linux/amd64","runner":"ubuntu-latest"},{"variant":"ner","dockerfile":"Dockerfile.ner","platform":"linux/amd64","runner":"ubuntu-latest"}]')
+          || fromJSON('[{"variant":"default","dockerfile":"Dockerfile","platform":"linux/amd64","runner":"ubuntu-latest"},{"variant":"default","dockerfile":"Dockerfile","platform":"linux/arm64","runner":"ubuntu-24.04-arm"},{"variant":"ner","dockerfile":"Dockerfile.ner","platform":"linux/amd64","runner":"ubuntu-latest"},{"variant":"ner","dockerfile":"Dockerfile.ner","platform":"linux/arm64","runner":"ubuntu-24.04-arm"}]') }}
 
     permissions:
       contents: read
@@ -80,10 +83,11 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
+          file: ${{ matrix.dockerfile }}
           platforms: ${{ matrix.platform }}
           push: false
-          cache-from: type=gha,scope=${{ matrix.platform }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.platform }}
+          cache-from: type=gha,scope=${{ matrix.variant }}-${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.variant }}-${{ matrix.platform }}
 
       # Each architecture is pushed by digest; the manifest below joins them
       # under the human-readable tags.
@@ -93,10 +97,11 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
+          file: ${{ matrix.dockerfile }}
           platforms: ${{ matrix.platform }}
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
-          cache-from: type=gha,scope=${{ matrix.platform }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.platform }}
+          cache-from: type=gha,scope=${{ matrix.variant }}-${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.variant }}-${{ matrix.platform }}
 
       - name: Export the digest
         if: ${{ github.event_name != 'pull_request' }}
@@ -107,30 +112,48 @@ jobs:
         env:
           DIGEST: ${{ steps.push.outputs.digest }}
 
+      # The variant keys the artifact so the manifest job can collect one
+      # variant's digests and no other's. job-index rather than the platform:
+      # matrix.platform holds a slash, which artifact names reject.
       - name: Upload the digest
         if: ${{ github.event_name != 'pull_request' }}
         uses: actions/upload-artifact@v7
         with:
-          name: digest-${{ strategy.job-index }}
+          name: digest-${{ matrix.variant }}-${{ strategy.job-index }}
           path: ${{ runner.temp }}/digests/*
           if-no-files-found: error
           retention-days: 1
 
   manifest:
-    name: Publish the manifest
+    name: Publish the ${{ matrix.variant }} manifest
     needs: build
     if: ${{ github.event_name != 'pull_request' }}
     runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The ner variant's floating tag is `ner`, mirroring `latest`,
+          # rather than the redundant `latest-ner`.
+          - variant: default
+            suffix: ""
+            floating: latest
+          - variant: ner
+            suffix: -ner
+            floating: ner
 
     permissions:
       contents: read
       packages: write
 
     steps:
+      # `default` and `ner` are not prefixes of each other, so each pattern
+      # collects exactly its own variant's digests.
       - name: Download the digests
         uses: actions/download-artifact@v8
         with:
-          pattern: digest-*
+          pattern: digest-${{ matrix.variant }}-*
           merge-multiple: true
           path: ${{ runner.temp }}/digests
 
@@ -151,20 +174,22 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           REF_NAME: ${{ github.ref_name }}
           SHA: ${{ github.sha }}
+          SUFFIX: ${{ matrix.suffix }}
+          FLOATING: ${{ matrix.floating }}
         run: |
           set -euo pipefail
           # The tag list is built here from environment variables rather than
           # interpolated into the script, and a release ref is validated, so a
           # ref name carrying shell metacharacters cannot run as code.
-          tags=(--tag "${IMAGE}:${SHA}")
+          tags=(--tag "${IMAGE}:${SHA}${SUFFIX}")
           if [ "${EVENT_NAME}" = "release" ]; then
             if ! printf '%s' "${REF_NAME}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
               echo "::error::unexpected release tag: ${REF_NAME}"
               exit 1
             fi
-            tags+=(--tag "${IMAGE}:${REF_NAME}" --tag "${IMAGE}:latest")
+            tags+=(--tag "${IMAGE}:${REF_NAME}${SUFFIX}" --tag "${IMAGE}:${FLOATING}")
           else
-            tags+=(--tag "${IMAGE}:main")
+            tags+=(--tag "${IMAGE}:main${SUFFIX}")
           fi
           # shellcheck disable=SC2046
           docker buildx imagetools create "${tags[@]}" \
@@ -172,15 +197,18 @@ jobs:
 
       - name: Summary
         shell: bash
+        env:
+          SUFFIX: ${{ matrix.suffix }}
+          FLOATING: ${{ matrix.floating }}
         run: |
           {
-            echo "## Image"
+            echo "## Image (${{ matrix.variant }})"
             echo ""
-            echo "- \`${IMAGE}:${GITHUB_SHA}\`"
+            echo "- \`${IMAGE}:${GITHUB_SHA}${SUFFIX}\`"
             if [ "${GITHUB_EVENT_NAME}" = "release" ]; then
-              echo "- \`${IMAGE}:${GITHUB_REF_NAME}\`"
-              echo "- \`${IMAGE}:latest\`"
+              echo "- \`${IMAGE}:${GITHUB_REF_NAME}${SUFFIX}\`"
+              echo "- \`${IMAGE}:${FLOATING}\`"
             else
-              echo "- \`${IMAGE}:main\`"
+              echo "- \`${IMAGE}:main${SUFFIX}\`"
             fi
           } >> "${GITHUB_STEP_SUMMARY}"

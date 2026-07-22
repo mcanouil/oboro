@@ -33,6 +33,13 @@ Several ways in, quickest first; the [Quickstart](https://m.canouil.dev/oboro/qu
 curl -fsSL https://m.canouil.dev/oboro/install.sh | bash
 ```
 
+Add `--features ner` for the build that also finds untold names (Linux: glibc 2.39+), then fetch its model:
+
+```bash
+curl -fsSL https://m.canouil.dev/oboro/install.sh | bash -s -- --features ner
+oboro models pull   # about 348 MB, once
+```
+
 **Docker** — no toolchain, one static binary; the vault volume holds the mapping, so it is not optional:
 
 ```bash
@@ -41,11 +48,13 @@ docker run --rm -v oboro-vault:/vault -v "$PWD":/work -w /work \
   --user "$(id -u):$(id -g)" ghcr.io/mcanouil/oboro:latest clean contract.docx
 ```
 
+The `ghcr.io/mcanouil/oboro:ner` tag carries the ner build with the recognition model already inside, so untold names are found with no download and no network at run time.
+
 **Prebuilt binary, by hand** — download the archive for your machine and `SHA256SUMS` from the [releases page](https://github.com/mcanouil/oboro/releases), verify, and put `oboro` on your `PATH`.
 
 **With Rust** — `cargo install --git https://github.com/mcanouil/oboro`.
 
-**From source** — required for the optional features, which the prebuilt binary and the image do not carry:
+**From source** — required for `ocr`, which no prebuilt binary or image carries:
 
 ```bash
 git clone https://github.com/mcanouil/oboro.git
@@ -56,7 +65,7 @@ cargo build --release --features "ner,ocr"   # names and image OCR
 
 **Devcontainer** — for building or contributing with only Docker on the host; it carries the pinned toolchain, Tesseract and the OCR libraries. Reopen the folder in the container in Visual Studio Code or a GitHub Codespace; see [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
-The prebuilt binary and the Docker image are the default feature set. Optical character recognition (`ocr`) needs the Tesseract system libraries. Name recognition (`ner`) links ONNX Runtime, which is fetched over the network while you build and has no musl build, so it cannot go in the static release binary. Both therefore stay a source build.
+The default prebuilt binary and Docker image carry no optional feature. Name recognition (`ner`) links ONNX Runtime, which has no musl build, so its prebuilt forms are separate: glibc release archives via the install script, and the `:ner` image. Optical character recognition (`ocr`) needs the Tesseract shared libraries at run time, so it stays a source build.
 
 ## Usage
 
@@ -139,7 +148,8 @@ are matched with French patterns only, and phone numbers are read against one
 country may be missed while an international `+` number is always caught.
 
 Personal and company names are found by a local, multilingual recognition
-model, built with `--features ner`:
+model, in any build with `--features ner`. The install script and the `:ner`
+Docker image both ship one prebuilt; from source it is:
 
 ```bash
 cargo build --release --features ner   # downloads ONNX Runtime while building
@@ -149,7 +159,8 @@ oboro models pull   # about 348 MB, once, verified against pinned hashes
 The build fetches ONNX Runtime, so `--features ner` needs network access at
 build time and a fully offline build fails there. The model itself runs on
 your machine. Once built, `models pull` is the only command that touches the
-network, and only when you run it.
+network, and only when you run it; the `:ner` image skips even that, since
+the model is baked in.
 
 Without the model, names are matched from the denylist in `oboro.toml`
 instead.

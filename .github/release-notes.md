@@ -12,6 +12,13 @@ curl -fsSL https://m.canouil.dev/oboro/install.sh | bash -s -- --version %%VERSI
 The script picks the archive for your machine, verifies it against `SHA256SUMS`, and installs into `/usr/local/bin` when writable, otherwise `~/.local/bin`.
 It needs `bash` and `curl`; on a minimal distribution such as Alpine, install them first with `apk add bash curl`.
 
+Add `--features ner` for the build that also finds untold names (on Linux it needs glibc 2.39+), then fetch its model:
+
+```bash
+curl -fsSL https://m.canouil.dev/oboro/install.sh | bash -s -- --version %%VERSION%% --features ner
+oboro models pull   # about 348 MB, once, verified against pinned hashes
+```
+
 ### Docker
 
 ```bash
@@ -25,6 +32,8 @@ docker run --rm \
 
 The vault volume is not optional.
 Without it the mapping between placeholders and real values disappears with the container, and the document can never be restored.
+
+The `ghcr.io/mcanouil/oboro:%%VERSION%%-ner` tag carries the ner build with the recognition model already inside the image, so untold names are found with no download and no network at run time.
 
 ### A prebuilt binary
 
@@ -54,18 +63,18 @@ cargo install --git https://github.com/mcanouil/oboro --tag %%VERSION%%
 
 ### From source, with the optional features
 
-The published binaries are the default build.
-They read `.txt`, `.md`, `.docx`, `.xlsx` and text-based `.pdf`, and find structured values and anything on your denylist.
-
+The default binaries read `.txt`, `.md`, `.docx`, `.xlsx` and text-based `.pdf`, and find structured values and anything on your denylist.
 They do **not** find names nobody told them about, and they do not read images.
-Names link ONNX Runtime, fetched over the network while building; images need the Tesseract system libraries. Both are compiled in rather than shipped:
+
+Names need a `-ner` archive from the table below (then `oboro models pull`), the `:%%VERSION%%-ner` image, or a source build.
+Images need the Tesseract system libraries, so reading them stays a source build:
 
 ```bash
 cargo build --release --features ner   # names and organisations, then: oboro models pull
 cargo build --release --features ocr   # images and scanned pages, needs Tesseract
 ```
 
-If names are not being redacted, this is almost certainly why.
+If names are not being redacted, a default build is almost certainly why.
 `oboro doctor` reports what any build can do.
 
 To build the optional features without setting up the system libraries on your machine, use the devcontainer, which carries the pinned toolchain, Tesseract and the OCR libraries:
@@ -97,6 +106,11 @@ It would be inconsistent to ask you to trust its own binaries on sight.
 | `x86_64-unknown-linux-musl` | Linux on Intel or AMD. Statically linked, so any distribution, glibc version or Alpine. |
 | `aarch64-unknown-linux-musl` | Linux on ARM, including most cloud instances. Statically linked. |
 | `aarch64-apple-darwin` | macOS on Apple silicon. |
+| `x86_64-unknown-linux-gnu-ner` | Linux on Intel or AMD, with name recognition. Needs glibc 2.39+ (Ubuntu 24.04+, Debian 13+). |
+| `aarch64-unknown-linux-gnu-ner` | Linux on ARM, with name recognition. Needs glibc 2.39+. |
+| `aarch64-apple-darwin-ner` | macOS on Apple silicon, with name recognition. |
+
+The `-ner` archives find untold names once the model is fetched with `oboro models pull`; the others are the smaller default build.
 
 There is no Windows build.
 The code that creates the vault key readable only by you is Unix-specific, and shipping a build where that quietly does nothing would misrepresent what the tool guarantees.

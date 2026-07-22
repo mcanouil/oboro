@@ -18,6 +18,15 @@ It installs into `/usr/local/bin` when writable, otherwise `~/.local/bin`.
 Pin a version with `--version`, choose a directory with `--dir`, and pass `--help` for the rest.
 The script needs `bash` and `curl`; on a minimal distribution such as Alpine, install them first with `apk add bash curl`.
 
+To also find names nobody told the tool about, install the ner build and fetch its model:
+
+```bash
+curl -fsSL https://m.canouil.dev/oboro/install.sh | bash -s -- --features ner
+oboro models pull   # about 348 MB, once
+```
+
+On Linux the ner binary needs glibc 2.39 or newer (Ubuntu 24.04+, Debian 13+); the default binary is static and runs anywhere.
+
 ### Docker
 
 No toolchain needed; the image is one static binary on `distroless`.
@@ -32,7 +41,7 @@ docker run --rm \
   ghcr.io/mcanouil/oboro:latest clean contract.docx
 ```
 
-The [Docker](docker.qmd) page covers `restore` and the volume in full.
+The [Docker](docker.qmd) page covers `restore` and the volume in full, along with the `ghcr.io/mcanouil/oboro:ner` variant, which finds untold names with the recognition model already inside the image.
 
 ### Prebuilt binary, by hand
 
@@ -57,7 +66,7 @@ cargo install --git https://github.com/mcanouil/oboro
 
 ### From source
 
-Required for the optional features, which the prebuilt binary and the image do not carry:
+Required for `ocr`, which no prebuilt binary or image carries, and for a `ner` build on a Linux distribution older than the prebuilt one's glibc:
 
 ```bash
 git clone https://github.com/mcanouil/oboro.git
@@ -68,7 +77,8 @@ cargo build --release
 The binary lands in `target/release/oboro`.
 
 That plain build depends on nothing but Rust.
-Two capabilities are optional and compiled in rather than shipped: reading images needs the Tesseract system libraries, and recognising names links ONNX Runtime, which the build fetches over the network.
+Two capabilities are optional: reading images needs the Tesseract system libraries, and recognising names links ONNX Runtime, which the build fetches over the network.
+The ner build is also shipped prebuilt, by the [install script](#install-script) and as [a Docker image](docker.qmd); ocr is compiled in rather than shipped.
 
 ::: {.panel-tabset}
 
