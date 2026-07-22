@@ -1,0 +1,89 @@
+# @license MIT
+# @copyright 2026 Mickaël Canouil
+# @author Mickaël Canouil
+
+# The ner build, with the recognition model already inside.
+#
+# This image inverts the default image's trade-offs. That one is a static
+# musl binary in a distroless-static base: small, offline, nothing to audit.
+# This one is glibc, roughly 450 MB, and carries a TLS stack (ureq) and the
+# 348 MB GLiNER model, because ONNX Runtime has no musl build and the model
+# is what makes `--features ner` worth having. In exchange, the container
+# finds untold names with no network access at run time: the model is baked
+# in, hash-verified at image build.
+#
+# The model-pull layer sits below the source layer, so any source change
+# re-downloads the model on the next uncached build. Accepted: it keeps
+# src/models.rs the single source of truth for the URLs and hashes rather
+# than parsing them out in shell here. If Hugging Face throttling ever
+# breaks CI, the escape hatch is a download stage keyed on src/models.rs.
+
+# Pinned by digest so a registry-side tag repoint cannot change what the binary
+# is built from. Dependabot bumps the digest when the tag moves.
+# bookworm rather than alpine: the ner build links ONNX Runtime, whose
+# prebuilt library is glibc-only.
+FROM rust:1-bookworm@sha256:77fac8b98f9f46062bb680b6d25d5bcaabfc400143952ebc572e924bcbedc3fa AS build
+
+WORKDIR /src
+
+# Dependencies are built from the manifests alone, so editing the source does
+# not rebuild the whole tree on every image build. This step also downloads
+# ONNX Runtime, which ort fetches while building.
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+RUN mkdir -p src \
+  && echo 'fn main() {}' > src/main.rs \
+  && echo '' > src/lib.rs \
+  && cargo build --release --locked --features ner \
+  && rm -rf src
+
+COPY src ./src
+# The stale fingerprint from the stub above would otherwise be reused.
+RUN touch src/main.rs src/lib.rs \
+  && cargo build --release --locked --features ner \
+  && strip target/release/oboro
+
+# The tool fetches its own model: `models pull` downloads both artefacts and
+# verifies them against the hashes pinned in src/models.rs, so a compromised
+# mirror cannot slip different weights into the image. HOME steers the
+# download to a directory the final stage can copy wholesale.
+RUN HOME=/model ./target/release/oboro models pull
+
+# Docker seeds a fresh named volume from whatever the image holds at that
+# path, ownership included. Shipping an empty directory owned by the runtime
+# user is what makes `-v oboro-vault:/vault` writable; without it the volume
+# arrives owned by root and the container cannot write its own key.
+RUN mkdir -p /seed-vault
+
+# Pinned by digest for the same reason as the build stage. cc rather than
+# static: ONNX Runtime needs libstdc++ and libgcc at run time.
+FROM gcr.io/distroless/cc-debian12:nonroot@sha256:fccdbb0a547c14e23fcf4ce8ad62ca5d43b4faae8d22cd292f490fef9946c96e
+
+COPY --from=build /src/target/release/oboro /usr/local/bin/oboro
+COPY --from=build --chown=nonroot:nonroot /seed-vault /vault
+# The model lands where models::directory() resolves it: $HOME/.oboro. HOME
+# is set explicitly so the lookup still works when the container runs under
+# `--user` with an identity that has no passwd entry.
+COPY --from=build --chown=nonroot:nonroot /model/.oboro /home/nonroot/.oboro
+ENV HOME=/home/nonroot
+
+# A container's filesystem goes when the container does. For this tool that
+# is not an inconvenience but a silent, permanent failure: clean succeeds,
+# the mapping vanishes with the container, and restore can never recover the
+# document. Pointing the defaults at a declared volume means the documented
+# commands all mount one place.
+# Named KEY_FILE rather than KEY because it holds a path, not key material;
+# the shorter name reads like a secret and gets flagged as one.
+ENV OBORO_VAULT=/vault/vault.db \
+    OBORO_KEY_FILE=/vault/key
+VOLUME ["/vault"]
+
+WORKDIR /work
+
+ENTRYPOINT ["/usr/local/bin/oboro"]
+CMD ["--help"]
+
+LABEL org.opencontainers.image.title="oboro (ner)" \
+      org.opencontainers.image.description="Replace sensitive values in documents with reversible placeholders before sharing them with a language model. Built with the ner feature and the recognition model baked in." \
+      org.opencontainers.image.source="https://github.com/mcanouil/oboro" \
+      org.opencontainers.image.documentation="https://m.canouil.dev/oboro/" \
+      org.opencontainers.image.licenses="MIT"
