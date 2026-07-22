@@ -1,0 +1,65 @@
+# @license MIT
+# @copyright 2026 Mickaël Canouil
+# @author Mickaël Canouil
+
+name: GHCR cleanup
+
+# Every push to main publishes two tagged manifest lists (<sha>, <sha>-ner)
+# plus their untagged per-architecture and attestation manifests. Nothing
+# references most of them for long, and nothing else cleans them up. This
+# deletes the per-commit sha tags and any untagged version no surviving
+# tagged manifest list references, and keeps the release tags (<version>,
+# <version>-ner), the floating tags (latest, ner) and the branch tags
+# (main, main-ner).
+
+on:
+  schedule:
+    # Weekly is enough: the backlog grows by two tagged images per push to
+    # main, and the deletion is idempotent.
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        type: boolean
+        description: "Log what would be deleted without deleting it"
+        default: false
+
+permissions:
+  contents: read
+
+# The cleanup action is not safe to run twice against the same package at
+# once, so runs queue rather than overlap.
+concurrency:
+  group: ghcr-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    name: Delete stale package versions
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      # Pinned by commit rather than tag, like the registry images in the
+      # Dockerfiles: a tag repoint on a third-party action with delete
+      # rights over the package must not change what runs here.
+      - name: Clean up ghcr.io/${{ github.repository }}
+        uses: dataaxiom/ghcr-cleanup-action@d52806a0dc70b430571a37da1fde39733ffd640f # v1.2.2
+        with:
+          # Exactly the per-commit tags: 40 hex characters, with or without
+          # the ner variant suffix. Untagged versions that deletion orphans
+          # (per-architecture and attestation manifests) are deleted by
+          # default, and only when no tagged manifest list references them.
+          delete-tags: "^[0-9a-f]{40}(-ner)?$"
+          use-regex: true
+          # Belt and braces: excluded tags take priority over every delete
+          # rule, so a matching mistake above cannot take a kept tag with it.
+          exclude-tags: "^(latest|ner|main(-ner)?|[0-9]+\\.[0-9]+\\.[0-9]+(-ner)?)$"
+          # Post-run scan that every surviving multi-arch image still has
+          # all of its children.
+          validate: true
+          dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run }}
+          token: ${{ secrets.GITHUB_TOKEN }}
