@@ -74,8 +74,14 @@ It does not remove the shape of the story around it.
 A document describing a dispute with a named supplier in a named town in a named month may identify everyone involved even with every name replaced.
 Structured identifiers are the part this tool can handle; inference from context is not, and no placeholder scheme solves it.
 
-## Language coverage
+## Languages
 
-The rules are written for French and English documents.
-The address patterns in particular are French.
-The recognition model is multilingual, but the tool has been exercised mostly on those two languages.
+Detection does not depend on the document's language, and you never declare one.
+Structured identifiers such as emails, IBANs, payment cards and IP addresses are matched by format, so they work in any language.
+The recognition model is multilingual and reads the whole document in one pass, so a file that mixes languages, for example French and English names side by side, is handled at once with no per-language setting.
+
+Two things are single-locale rather than language-neutral.
+Postal address patterns are French only, so an address in another country is left to the recognition model or to your denylist.
+Phone numbers are read against one `default_region`, `FR` by default, so a number written in another country's national format may be missed; a number in international `+` form is caught whatever the region.
+
+The tool has been exercised mostly on French and English, though nothing in it is limited to those two.
