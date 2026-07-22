@@ -108,7 +108,7 @@ $line-height-base: 1.65;
 // The navbar is pinned to the night palette in both schemes (background: dark
 // in _quarto.yml), so anything anchored to it, the tool pills, the widget
 // menu, the toggle, keeps the dark surface. These are deliberately not
-// overridden under [data-bs-theme="dark"]: they do not follow the page scheme.
+// overridden under .quarto-dark: they do not follow the page scheme.
 
 :root {
   --oboro-navbar-bg: #1b242e;
@@ -124,7 +124,7 @@ $line-height-base: 1.65;
   --oboro-moon-soft: rgba(201, 162, 39, 0.14);
 }
 
-[data-bs-theme="dark"] {
+.quarto-dark {
   --oboro-moon: #e6c558;
   --oboro-moon-mark: #e6c558;
   --oboro-moon-soft: rgba(230, 197, 88, 0.16);
@@ -326,7 +326,7 @@ $oboro-icon-moon: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg
 
 // Quarto hard-codes #dee2e6 on the panel's left/right/bottom edges, which does
 // not adapt to dark; re-derive them from body-mix() so all four edges match.
-[data-bs-theme] .panel-tabset > .tab-content {
+html .panel-tabset > .tab-content {
   border-color: body-mix(85%);
 }
 
@@ -352,24 +352,26 @@ $oboro-icon-moon: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg
 // ===========================================================================
 // CODE
 // ===========================================================================
-// Quarto bakes a fixed grey into div.sourceCode. The [data-bs-theme] prefix
-// (always on <html>) raises specificity so these win, and body-mix() derives
-// the surface from the live theme colours, correct in both light and dark.
+// Quarto bakes a fixed grey into div.sourceCode. Quarto marks the scheme with
+// body.quarto-dark / .quarto-light and swaps the whole stylesheet bundle, so an
+// html prefix (not the never-set data-bs-theme) raises specificity over Quarto's
+// rule; body-mix() derives the surface from the per-bundle theme colours,
+// correct in both light and dark.
 
-[data-bs-theme] div.sourceCode,
-[data-bs-theme] pre:not(.sourceCode) {
+html div.sourceCode,
+html pre:not(.sourceCode) {
   background-color: body-mix(95%);
   border: 1px solid body-mix(85%);
   border-radius: $border-radius-sm;
 }
 
-[data-bs-theme] pre.sourceCode {
+html pre.sourceCode {
   background-color: transparent;
   border: none;
 }
 
 // Code Window extension: its style.css uses the CSS system colour `Canvas`,
-// which follows the OS scheme rather than the [data-bs-theme] toggle. Re-skin
+// which follows the OS scheme rather than the active colour-scheme bundle. Re-skin
 // the container and title bar with body-mix() so the block follows the page
 // scheme. A leading `div` keeps these authoritative over the extension's
 // class-only rules regardless of load order.
