@@ -12,6 +12,8 @@ passes ISO 13616 mod-97, and the card number is the well-known test value.
 | `contract.txt` | Plain text, every rule-based recogniser |
 | `contract.docx` | Word extraction, including accented entity references |
 | `clients.xlsx` | Spreadsheet extraction across columns |
+| `clients.csv` | Comma-separated values, passed through as text |
+| `clients.tsv` | Tab-separated values, passed through as text |
 | `invoice.pdf` | PDF with embedded text |
 | `letterhead.docx` | Text living in header and footer parts, not the body |
 | `sparse.pdf` | A short but genuine document, which must still be read |

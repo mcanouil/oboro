@@ -7,10 +7,14 @@
 //! one of them would otherwise be reported as dead code.
 #![allow(dead_code)]
 
+mod xlsx_builder;
+
 use std::path::{Path, PathBuf};
 
 use assert_cmd::Command;
 use tempfile::TempDir;
+
+pub use xlsx_builder::write_xlsx;
 
 /// Absolute path to a file in `testdata/`.
 pub fn fixture(name: &str) -> PathBuf {

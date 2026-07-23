@@ -24,6 +24,15 @@ use crate::config::Config;
 use crate::detect::Detector;
 use crate::vault::Vault;
 
+/// Output naming shared by every document of one input path: the stem is
+/// redacted once instead of per sheet, and the namer keeps two sheets whose
+/// names sanitise identically in distinct output files.
+#[derive(Default)]
+struct Naming {
+    stem: Option<String>,
+    namer: super::SheetNamer,
+}
+
 /// What the user asked for on leaving a document.
 enum Outcome {
     /// Write this document and move to the next.
@@ -60,11 +69,12 @@ pub fn run(
     // alternate screen up and straight back down.
     let mut documents = Vec::new();
     for input in inputs {
-        let document = Document::open(&input.path, input.root.as_deref(), &detector)?;
-        if document.decisions.is_empty() {
-            eprintln!("{}: nothing detected, skipped", input.path.display());
-        } else {
-            documents.push(document);
+        for document in Document::open_all(&input.path, input.root.as_deref(), &detector)? {
+            if document.decisions.is_empty() {
+                eprintln!("{}: nothing detected, skipped", document.describe());
+            } else {
+                documents.push(document);
+            }
         }
     }
     if documents.is_empty() {
@@ -72,33 +82,65 @@ pub fn run(
     }
 
     let mut written = Vec::new();
+    let mut written_outputs = super::WrittenOutputs::new();
     let mut skipped = Vec::new();
     let mut quit = false;
-    {
+    let mut namings: std::collections::HashMap<std::path::PathBuf, Naming> =
+        std::collections::HashMap::new();
+    // The loop's result is held rather than propagated with `?`, so the
+    // summary below still reports what was written before a failure; the
+    // guard's Drop has already restored the terminal by then.
+    let outcome = (|| -> Result<()> {
         // One alternate screen for the whole batch, restored by the guard's
         // Drop even if a draw or a write below fails or panics.
         let mut guard = TerminalGuard::new().context("preparing the terminal")?;
         for document in &mut documents {
             match review_one(guard.terminal(), document)? {
                 Outcome::Write => {
-                    let stem = if config.redact_filenames {
-                        Some(super::redacted_stem(&document.path, &detector, vault)?)
-                    } else {
-                        None
+                    let naming = match namings.entry(document.path.clone()) {
+                        std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+                        std::collections::hash_map::Entry::Vacant(entry) => {
+                            let stem = if config.redact_filenames {
+                                Some(super::redacted_stem(&document.path, &detector, vault)?)
+                            } else {
+                                None
+                            };
+                            entry.insert(Naming {
+                                stem,
+                                namer: super::SheetNamer::new(),
+                            })
+                        }
                     };
-                    written.push(document.write(vault, output_dir, stem.as_deref())?);
+                    let fragment = match &document.sheet {
+                        Some((index, name)) => Some(naming.namer.fragment(
+                            name,
+                            *index,
+                            config.redact_filenames,
+                            &detector,
+                            vault,
+                        )?),
+                        None => None,
+                    };
+                    written.push(document.write(
+                        vault,
+                        output_dir,
+                        naming.stem.as_deref(),
+                        fragment.as_deref(),
+                        &mut written_outputs,
+                    )?);
                 }
-                Outcome::Skip => skipped.push(document.path.clone()),
+                Outcome::Skip => skipped.push(document.describe()),
                 Outcome::Quit => {
                     quit = true;
                     break;
                 }
             }
         }
-    }
+        Ok(())
+    })();
 
-    for path in &skipped {
-        eprintln!("{}: skipped, nothing written", path.display());
+    for document in &skipped {
+        eprintln!("{document}: skipped, nothing written");
     }
     for path in &written {
         eprintln!("wrote {}", path.display());
@@ -106,7 +148,7 @@ pub fn run(
     if quit {
         eprintln!("stopped; {} file(s) written", written.len());
     }
-    Ok(())
+    outcome
 }
 
 type Screen = Terminal<CrosstermBackend<Stdout>>;
@@ -220,7 +262,7 @@ fn draw_header(frame: &mut ratatui::Frame, area: Rect, document: &Document) {
     let total = document.decisions.len();
     let title = format!(
         " {}  —  {accepted} of {total} will be redacted ",
-        document.path.display()
+        document.describe()
     );
     frame.render_widget(
         Paragraph::new(title).block(Block::default().borders(Borders::ALL)),
@@ -303,6 +345,7 @@ mod tests {
         Document {
             path: PathBuf::from("note.txt"),
             root: None,
+            sheet: None,
             text: text.to_owned(),
             decisions,
         }

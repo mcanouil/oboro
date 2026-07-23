@@ -49,8 +49,9 @@ The same value always becomes the same placeholder, so a model can still tell th
 | Format | How |
 | --- | --- |
 | `.txt`, `.md` | Directly. |
+| `.csv`, `.tsv` | Directly. The output keeps the tabular extension. |
 | `.docx` | Text runs from the body, headers, footers, footnotes and comments. |
-| `.xlsx`, `.xlsm` | Every sheet, flattened to rows. |
+| `.xlsx`, `.xlsm` | One TSV file per sheet, named `book.<sheet>.clean.tsv`. |
 | `.pdf` | Embedded text. Scanned PDFs are refused rather than half-read. |
 | `.png`, `.jpg`, `.tif` | Tesseract, in a build compiled with `--features ocr`. |
 

@@ -11,7 +11,7 @@ mod ui;
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 
 use crate::detect::{Detector, Span};
 use crate::vault::Vault;
@@ -32,12 +32,20 @@ pub struct Document {
     /// directory on write. `None` for a file named directly on the command
     /// line. See [`crate::walk::Input`].
     pub root: Option<PathBuf>,
+    /// The workbook sheet this document came from, as its zero-based position
+    /// and raw name. `None` for a whole-file document. The name may hold PII
+    /// and path-hostile characters; [`SheetNamer`] turns it into a filename
+    /// part.
+    pub sheet: Option<(usize, String)>,
     pub text: String,
     pub decisions: Vec<Decision>,
 }
 
 impl Document {
     /// Reads and analyses `path` with a detector shared across the batch.
+    ///
+    /// A plain document yields one entry; a workbook yields one per sheet, so
+    /// each table is reviewed and written on its own.
     ///
     /// `root` is the directory the file was discovered under, used to mirror
     /// the tree on write; it is `None` for a directly named file.
@@ -48,21 +56,37 @@ impl Document {
     /// # Errors
     ///
     /// Returns an error if the file cannot be read or detection fails.
-    pub fn open(path: &Path, root: Option<&Path>, detector: &Detector) -> Result<Self> {
-        let text = crate::convert::to_text(path)?;
-        let decisions = crate::pipeline::detect(&text, detector)?
+    pub fn open_all(path: &Path, root: Option<&Path>, detector: &Detector) -> Result<Vec<Self>> {
+        crate::convert::read(path)?
+            .into_parts()
             .into_iter()
-            .map(|span| Decision {
-                span,
-                accepted: true,
+            .map(|(sheet, text)| {
+                let decisions = crate::pipeline::detect(&text, detector)?
+                    .into_iter()
+                    .map(|span| Decision {
+                        span,
+                        accepted: true,
+                    })
+                    .collect();
+                Ok(Self {
+                    path: path.to_path_buf(),
+                    root: root.map(Path::to_path_buf),
+                    sheet,
+                    text,
+                    decisions,
+                })
             })
-            .collect();
-        Ok(Self {
-            path: path.to_path_buf(),
-            root: root.map(Path::to_path_buf),
-            text,
-            decisions,
-        })
+            .collect()
+    }
+
+    /// Names this document for messages: the path, plus the sheet when it is
+    /// one table of a workbook.
+    #[must_use]
+    pub fn describe(&self) -> String {
+        match &self.sheet {
+            Some((_, name)) => format!("{} [{name}]", self.path.display()),
+            None => self.path.display().to_string(),
+        }
     }
 
     #[must_use]
@@ -108,28 +132,132 @@ impl Document {
 
     /// Writes the reviewed result beside the input, as `clean` does.
     ///
+    /// `written` records every destination this run has produced; a second
+    /// document resolving to one of them is refused before its values are
+    /// stored, so an earlier reviewed output is never silently replaced.
+    ///
     /// # Errors
     ///
-    /// Returns an error if the vault fails or the file cannot be written.
+    /// Returns an error if the destination was already written this run, the
+    /// vault fails, or the file cannot be written.
     pub fn write(
         &self,
         vault: &mut Vault,
         output_dir: Option<&Path>,
         stem_override: Option<&str>,
+        sheet_fragment: Option<&str>,
+        written: &mut WrittenOutputs,
     ) -> Result<PathBuf> {
+        let destination = output_path(
+            &self.path,
+            output_dir,
+            self.root.as_deref(),
+            stem_override,
+            sheet_fragment,
+        )?;
+        written.claim(&destination)?;
         let report = self.apply(vault)?;
-        let destination = output_path(&self.path, output_dir, self.root.as_deref(), stem_override)?;
-        if let Some(parent) = destination.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("creating output directory {}", parent.display()))?;
-        }
-        std::fs::write(&destination, &report.text)
-            .with_context(|| format!("writing {}", destination.display()))?;
+        write_output(&destination, &report.text)?;
+        written.record(&destination)?;
         Ok(destination)
     }
 }
 
-/// Builds the sanitised output path, `report.docx` becoming `report.clean.md`.
+/// Destinations already produced by this run, for refusing collisions.
+///
+/// Two layers close different gaps: folded path strings catch
+/// case-insensitive collisions before the second file even exists (APFS and
+/// NTFS treat names differing only by case as one file), and file identity
+/// (device and inode) catches aliases the string form cannot see, such as
+/// `./x` beside `x`, `dir/../x`, or names the filesystem case-folds beyond
+/// simple lowercasing.
+#[derive(Default)]
+pub struct WrittenOutputs {
+    folded: std::collections::HashSet<String>,
+    identities: std::collections::HashSet<(u64, u64)>,
+}
+
+impl WrittenOutputs {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Claims `destination`, refusing it when this run already produced an
+    /// output the write would replace.
+    ///
+    /// Called before a document's values are stored, so a refused output
+    /// allocates no placeholders.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the destination collides with an output already
+    /// written this run, or if it cannot be inspected.
+    pub fn claim(&mut self, destination: &Path) -> Result<()> {
+        let collided = !self
+            .folded
+            .insert(destination.to_string_lossy().to_lowercase())
+            || matches!(identity_of(destination)?, Some(identity) if self.identities.contains(&identity));
+        if collided {
+            bail!(
+                "two inputs would both be written to {}; process them separately \
+                 or into different output directories",
+                destination.display()
+            );
+        }
+        Ok(())
+    }
+
+    /// Records the identity of `destination` after it was written.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the freshly written file cannot be inspected.
+    pub fn record(&mut self, destination: &Path) -> Result<()> {
+        if let Some(identity) = identity_of(destination)? {
+            self.identities.insert(identity);
+        }
+        Ok(())
+    }
+}
+
+/// The (device, inode) pair identifying `path`, or `None` when it does not
+/// exist or the platform has no such notion.
+#[cfg(unix)]
+fn identity_of(path: &Path) -> Result<Option<(u64, u64)>> {
+    use std::os::unix::fs::MetadataExt;
+    match std::fs::metadata(path) {
+        Ok(metadata) => Ok(Some((metadata.dev(), metadata.ino()))),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error).with_context(|| format!("inspecting {}", path.display())),
+    }
+}
+
+#[cfg(not(unix))]
+fn identity_of(_path: &Path) -> Result<Option<(u64, u64)>> {
+    Ok(None)
+}
+
+/// Writes sanitised `text` at `destination`, creating parent directories.
+///
+/// The one write path for `clean` and `review`, so the two commands cannot
+/// drift in how outputs land on disk.
+///
+/// # Errors
+///
+/// Returns an error if a directory or the file cannot be created.
+pub fn write_output(destination: &Path, text: &str) -> Result<()> {
+    if let Some(parent) = destination.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("creating output directory {}", parent.display()))?;
+    }
+    std::fs::write(destination, text).with_context(|| format!("writing {}", destination.display()))
+}
+
+/// Builds the sanitised output path, the suffix following the input's format:
+/// `report.docx` becomes `report.clean.md`, `data.csv` becomes
+/// `data.clean.csv`, and `book.xlsx` with the sheet fragment `Clients`
+/// becomes `book.Clients.clean.tsv`.
 ///
 /// When `output_dir` and `root` are both given, the input's location relative
 /// to `root` is mirrored under `output_dir`, so files sharing a name in
@@ -138,7 +266,8 @@ impl Document {
 ///
 /// `stem_override` supplies a redacted stem in place of the input's own, so PII
 /// in the filename does not survive into the output name; `None` keeps the
-/// input stem verbatim.
+/// input stem verbatim. `sheet_fragment` names the workbook sheet this output
+/// holds, from [`SheetNamer`]; `None` for whole-file outputs.
 ///
 /// # Errors
 ///
@@ -149,12 +278,17 @@ pub fn output_path(
     output_dir: Option<&Path>,
     root: Option<&Path>,
     stem_override: Option<&str>,
+    sheet_fragment: Option<&str>,
 ) -> Result<PathBuf> {
     let stem = match stem_override {
         Some(stem) => stem,
         None => file_stem_str(input)?,
     };
-    let name = format!("{stem}.clean.md");
+    let suffix = crate::convert::output_suffix(crate::convert::format_of(input));
+    let name = match sheet_fragment {
+        Some(fragment) => format!("{stem}.{fragment}{suffix}"),
+        None => format!("{stem}{suffix}"),
+    };
     Ok(match (output_dir, root) {
         (Some(dir), Some(root)) => {
             let relative = input
@@ -178,6 +312,88 @@ pub fn output_path(
 /// vault fails.
 pub fn redacted_stem(input: &Path, detector: &Detector, vault: &mut Vault) -> Result<String> {
     crate::pipeline::clean_stem(file_stem_str(input)?, detector, vault)
+}
+
+/// Turns a sheet name into a filesystem-safe filename fragment.
+///
+/// Path separators, characters some filesystems refuse, and control
+/// characters become underscores; surrounding whitespace and leading dots are
+/// dropped. A name with nothing usable left falls back to `sheet<N>` from
+/// `index`, the sheet's zero-based position in the workbook.
+#[must_use]
+pub fn sheet_fragment(name: &str, index: usize) -> String {
+    let sanitised: String = name
+        .chars()
+        .map(|character| {
+            let hostile = matches!(
+                character,
+                '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' | '[' | ']'
+            );
+            if hostile || character.is_control() {
+                '_'
+            } else {
+                character
+            }
+        })
+        .collect();
+    let trimmed = sanitised.trim().trim_start_matches('.').trim();
+    if trimmed.is_empty() {
+        format!("sheet{}", index + 1)
+    } else {
+        trimmed.to_owned()
+    }
+}
+
+/// Allocates unique output-name fragments for the sheets of one workbook.
+///
+/// The namer remembers every fragment it hands out, so uniqueness is its own
+/// property rather than bookkeeping each caller must carry correctly.
+/// Fragments are compared case-insensitively, since APFS and NTFS treat names
+/// differing only by case as one file and would silently overwrite.
+#[derive(Default)]
+pub struct SheetNamer {
+    used: std::collections::HashSet<String>,
+}
+
+impl SheetNamer {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Builds the output-name fragment for one sheet.
+    ///
+    /// When `redact` is set the name first goes through the same PII
+    /// redaction as file stems, sharing `vault` so a client name in a tab and
+    /// in the body get one placeholder. The result is then sanitised by
+    /// [`sheet_fragment`] and made unique within this workbook by appending
+    /// `_2`, `_3`… on collision.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if detection or the vault fails while redacting.
+    pub fn fragment(
+        &mut self,
+        name: &str,
+        index: usize,
+        redact: bool,
+        detector: &Detector,
+        vault: &mut Vault,
+    ) -> Result<String> {
+        let base = if redact {
+            crate::pipeline::clean_stem(name, detector, vault)?
+        } else {
+            name.to_owned()
+        };
+        let fragment = sheet_fragment(&base, index);
+        let mut candidate = fragment.clone();
+        let mut attempt = 2;
+        while !self.used.insert(candidate.to_lowercase()) {
+            candidate = format!("{fragment}_{attempt}");
+            attempt += 1;
+        }
+        Ok(candidate)
+    }
 }
 
 /// Extracts `input`'s file stem as UTF-8, the part reused for the output name.
@@ -209,6 +425,7 @@ mod tests {
         Document {
             path: PathBuf::from("note.txt"),
             root: None,
+            sheet: None,
             text: text.to_owned(),
             decisions,
         }
@@ -285,6 +502,50 @@ mod tests {
         );
     }
 
+    /// APFS and NTFS treat names differing only by case as one file, so two
+    /// such fragments would silently overwrite each other there.
+    #[test]
+    fn sheet_fragments_differing_only_by_case_are_numbered_apart() {
+        let mut config = crate::config::Config::default();
+        config.ner_enabled = false;
+        let detector = Detector::new(&config).expect("detector");
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let mut vault = open_vault(&dir);
+        let mut namer = SheetNamer::new();
+
+        let first = namer
+            .fragment("Clients", 0, false, &detector, &mut vault)
+            .expect("first fragment");
+        let second = namer
+            .fragment("clients", 1, false, &detector, &mut vault)
+            .expect("second fragment");
+        assert_eq!(first, "Clients");
+        assert_eq!(second, "clients_2");
+    }
+
+    #[test]
+    fn a_second_document_for_one_destination_is_refused_not_overwritten() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let out = dir.path().join("out");
+        let first = document("Mail a@example.com.");
+        let second = document("Mail b@example.com.");
+        let mut vault = open_vault(&dir);
+        let mut written = WrittenOutputs::new();
+
+        first
+            .write(&mut vault, Some(&out), None, None, &mut written)
+            .expect("first write");
+        let error = second
+            .write(&mut vault, Some(&out), None, None, &mut written)
+            .expect_err("a second write to one destination must be refused");
+        assert!(format!("{error:#}").contains("both be written to"));
+        assert_eq!(
+            vault.entries().expect("listing").len(),
+            1,
+            "the refused document must not allocate placeholders"
+        );
+    }
+
     #[test]
     fn context_shows_the_line_the_detection_came_from() {
         let doc = document("First line.\nCall 06 12 34 56 78 today.\nLast line.");
@@ -305,7 +566,8 @@ mod tests {
 
     #[test]
     fn output_is_named_after_the_input() {
-        let path = output_path(Path::new("/tmp/report.docx"), None, None, None).expect("naming");
+        let path =
+            output_path(Path::new("/tmp/report.docx"), None, None, None, None).expect("naming");
         assert_eq!(path, Path::new("/tmp/report.clean.md"));
 
         let path = output_path(
@@ -313,9 +575,32 @@ mod tests {
             Some(Path::new("/out")),
             None,
             None,
+            None,
         )
         .expect("naming");
         assert_eq!(path, Path::new("/out/report.clean.md"));
+    }
+
+    #[test]
+    fn tabular_inputs_keep_a_tabular_extension() {
+        let path = output_path(Path::new("/tmp/data.csv"), None, None, None, None).expect("naming");
+        assert_eq!(path, Path::new("/tmp/data.clean.csv"));
+
+        let path = output_path(Path::new("/tmp/data.tsv"), None, None, None, None).expect("naming");
+        assert_eq!(path, Path::new("/tmp/data.clean.tsv"));
+    }
+
+    #[test]
+    fn a_sheet_fragment_lands_between_stem_and_suffix() {
+        let path = output_path(
+            Path::new("/tmp/book.xlsx"),
+            None,
+            None,
+            None,
+            Some("Clients"),
+        )
+        .expect("naming");
+        assert_eq!(path, Path::new("/tmp/book.Clients.clean.tsv"));
     }
 
     #[test]
@@ -325,6 +610,7 @@ mod tests {
             None,
             None,
             Some("PERSON_1"),
+            None,
         )
         .expect("naming");
         assert_eq!(path, Path::new("/tmp/PERSON_1.clean.md"));
@@ -337,9 +623,43 @@ mod tests {
             Some(Path::new("/out")),
             Some(Path::new("/a")),
             None,
+            None,
         )
         .expect("naming");
         assert_eq!(path, Path::new("/out/sub/report.clean.md"));
+    }
+
+    #[test]
+    fn hostile_sheet_names_become_safe_fragments() {
+        assert_eq!(sheet_fragment("P&L / Q1", 0), "P&L _ Q1");
+        assert_eq!(sheet_fragment("a:b", 0), "a_b");
+        assert_eq!(sheet_fragment("tab\tname", 0), "tab_name");
+        assert_eq!(sheet_fragment("Clients", 0), "Clients");
+    }
+
+    #[test]
+    fn a_sheet_name_with_nothing_usable_falls_back_to_its_position() {
+        assert_eq!(sheet_fragment("...", 0), "sheet1");
+        assert_eq!(sheet_fragment("  ", 2), "sheet3");
+    }
+
+    #[test]
+    fn colliding_sheet_fragments_are_numbered_apart() {
+        let mut config = crate::config::Config::default();
+        config.ner_enabled = false;
+        let detector = Detector::new(&config).expect("detector");
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let mut vault = open_vault(&dir);
+        let mut namer = SheetNamer::new();
+
+        let first = namer
+            .fragment("a:b", 0, false, &detector, &mut vault)
+            .expect("first fragment");
+        let second = namer
+            .fragment("a*b", 1, false, &detector, &mut vault)
+            .expect("second fragment");
+        assert_eq!(first, "a_b");
+        assert_eq!(second, "a_b_2");
     }
 
     #[test]
