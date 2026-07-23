@@ -1,12 +1,14 @@
 //! User configuration loaded from `oboro.toml`.
 //!
 //! The file is optional: without one, the deterministic recognisers run with
-//! French defaults and no user patterns.
+//! their own defaults and no user patterns.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
+use phonenumber::country::Id;
 use regex::{Regex, RegexBuilder};
 use serde::Deserialize;
 
@@ -15,8 +17,6 @@ use crate::detect::EntityKind;
 /// The file name looked up in the working directory and its ancestors.
 pub const CONFIG_FILE: &str = "oboro.toml";
 
-/// Region used when a file does not set one.
-const DEFAULT_REGION: &str = "FR";
 /// Whether the recognition model runs when installed, absent configuration.
 const DEFAULT_NER_ENABLED: bool = true;
 /// Minimum model probability acted on, absent configuration.
@@ -36,10 +36,31 @@ pub struct DenyTerm {
     pub regex: Regex,
 }
 
+/// Where the effective phone regions came from, so `doctor` can say.
+#[derive(Debug, PartialEq, Eq)]
+pub enum RegionSource {
+    /// Listed in `oboro.toml`.
+    Configured,
+    /// Derived from the named environment variable, such as `LANG`.
+    Locale(String),
+    /// Nothing to go on, so only international `+` numbers are read.
+    Unknown,
+}
+
 /// Effective configuration for a run.
 pub struct Config {
-    /// Region used to interpret national phone number formats.
-    pub default_region: String,
+    /// Regions whose national phone number formats are recognised.
+    ///
+    /// A hint rather than a requirement: a number in international `+` form is
+    /// read whatever this holds, including when it is empty.
+    pub regions: Vec<Id>,
+    /// Where [`Config::regions`] came from.
+    pub regions_source: RegionSource,
+    /// Languages requested from Tesseract, in order, empty when not set.
+    ///
+    /// A hint too: left empty, the OCR layer uses whatever trained data is
+    /// installed.
+    pub ocr_languages: Vec<String>,
     /// Whether to run the local recognition model when it is installed.
     pub ner_enabled: bool,
     /// Minimum probability before a model detection is acted on.
@@ -66,9 +87,14 @@ pub struct Config {
 }
 
 impl Default for Config {
+    /// Reads the environment's locale for the phone regions, since a run
+    /// without a configuration file still lands here.
     fn default() -> Self {
+        let (regions, regions_source) = regions_from_environment();
         Self {
-            default_region: DEFAULT_REGION.to_owned(),
+            regions,
+            regions_source,
+            ocr_languages: Vec::new(),
             ner_enabled: DEFAULT_NER_ENABLED,
             ner_threshold: DEFAULT_NER_THRESHOLD,
             allowlist: Vec::new(),
@@ -121,25 +147,63 @@ impl Config {
     /// surrounding whitespace.
     ///
     /// Case folding is Unicode-aware: ASCII-only folding would leave
-    /// `SOCIÉTÉ` and `Société` unequal, silently failing for exactly the
-    /// French text this tool targets.
+    /// `SOCIÉTÉ` and `Société` unequal, silently failing on any text that
+    /// carries accents.
     #[must_use]
     pub fn is_allowlisted(&self, text: &str) -> bool {
         self.allowlist_folded.contains(&fold(text))
     }
+
+    /// The effective regions as their two-letter codes, for display.
+    #[must_use]
+    pub fn region_codes(&self) -> Vec<&str> {
+        self.regions.iter().map(Id::as_ref).collect()
+    }
 }
 
 /// Folds a value for allowlist comparison: trimmed and lowercased, Unicode
-/// aware so accented French text folds correctly.
+/// aware so accented text folds correctly whatever its language.
 fn fold(text: &str) -> String {
     text.trim().to_lowercase()
+}
+
+/// Reads the phone regions from the environment's locale.
+///
+/// A locale is a hint about the documents at hand, not a declaration, so an
+/// unset or unparseable one simply yields no regions: international `+`
+/// numbers are still read.
+fn regions_from_environment() -> (Vec<Id>, RegionSource) {
+    for variable in ["LC_ALL", "LANG"] {
+        let Ok(value) = std::env::var(variable) else {
+            continue;
+        };
+        if let Some(region) = region_from_locale(&value).and_then(|code| Id::from_str(&code).ok()) {
+            return (vec![region], RegionSource::Locale(variable.to_owned()));
+        }
+    }
+    (Vec::new(), RegionSource::Unknown)
+}
+
+/// Extracts the region from a POSIX locale such as `fr_FR.UTF-8`.
+///
+/// Returns `None` for locales carrying no region, including `C` and `POSIX`.
+fn region_from_locale(value: &str) -> Option<String> {
+    let region = value
+        .split(['.', '@'])
+        .next()?
+        .split('_')
+        .nth(1)?
+        .to_ascii_uppercase();
+    (region.len() == 2 && region.chars().all(|c| c.is_ascii_uppercase())).then_some(region)
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawConfig {
-    #[serde(default = "default_region")]
-    default_region: String,
+    #[serde(default)]
+    regions: Option<Vec<String>>,
+    #[serde(default)]
+    ocr_languages: Vec<String>,
     #[serde(default = "default_ner_enabled")]
     ner_enabled: bool,
     #[serde(default = "default_ner_threshold")]
@@ -152,10 +216,6 @@ struct RawConfig {
     denylist: Vec<RawDenyTerm>,
     #[serde(default)]
     patterns: Vec<RawPattern>,
-}
-
-fn default_region() -> String {
-    DEFAULT_REGION.to_owned()
 }
 
 fn default_ner_enabled() -> bool {
@@ -235,8 +295,17 @@ impl RawConfig {
 
         let allowlist_folded = self.allowlist.iter().map(|entry| fold(entry)).collect();
 
+        // An absent key falls back to the locale; an explicitly empty list is
+        // a deliberate choice to read international numbers only.
+        let (regions, regions_source) = match self.regions {
+            None => regions_from_environment(),
+            Some(codes) => (parse_regions(&codes)?, RegionSource::Configured),
+        };
+
         Ok(Config {
-            default_region: self.default_region,
+            regions,
+            regions_source,
+            ocr_languages: self.ocr_languages,
             ner_enabled: self.ner_enabled,
             ner_threshold: self.ner_threshold,
             allowlist: self.allowlist,
@@ -246,6 +315,24 @@ impl RawConfig {
             redact_filenames: self.redact_filenames,
         })
     }
+}
+
+/// Turns configured region codes into `libphonenumber` regions.
+///
+/// An unknown code is an error rather than a silent omission: a typo would
+/// otherwise cost every national-format number in the document.
+fn parse_regions(codes: &[String]) -> Result<Vec<Id>> {
+    codes
+        .iter()
+        .map(|code| {
+            Id::from_str(code.trim().to_ascii_uppercase().as_str()).map_err(|_| {
+                anyhow!(
+                    "'{code}' is not a two-letter region code; \
+                     regions takes codes such as \"FR\", \"GB\" or \"US\""
+                )
+            })
+        })
+        .collect()
 }
 
 /// Anchors a literal term at word boundaries.
@@ -288,8 +375,61 @@ mod tests {
     #[test]
     fn missing_configuration_yields_defaults() {
         let config = Config::load(None).expect("defaults must load");
-        assert_eq!(config.default_region, "FR");
         assert!(config.allowlist.is_empty());
+        assert!(config.ocr_languages.is_empty());
+        assert!(config.ner_enabled);
+    }
+
+    #[test]
+    fn no_region_key_falls_back_to_the_locale_or_to_nothing() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let path = write(dir.path(), "allowlist = []\n");
+        let config = Config::load(Some(&path)).expect("configuration must load");
+        assert_ne!(
+            config.regions_source,
+            RegionSource::Configured,
+            "no regions key must not read as configured"
+        );
+    }
+
+    #[test]
+    fn an_empty_region_list_is_a_deliberate_choice() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let path = write(dir.path(), "regions = []\n");
+        let config = Config::load(Some(&path)).expect("configuration must load");
+        assert!(config.regions.is_empty());
+        assert_eq!(config.regions_source, RegionSource::Configured);
+    }
+
+    #[test]
+    fn several_regions_are_kept_in_order() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let path = write(dir.path(), "regions = [\"fr\", \"GB\"]\n");
+        let config = Config::load(Some(&path)).expect("configuration must load");
+        assert_eq!(config.region_codes(), ["FR", "GB"]);
+    }
+
+    #[test]
+    fn an_unknown_region_is_reported_rather_than_dropped() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let path = write(dir.path(), "regions = [\"XX\"]\n");
+        let error = Config::load(Some(&path))
+            .err()
+            .expect("an unknown region must fail");
+        let rendered = format!("{error:#}");
+        assert!(rendered.contains("XX"), "unhelpful error: {rendered}");
+    }
+
+    #[test]
+    fn a_locale_yields_its_region_only_when_it_carries_one() {
+        assert_eq!(region_from_locale("fr_FR.UTF-8").as_deref(), Some("FR"));
+        assert_eq!(region_from_locale("en_GB").as_deref(), Some("GB"));
+        assert_eq!(region_from_locale("sr_RS@latin").as_deref(), Some("RS"));
+        assert_eq!(region_from_locale("C"), None);
+        assert_eq!(region_from_locale("POSIX"), None);
+        assert_eq!(region_from_locale(""), None);
+        assert_eq!(region_from_locale("en_US_POSIX").as_deref(), Some("US"));
+        assert_eq!(region_from_locale("fr_FRA"), None);
     }
 
     #[test]
@@ -298,7 +438,8 @@ mod tests {
         let path = write(
             dir.path(),
             r#"
-default_region = "GB"
+regions = ["GB"]
+ocr_languages = ["deu"]
 allowlist = ["Ma Societe SARL"]
 
 [[denylist]]
@@ -312,7 +453,8 @@ regex = "CT-[0-9]{6}"
         );
 
         let config = Config::load(Some(&path)).expect("configuration must load");
-        assert_eq!(config.default_region, "GB");
+        assert_eq!(config.region_codes(), ["GB"]);
+        assert_eq!(config.ocr_languages, ["deu"]);
         assert!(config.is_allowlisted("ma societe sarl"));
         assert_eq!(config.denylist.len(), 1);
         assert_eq!(config.denylist[0].kind, EntityKind::Organisation);
@@ -421,14 +563,14 @@ regex = "CT-[0-9"
     #[test]
     fn unknown_keys_are_rejected_rather_than_silently_ignored() {
         let dir = tempfile::tempdir().expect("temporary directory");
-        let path = write(dir.path(), "defualt_region = \"FR\"\n");
+        let path = write(dir.path(), "regoins = [\"FR\"]\n");
         assert!(Config::load(Some(&path)).is_err());
     }
 
     #[test]
     fn discover_walks_up_to_an_ancestor() {
         let dir = tempfile::tempdir().expect("temporary directory");
-        write(dir.path(), "default_region = \"FR\"\n");
+        write(dir.path(), "regions = [\"FR\"]\n");
         let nested = dir.path().join("a").join("b");
         std::fs::create_dir_all(&nested).expect("creating nested directories");
         assert!(Config::discover(&nested).is_some());

@@ -42,6 +42,13 @@ impl<'a> Detector<'a> {
         })
     }
 
+    /// The configuration this stack was built from, so a caller holding a
+    /// detector does not have to carry the configuration alongside it.
+    #[must_use]
+    pub const fn config(&self) -> &Config {
+        self.config
+    }
+
     /// Runs every detection layer over `text`, returning the raw, possibly
     /// overlapping spans for [`merge`] to reconcile.
     ///

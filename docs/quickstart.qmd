@@ -97,17 +97,20 @@ Once built, it is the only command that touches the network.
 
 ## Images
 
-Reading images and scanned documents needs Tesseract:
+Reading images and scanned documents needs Tesseract, plus trained data for the languages your documents are in:
 
 ```bash
-# Debian and Ubuntu
-sudo apt-get install tesseract-ocr tesseract-ocr-fra libtesseract-dev libleptonica-dev
+# Debian and Ubuntu; add a tesseract-ocr-<language> package per language
+sudo apt-get install tesseract-ocr tesseract-ocr-eng libtesseract-dev libleptonica-dev
 
-# macOS
+# macOS; tesseract-lang installs the trained data for every language
 brew install tesseract tesseract-lang
 
 cargo build --release --features ocr
 ```
+
+Whatever is installed is used, so no language has to be declared.
+Set [`ocr_languages`](configuration.qmd#ocr_languages) to pick among them.
 
 ## Both
 

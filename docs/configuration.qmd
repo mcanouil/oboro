@@ -8,8 +8,11 @@ Without one it uses the defaults below.
 Every section is optional.
 
 ```toml
-# Region used to interpret national phone number formats.
-default_region = "FR"
+# Regions whose national phone number formats are read. Optional.
+regions = ["FR", "GB"]
+
+# Languages requested from Tesseract when reading images. Optional.
+ocr_languages = ["fra", "eng"]
 
 # The local recognition model.
 ner_enabled = true
@@ -32,11 +35,38 @@ name = "contract number"
 regex = "CT-[0-9]{6}"
 ```
 
-## `default_region`
+## `regions`
 
-A two-letter region code deciding how national phone numbers are read.
+Two-letter region codes deciding how national phone numbers are read.
+A number is redacted when it is valid in any of them, so listing more regions widens what is caught and listing none narrows it.
+
 With `FR`, `06 12 34 56 78` is a valid mobile number.
-With `GB` it is not, and would be left alone.
+With `GB` alone it is not, and would be left alone.
+A number written in international form, `+33 6 12 34 56 78`, is read whatever this holds, including when it is empty.
+
+Leave the key out and the region comes from the environment's locale (`LC_ALL`, then `LANG`), which `oboro doctor` reports:
+
+```text
+regions:    FR (from $LANG)
+regions:    FR, GB (from oboro.toml)
+regions:    none (international + numbers only)
+```
+
+Set `regions = []` to say deliberately that only international numbers should be read.
+An unknown code is refused by name rather than ignored, since a typo would otherwise cost every national number in the document.
+
+Nothing else in detection consults this.
+Street addresses, postcodes and every checksummed identifier are matched by shape, in any language.
+
+## `ocr_languages`
+
+Languages requested from Tesseract when reading an image, in order of priority, using Tesseract's own three-letter codes (`fra`, `eng`, `deu`).
+Only used in a build with `--features ocr`.
+
+Leave it out and `oboro` reads whatever trained data is installed: up to four languages are loaded together, English first when it is there.
+Past four, one language is used, since Tesseract loses both speed and accuracy as languages pile up; that is the point at which naming what your documents are in is worth it.
+
+A language you ask for that has no trained data installed is reported, listing what is installed, rather than failing obscurely inside Tesseract.
 
 ## `ner_enabled` and `ner_threshold`
 
