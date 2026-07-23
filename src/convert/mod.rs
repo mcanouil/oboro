@@ -19,7 +19,7 @@ use anyhow::{Context, Result, bail};
 /// A format this build knows how to read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Format {
-    /// Plain text and markdown, read as-is.
+    /// Plain text and markdown, tidied by [`tidy`] as it is read.
     Text,
     /// Comma-separated values, read as-is; the output keeps the extension.
     Csv,
@@ -142,6 +142,10 @@ pub fn format_of(path: &Path) -> Option<Format> {
 
 /// Reads `path` and returns its content, one document or one table per sheet.
 ///
+/// Text and markdown are tidied by [`tidy`] before anything else sees them, so
+/// detection spans and the written output agree. Tabular content is returned
+/// byte for byte, since whitespace there is structure.
+///
 /// # Errors
 ///
 /// Returns an error if the format is unsupported, the file cannot be read or
@@ -158,14 +162,43 @@ pub fn read(path: &Path) -> Result<Conversion> {
     };
 
     match format {
-        Format::Text | Format::Csv | Format::Tsv => std::fs::read_to_string(path)
-            .map(Conversion::Document)
-            .with_context(|| format!("reading {}; it must be valid UTF-8 text", path.display())),
+        Format::Text => read_utf8(path).map(|text| Conversion::Document(tidy(&text))),
+        Format::Csv | Format::Tsv => read_utf8(path).map(Conversion::Document),
         Format::Docx => docx::to_text(path).map(Conversion::Document),
         Format::Xlsx => xlsx::to_sheets(path).map(Conversion::Sheets),
         Format::Pdf => pdf::to_text(path).map(Conversion::Document),
         Format::Image => image_to_text(path).map(Conversion::Document),
     }
+}
+
+fn read_utf8(path: &Path) -> Result<String> {
+    std::fs::read_to_string(path)
+        .with_context(|| format!("reading {}; it must be valid UTF-8 text", path.display()))
+}
+
+/// Strips trailing whitespace from every line, collapses runs of empty lines
+/// into one, and drops empty lines at either end, ending on a single newline.
+///
+/// Leading whitespace is left alone: in markdown it carries structure, such as
+/// nested list items and indented code blocks. Nothing here parses markdown,
+/// so a hard line break written as two trailing spaces does not survive, and
+/// blank lines inside a fenced code block collapse like any other.
+fn tidy(text: &str) -> String {
+    let mut tidied = String::with_capacity(text.len());
+    let mut blank_pending = false;
+    for line in text.lines().map(str::trim_end) {
+        if line.is_empty() {
+            blank_pending = !tidied.is_empty();
+            continue;
+        }
+        if blank_pending {
+            tidied.push('\n');
+            blank_pending = false;
+        }
+        tidied.push_str(line);
+        tidied.push('\n');
+    }
+    tidied
 }
 
 #[cfg(feature = "ocr")]
@@ -214,6 +247,69 @@ mod tests {
                 "name,mail\nJean,a@example.com\n"
             );
         }
+    }
+
+    #[test]
+    fn tabular_content_is_never_tidied() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let raw = "name,mail  \n\n\n,\nJean,a@example.com\n\n";
+        for name in ["data.csv", "data.tsv"] {
+            let path = dir.path().join(name);
+            std::fs::write(&path, raw).expect("writing");
+            assert_eq!(
+                read_document(&path).expect("reading"),
+                raw,
+                "{name}: trimming a cell or dropping a row would move the columns"
+            );
+        }
+    }
+
+    /// Reads `content` written to a markdown file, as the tidying pass leaves it.
+    fn read_tidied(content: &str) -> String {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let path = dir.path().join("note.md");
+        std::fs::write(&path, content).expect("writing");
+        read_document(&path).expect("reading")
+    }
+
+    #[test]
+    fn trailing_whitespace_goes_and_indentation_stays() {
+        assert_eq!(
+            read_tidied("- one  \n  - two\t\n\n      code  \n"),
+            "- one\n  - two\n\n      code\n"
+        );
+    }
+
+    #[test]
+    fn runs_of_empty_lines_collapse_into_one() {
+        assert_eq!(read_tidied("# Title\n\n\n\nBody\n"), "# Title\n\nBody\n");
+    }
+
+    #[test]
+    fn blank_lines_at_either_end_are_dropped() {
+        assert_eq!(read_tidied("\n  \n# Title\n\n \n\n"), "# Title\n");
+    }
+
+    #[test]
+    fn text_ends_on_exactly_one_newline() {
+        assert_eq!(read_tidied("# Title"), "# Title\n");
+        assert_eq!(read_tidied("# Title\n\n\n"), "# Title\n");
+    }
+
+    #[test]
+    fn a_file_of_only_whitespace_reads_as_empty_text() {
+        assert_eq!(read_tidied("  \n\t\n\n"), "");
+    }
+
+    #[test]
+    fn carriage_returns_do_not_survive() {
+        assert_eq!(read_tidied("# Title\r\n\r\nBody\r\n"), "# Title\n\nBody\n");
+    }
+
+    #[test]
+    fn tidying_an_already_tidy_document_changes_nothing() {
+        let tidy_text = "# Title\n\n- one\n  - two\n\nBody\n";
+        assert_eq!(read_tidied(tidy_text), tidy_text);
     }
 
     #[test]
@@ -315,5 +411,32 @@ mod tests {
         std::fs::write(&path, [0x89, b'P', b'N', b'G']).expect("writing");
         let error = read(&path).expect_err("no ocr in this build");
         assert!(format!("{error:#}").contains("--features ocr"));
+    }
+
+    proptest::proptest! {
+        /// Tidying may only ever drop whitespace. Were it to alter, reorder or
+        /// escape a character, a value would no longer match the rule meant to
+        /// find it, and would reach the model unredacted.
+        #[test]
+        fn tidying_leaves_every_other_character_untouched(text in "[ \t\r\n\\PC]{0,256}") {
+            let bare = |text: &str| text.chars().filter(|c| !c.is_whitespace()).collect::<String>();
+            proptest::prop_assert_eq!(bare(&tidy(&text)), bare(&text));
+        }
+
+        /// Tidying may only ever remove lines. A formatter that reflowed prose
+        /// could put a line break inside an IBAN, a card number or an address,
+        /// none of which are matched across one; see `detect::rules`.
+        #[test]
+        fn tidying_never_splits_a_line_in_two(text in "[ \t\r\n\\PC]{0,256}") {
+            proptest::prop_assert!(tidy(&text).lines().count() <= text.lines().count());
+        }
+
+        /// Cleaning an already cleaned document must be a no-op, so output fed
+        /// back in is left alone.
+        #[test]
+        fn tidying_twice_changes_nothing_more(text in "[ \t\r\n\\PC]{0,256}") {
+            let once = tidy(&text);
+            proptest::prop_assert_eq!(tidy(&once), once.clone());
+        }
     }
 }
