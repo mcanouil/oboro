@@ -43,10 +43,21 @@ impl Workspace {
     /// Run from inside the workspace so configuration discovery cannot walk up
     /// into an ancestor `oboro.toml` on the developer's machine and change what
     /// a test sees.
+    ///
+    /// The locale is fixed too: without a `regions` key the phone recogniser
+    /// takes its hint from the environment, so the developer's own locale would
+    /// otherwise decide what these tests detect.
     pub fn command(&self) -> Command {
+        self.command_in_locale("fr_FR.UTF-8")
+    }
+
+    /// A `oboro` invocation running in `locale`, for the tests that care.
+    pub fn command_in_locale(&self, locale: &str) -> Command {
         let mut command = Command::cargo_bin("oboro").expect("the oboro binary must build");
         command
             .current_dir(self.dir.path())
+            .env("LC_ALL", locale)
+            .env("LANG", locale)
             .arg("--vault")
             .arg(self.dir.path().join("vault.db"))
             .arg("--key")

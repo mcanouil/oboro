@@ -120,7 +120,9 @@ a name in different subfolders do not collide.
 
 Optical character recognition is optional because it needs the Tesseract
 system libraries. Without it the binary depends on nothing but Rust, and
-images are refused with a message saying so rather than read as empty.
+images are refused with a message saying so rather than read as empty. With
+it, whatever trained data Tesseract has installed is used, so no language
+needs declaring; `ocr_languages` picks among them.
 
 ```bash
 cargo build --release --features ocr
@@ -140,13 +142,16 @@ This build recognises:
 | SIRET                                 | Luhn on both the SIREN prefix and the whole number |
 | SIREN                                 | Luhn checksum                                      |
 | IP addresses                          | Parsed as IPv4 or IPv6                             |
-| French street addresses and postcodes | Pattern                                            |
+| Street addresses and postcodes        | Pattern                                            |
 | Anything you list yourself            | Your regular expressions and terms                 |
 
-Two of these are single-locale rather than language-neutral: street addresses
-are matched with French patterns only, and phone numbers are read against one
-`default_region` (`FR` by default), so a national-format number from another
-country may be missed while an international `+` number is always caught.
+Street addresses are matched in the three word orders languages use, so `12 rue
+de la Paix`, `10 Downing Street` and `Hauptstraße 5` are all read without
+anything being declared. Two settings exist as hints and neither is required:
+`regions` widens which national phone formats are read, an international `+`
+number being caught whatever it holds, and `ocr_languages` names what an image
+is written in. See [Limitations](https://m.canouil.dev/oboro/limitations.html#languages)
+for what the postcode patterns do and do not cover.
 
 Personal and company names are found by a local, multilingual recognition
 model, in any build with `--features ner`. The install script and the `:ner`
@@ -190,8 +195,13 @@ more.
 directory. Every section is optional.
 
 ```toml
-# Region used to interpret national phone number formats.
-default_region = "FR"
+# Regions whose national phone number formats are read. Optional: without it
+# the region comes from the locale, and international + numbers always work.
+regions = ["FR", "GB"]
+
+# Languages requested from Tesseract when reading images. Optional: without it
+# whatever trained data is installed is used.
+ocr_languages = ["fra", "eng"]
 
 # The local recognition model. Lower the threshold to redact more.
 ner_enabled = true

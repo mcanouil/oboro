@@ -1,4 +1,8 @@
-//! Deterministic pattern recognisers for French and English documents.
+//! Deterministic pattern recognisers.
+//!
+//! No language is declared or detected: every recogniser runs on every
+//! document, and the ones that need words rather than digits carry the
+//! vocabulary of several languages at once.
 //!
 //! Every recogniser pairs a permissive regex with a validator, so structural
 //! checks (Luhn, IBAN mod-97, `libphonenumber`) reject the bulk of the false
@@ -12,6 +16,7 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 use std::str::FromStr;
 use std::sync::LazyLock;
 
+use phonenumber::country::Id;
 use regex::Regex;
 
 use super::{EntityKind, Span};
@@ -52,19 +57,69 @@ static IPV6: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)\b(?:[a-f0-9]{0,4}:){2,7}[a-f0-9]{0,4}\b").expect("ipv6 pattern is valid")
 });
 
-/// French street addresses: a number, an optional `bis`/`ter`, a street type,
-/// then the street name up to a line or clause break.
-static FR_STREET: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r"(?i)\b\d{1,4}\s*(?:bis|ter|quater)?[,]?\s+(?:rue|avenue|av\.|boulevard|bd\.?|chemin|place|impasse|all[ée]e|route|quai|cours|square|villa|passage|voie|sentier)\b[^\r\n,;.]{2,60}",
-    )
+/// Street addresses, in the word orders written across languages.
+///
+/// The type-first branch (`12 rue de la Paix`, `3 via Roma`) carries the
+/// romance vocabulary. The type-last branch (`10 Downing Street`) carries the
+/// germanic one and demands a capitalised name, which is what keeps `3 way
+/// split` out. The last two read the German and Dutch habit of welding the
+/// type onto the name, with the number after it (`Hauptstraße 5`) or before
+/// (`12 Kerkstraat`).
+///
+/// Abbreviations are only accepted with their full stop, since a bare `st` or
+/// `dr` after a number appears in ordinary prose too.
+static STREET: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(&format!(
+        r"(?x)
+        \b\d{{1,4}} \s* (?i:bis|ter|quater)? ,? \s+ (?i:{TYPE_FIRST}) \b [^\r\n,;.]{{2,60}}
+        |
+        \b\d{{1,4}}[a-zA-Z]? ,? \s+ (?:\p{{Lu}}[\p{{L}}'’\-]* \s+){{1,4}}
+            (?: (?i:{TYPE_LAST})\b | (?i:{TYPE_ABBREVIATED})\. )
+        |
+        \b\p{{Lu}}[\p{{L}}\-]{{2,}} (?i:{TYPE_COMPOUND}) \s+ \d{{1,4}}[a-zA-Z]?\b
+        |
+        \b\d{{1,4}}[a-zA-Z]? ,? \s+ \p{{Lu}}[\p{{L}}\-]{{2,}} (?i:{TYPE_COMPOUND}) \b
+        "
+    ))
     .expect("street pattern is valid")
 });
 
-/// A French postcode followed by a capitalised commune name.
-static FR_POSTCODE_CITY: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\b\d{5}\s+[A-ZÀ-ÖØ-Þ][\p{L}'’\-]+(?:[ \-][A-ZÀ-ÖØ-Þ]?[\p{L}'’\-]+){0,3}\b")
-        .expect("postcode pattern is valid")
+/// Street types written before the name.
+const TYPE_FIRST: &str = r"rue|avenue|av\.|boulevard|bd\.?|chemin|place|impasse|all[ée]e|route|quai|cours|square|villa|passage|voie|sentier|via|viale|piazza|piazzale|corso|strada|calle|avenida|avda\.?|plaza|paseo|carrera|rua|travessa|pra[çc]a";
+
+/// Street types written after the name, spelled out in full.
+const TYPE_LAST: &str = r"street|road|avenue|lane|drive|way|court|close|crescent|terrace|square|boulevard|stra[ßs]se|weg|gasse|platz|allee|straat|laan|plein|gatan|gata|vej|vei";
+
+/// Street types written after the name and abbreviated, so requiring a stop.
+const TYPE_ABBREVIATED: &str = r"st|rd|ave|ln|dr|ct|blvd|str";
+
+/// Street types welded onto the end of the name.
+const TYPE_COMPOUND: &str = r"stra[ßs]e|str\.|weg|gasse|platz|allee|straat|laan|plein|gatan|vej";
+
+/// Postcodes, in every shape that can be told apart from ordinary text.
+///
+/// A bare four-digit postcode followed by a place name is deliberately absent:
+/// it cannot be distinguished from `2024 January`, and the false positives
+/// would fall on every document that mentions a year.
+static POSTCODE_CITY: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?x)
+        # Five digits then a place: fr, de, es, it, tr.
+        \b\d{5}\s+ [A-ZÀ-ÖØ-Þ][\p{L}'’\-]+ (?:[\x20\-][A-ZÀ-ÖØ-Þ]?[\p{L}'’\-]+){0,3} \b
+        |
+        # Four digits, two letters, then a place: nl.
+        \b\d{4}\s?[A-Z]{2}\s+ [A-ZÀ-ÖØ-Þ][\p{L}'’\-]+ (?:[\x20\-][A-ZÀ-ÖØ-Þ]?[\p{L}'’\-]+){0,3} \b
+        |
+        # Identifying on their own: gb, then ca.
+        \b[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}\b
+        |
+        \b[A-Z]\d[A-Z]\s?\d[A-Z]\d\b
+        |
+        # Place first, then the code: us.
+        \b[A-ZÀ-ÖØ-Þ][\p{L}'’\-]+(?:\x20[A-ZÀ-ÖØ-Þ][\p{L}'’\-]+){0,2},\s?[A-Z]{2}\s+\d{5}(?:-\d{4})?\b
+        ",
+    )
+    .expect("postcode pattern is valid")
 });
 
 /// The rules layer, compiled once against a [`Config`].
@@ -106,7 +161,7 @@ impl<'a> Rules<'a> {
             text,
             &PHONE_CANDIDATE,
             &EntityKind::Phone,
-            |m| is_valid_phone(m, &self.config.default_region),
+            |m| is_valid_phone(m, &self.config.regions),
         );
         push_matches(&mut spans, text, &IPV4, &EntityKind::IpAddress, |m| {
             Ipv4Addr::from_str(m.trim()).is_ok()
@@ -114,11 +169,11 @@ impl<'a> Rules<'a> {
         push_matches(&mut spans, text, &IPV6, &EntityKind::IpAddress, |m| {
             Ipv6Addr::from_str(m.trim()).is_ok()
         });
-        push_matches(&mut spans, text, &FR_STREET, &EntityKind::Address, |_| true);
+        push_matches(&mut spans, text, &STREET, &EntityKind::Address, |_| true);
         push_matches(
             &mut spans,
             text,
-            &FR_POSTCODE_CITY,
+            &POSTCODE_CITY,
             &EntityKind::Address,
             |_| true,
         );
@@ -238,9 +293,13 @@ pub fn is_valid_iban(candidate: &str) -> bool {
     remainder == 1
 }
 
-/// Validates a candidate through `libphonenumber`, trying the configured
-/// region for national formats and no region for `+` prefixed numbers.
-fn is_valid_phone(candidate: &str, default_region: &str) -> bool {
+/// Validates a candidate through `libphonenumber`.
+///
+/// No region is tried first, which catches every `+` prefixed number whatever
+/// the configuration holds. Each configured region is then tried in turn, so
+/// listing more regions widens what national formats are read without any of
+/// them being required.
+fn is_valid_phone(candidate: &str, regions: &[Id]) -> bool {
     let trimmed = candidate.trim();
     // Reject runs that are clearly something else, such as long account codes.
     let digit_count = digits_of(trimmed).len();
@@ -248,19 +307,27 @@ fn is_valid_phone(candidate: &str, default_region: &str) -> bool {
         return false;
     }
 
-    let region = phonenumber::country::Id::from_str(default_region).ok();
-    if let Ok(number) = phonenumber::parse(region, trimmed) {
-        return phonenumber::is_valid(&number);
-    }
-    false
+    std::iter::once(None)
+        .chain(regions.iter().copied().map(Some))
+        .any(|region| {
+            phonenumber::parse(region, trimmed).is_ok_and(|number| phonenumber::is_valid(&number))
+        })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// A configuration with fixed regions, so these tests do not depend on the
+    /// locale of the machine running them.
+    fn config_for(regions: &[Id]) -> Config {
+        let mut config = Config::default();
+        config.regions = regions.to_vec();
+        config
+    }
+
     fn detect(text: &str) -> Vec<Span> {
-        let config = Config::default();
+        let config = config_for(&[Id::FR]);
         Rules::new(&config).detect(text)
     }
 
@@ -381,6 +448,100 @@ mod tests {
         );
     }
 
+    /// The address recognisers carry several languages at once, with no
+    /// language declared anywhere.
+    #[test]
+    fn finds_street_addresses_in_several_languages() {
+        for (text, expected) in [
+            (
+                "Delivery to 10 Downing Street, London.",
+                "10 Downing Street",
+            ),
+            ("Adresse: Hauptstraße 5, Berlin.", "Hauptstraße 5"),
+            ("Wohnt in 5 Hauptstraße heute.", "5 Hauptstraße"),
+            ("Bezorging op Kerkstraat 12 vandaag.", "Kerkstraat 12"),
+            ("Vive en 3 Calle Mayor ahora.", "3 Calle Mayor"),
+            ("Consegna al 7 via Roma domani.", "7 via Roma"),
+            ("Send to 221B Baker St. tomorrow.", "221B Baker St."),
+            ("Mora na 4 Kungsgatan idag.", "4 Kungsgatan"),
+        ] {
+            let found = kinds_of(text, &EntityKind::Address);
+            assert!(
+                found.iter().any(|f| f.contains(expected)),
+                "{expected} was not found in {text:?}, got {found:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn finds_postcodes_in_several_formats() {
+        for (text, expected) in [
+            ("Office at SW1A 1AA in London.", "SW1A 1AA"),
+            ("Bureau à K1A 0B6 au Canada.", "K1A 0B6"),
+            ("Adres: 1234 AB Amsterdam hier.", "1234 AB Amsterdam"),
+            (
+                "Lives in Springfield, IL 62704 now.",
+                "Springfield, IL 62704",
+            ),
+        ] {
+            let found = kinds_of(text, &EntityKind::Address);
+            assert!(
+                found.iter().any(|f| f.contains(expected)),
+                "{expected} was not found in {text:?}, got {found:?}"
+            );
+        }
+    }
+
+    /// A capitalised name is required before a type-last street word, and a
+    /// four-digit postcode is not read at all, both to keep ordinary prose out.
+    #[test]
+    fn ordinary_prose_is_not_read_as_an_address() {
+        for text in [
+            "We agreed on a 3 way split of the invoice.",
+            "The report covers 2024 January onwards.",
+            "Invoice 12 was sent by way of post.",
+        ] {
+            let found = kinds_of(text, &EntityKind::Address);
+            assert!(
+                found.is_empty(),
+                "{text:?} was read as an address: {found:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_international_number_is_read_with_no_regions_at_all() {
+        let config = config_for(&[]);
+        let spans =
+            Rules::new(&config).detect("Appelez le +33 1 42 68 53 00 ou le 06 12 34 56 78.");
+        let phones: Vec<String> = spans
+            .into_iter()
+            .filter(|s| s.kind == EntityKind::Phone)
+            .map(|s| s.text)
+            .collect();
+        assert_eq!(
+            phones.len(),
+            1,
+            "only the international number can be read without a region: {phones:?}"
+        );
+        assert!(phones[0].contains("+33"));
+    }
+
+    #[test]
+    fn listing_more_regions_reads_more_national_formats() {
+        let config = config_for(&[Id::FR, Id::GB]);
+        let spans = Rules::new(&config).detect("Call 07911 123456 or 06 12 34 56 78 today.");
+        let phones = spans.iter().filter(|s| s.kind == EntityKind::Phone).count();
+        assert_eq!(phones, 2, "both national formats must be read");
+
+        let config = config_for(&[Id::FR]);
+        let spans = Rules::new(&config).detect("Call 07911 123456 today.");
+        assert!(
+            !spans.iter().any(|s| s.kind == EntityKind::Phone),
+            "a British number is not a valid French one"
+        );
+    }
+
     #[test]
     fn finds_ip_addresses_and_rejects_invalid_octets() {
         let found = kinds_of("Hosts 192.168.1.10 and 999.1.1.1.", &EntityKind::IpAddress);
@@ -479,7 +640,7 @@ mod tests {
         /// Detection must never panic and must stay inside the text.
         #[test]
         fn detection_yields_spans_within_the_text(text in ".{0,256}") {
-            let config = Config::default();
+            let config = config_for(&[Id::FR]);
             for span in Rules::new(&config).detect(&text) {
                 proptest::prop_assert!(span.end <= text.len());
                 proptest::prop_assert!(span.start <= span.end);

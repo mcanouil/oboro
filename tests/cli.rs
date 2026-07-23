@@ -634,6 +634,112 @@ fn doctor_reports_the_vault_and_confirms_no_network_use() {
 }
 
 #[test]
+fn doctor_says_where_the_phone_regions_came_from() {
+    let workspace = Workspace::new();
+    workspace
+        .command()
+        .arg("doctor")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("regions:"))
+        .stdout(predicate::str::contains("FR (from $LC_ALL)"));
+
+    std::fs::write(workspace.path().join("oboro.toml"), "regions = [\"GB\"]\n")
+        .expect("writing the configuration");
+    workspace
+        .command()
+        .arg("doctor")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("GB (from oboro.toml)"));
+}
+
+/// No locale, no configuration, and structured identifiers are still found:
+/// nothing about detection requires a language or a region to be declared.
+#[test]
+fn a_document_is_cleaned_with_no_locale_and_no_configuration() {
+    let workspace = Workspace::new();
+    let input = workspace.path().join("mixed.txt");
+    std::fs::write(
+        &input,
+        "Ring +33 1 42 68 53 00 or mail sales@example.com.\n\
+         Deliver to 10 Downing Street, SW1A 1AA.\n\
+         Hauptstraße 5 is the other address.\n",
+    )
+    .expect("writing the input");
+
+    workspace
+        .command_in_locale("C")
+        .arg("clean")
+        .arg(&input)
+        .assert()
+        .success();
+
+    let output = std::fs::read_to_string(workspace.path().join("mixed.clean.md"))
+        .expect("the sanitised file must exist");
+    for secret in [
+        "+33 1 42 68 53 00",
+        "sales@example.com",
+        "10 Downing Street",
+        "SW1A 1AA",
+        "Hauptstraße 5",
+    ] {
+        assert!(
+            !output.contains(secret),
+            "{secret} survived with no locale set: {output}"
+        );
+    }
+}
+
+/// A region is a hint that widens what is read, never a requirement: with no
+/// locale the international number is still caught and the national one is not.
+#[test]
+fn a_region_hint_only_widens_what_is_read() {
+    let workspace = Workspace::new();
+    let input = workspace.path().join("calls.txt");
+    let text = "Ring +33 1 42 68 53 00 or 06 12 34 56 78.\n";
+    std::fs::write(&input, text).expect("writing the input");
+
+    workspace
+        .command_in_locale("C")
+        .arg("clean")
+        .arg(&input)
+        .arg("--stdout")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("+33 1 42 68 53 00").not())
+        .stdout(predicate::str::contains("06 12 34 56 78"));
+
+    std::fs::write(workspace.path().join("oboro.toml"), "regions = [\"FR\"]\n")
+        .expect("writing the configuration");
+    workspace
+        .command_in_locale("C")
+        .arg("clean")
+        .arg(&input)
+        .arg("--stdout")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("06 12 34 56 78").not());
+}
+
+#[test]
+fn an_unknown_region_is_refused_with_the_code_named() {
+    let workspace = Workspace::new();
+    let input = workspace.path().join("note.txt");
+    std::fs::write(&input, "Nothing here.\n").expect("writing the input");
+    std::fs::write(workspace.path().join("oboro.toml"), "regions = [\"XX\"]\n")
+        .expect("writing the configuration");
+
+    workspace
+        .command()
+        .arg("clean")
+        .arg(&input)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("XX"));
+}
+
+#[test]
 fn separate_vaults_do_not_share_placeholders() {
     let first = Workspace::new();
     let second = Workspace::new();

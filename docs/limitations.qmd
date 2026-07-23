@@ -80,8 +80,19 @@ Detection does not depend on the document's language, and you never declare one.
 Structured identifiers such as emails, IBANs, payment cards and IP addresses are matched by format, so they work in any language.
 The recognition model is multilingual and reads the whole document in one pass, so a file that mixes languages, for example French and English names side by side, is handled at once with no per-language setting.
 
-Two things are single-locale rather than language-neutral.
-Postal address patterns are French only, so an address in another country is left to the recognition model or to your denylist.
-Phone numbers are read against one `default_region`, `FR` by default, so a number written in another country's national format may be missed; a number in international `+` form is caught whatever the region.
+Street addresses are matched by shape too, in the three word orders languages use: the type before the name (`12 rue de la Paix`, `3 via Roma`), after it (`10 Downing Street`), or welded onto it (`Hauptstraße 5`).
+An address whose street type is not in that vocabulary is left to the recognition model or to your denylist.
+
+Two gaps in the postcode patterns are worth knowing.
+
+A postcode of four bare digits followed by a place name, as in Belgium, Switzerland, Austria and Scandinavia, is deliberately not matched: it cannot be told apart from `2024 January`, and matching it would put a hole in every document that mentions a year.
+Those addresses are still caught when the street line is, and the postcode alone is rarely identifying.
+
+Five-digit, British, Canadian, Dutch and American postcodes are matched.
+Anything else is not.
+
+Two settings exist as hints, and neither is required.
+[`regions`](configuration.qmd#regions) widens which national phone number formats are read, and a number in international `+` form is read whatever it holds.
+[`ocr_languages`](configuration.qmd#ocr_languages) names what an image is written in, and left unset the installed trained data is used.
 
 The tool has been exercised mostly on French and English, though nothing in it is limited to those two.

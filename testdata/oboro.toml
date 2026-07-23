@@ -3,7 +3,9 @@
 # Until the NER layer lands, personal and company names are caught by listing
 # them explicitly here.
 
-default_region = "FR"
+# Fixed so the tests read the fixtures' French phone numbers whatever locale
+# the machine running them has.
+regions = ["FR"]
 
 # Names the tool must never redact.
 allowlist = ["Lille"]

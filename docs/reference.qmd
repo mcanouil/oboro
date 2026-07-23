@@ -120,7 +120,7 @@ key:        /Users/you/.oboro/key
   /Users/you/.oboro/vault.db mode 0600 (ok)
   /Users/you/.oboro/key mode 0600 (ok)
 config:     /Users/you/work/oboro.toml
-region:     FR
+regions:    FR, GB (from oboro.toml)
 allowlist:  1 entr(y/ies)
 denylist:   3 term(s)
 patterns:   1 custom

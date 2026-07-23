@@ -144,11 +144,11 @@ RUN cargo build --release --features "ner,ocr"
 
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      tesseract-ocr tesseract-ocr-fra \
+      tesseract-ocr tesseract-ocr-eng \
   && rm -rf /var/lib/apt/lists/*
 COPY --from=build /src/target/release/oboro /usr/local/bin/oboro
 ENTRYPOINT ["oboro"]
 ```
 
-The runtime stage keeps `tesseract-ocr` because OCR loads it at run time; `ner` built this way still needs `oboro models pull` on first use.
+The runtime stage keeps `tesseract-ocr` because OCR loads it at run time, and one `tesseract-ocr-<language>` package per language your documents are in; `ner` built this way still needs `oboro models pull` on first use.
 This is an advanced, unsupported path: the published images stay the default and ner builds for the reasons above.

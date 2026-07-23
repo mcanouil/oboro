@@ -329,10 +329,11 @@ mod tests {
     use std::path::PathBuf;
 
     fn document(text: &str) -> Document {
-        // Rules-only, so the drawn detections do not depend on whether the
-        // recognition model happens to be installed.
+        // Rules-only with fixed regions, so the drawn detections depend on
+        // neither the installed model nor the locale of the machine.
         let mut config = Config::default();
         config.ner_enabled = false;
+        config.regions = vec![phonenumber::country::Id::FR];
         let detector = Detector::new(&config).expect("detector");
         let decisions = crate::pipeline::detect(text, &detector)
             .expect("detecting")

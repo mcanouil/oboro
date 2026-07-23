@@ -208,8 +208,11 @@ mod tests {
             // These tests assert the deterministic rules layer; the model is
             // exercised by its own calibration tests, and leaving it on would
             // make the outcome depend on whether the machine has it installed.
+            // The regions are fixed for the same reason: by default they come
+            // from the locale of whoever runs the tests.
             let mut config = Config::default();
             config.ner_enabled = false;
+            config.regions = vec![phonenumber::country::Id::FR];
             Self {
                 vault,
                 config,

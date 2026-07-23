@@ -146,13 +146,16 @@ pub fn format_of(path: &Path) -> Option<Format> {
 /// detection spans and the written output agree. Tabular content is returned
 /// byte for byte, since whitespace there is structure.
 ///
+/// `ocr_languages` only reaches the image path, and only as a hint: left empty,
+/// recognition uses whatever trained data is installed.
+///
 /// # Errors
 ///
 /// Returns an error if the format is unsupported, the file cannot be read or
 /// parsed, or the document holds no extractable text. That last case matters:
 /// a scanned PDF silently yielding nothing would look like a document with
 /// nothing sensitive in it.
-pub fn read(path: &Path) -> Result<Conversion> {
+pub fn read(path: &Path, ocr_languages: &[String]) -> Result<Conversion> {
     let Some(format) = format_of(path) else {
         bail!(
             "unsupported file type for {}; this build reads: {}",
@@ -167,7 +170,7 @@ pub fn read(path: &Path) -> Result<Conversion> {
         Format::Docx => docx::to_text(path).map(Conversion::Document),
         Format::Xlsx => xlsx::to_sheets(path).map(Conversion::Sheets),
         Format::Pdf => pdf::to_text(path).map(Conversion::Document),
-        Format::Image => image_to_text(path).map(Conversion::Document),
+        Format::Image => image_to_text(path, ocr_languages).map(Conversion::Document),
     }
 }
 
@@ -202,12 +205,12 @@ fn tidy(text: &str) -> String {
 }
 
 #[cfg(feature = "ocr")]
-fn image_to_text(path: &Path) -> Result<String> {
-    ocr::image_to_text(path)
+fn image_to_text(path: &Path, languages: &[String]) -> Result<String> {
+    ocr::image_to_text(path, languages)
 }
 
 #[cfg(not(feature = "ocr"))]
-fn image_to_text(path: &Path) -> Result<String> {
+fn image_to_text(path: &Path, _languages: &[String]) -> Result<String> {
     bail!(
         "cannot read {}: reading images needs optical character recognition, \
          which this build was compiled without. Rebuild with `--features ocr` \
@@ -222,7 +225,7 @@ mod tests {
 
     /// Reads `path`, asserting it yields a single document.
     fn read_document(path: &Path) -> Result<String> {
-        match read(path)? {
+        match read(path, &[])? {
             Conversion::Document(text) => Ok(text),
             Conversion::Sheets(_) => panic!("{} unexpectedly read as sheets", path.display()),
         }
@@ -325,7 +328,7 @@ mod tests {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("testdata")
             .join("clients.xlsx");
-        match read(&path).expect("reading") {
+        match read(&path, &[]).expect("reading") {
             Conversion::Sheets(sheets) => assert!(!sheets.is_empty()),
             Conversion::Document(_) => panic!("a workbook must read as sheets"),
         }
@@ -336,7 +339,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("temporary directory");
         let path = dir.path().join("archive.zip");
         std::fs::write(&path, "binary").expect("writing");
-        let error = read(&path).expect_err("zip is not supported");
+        let error = read(&path, &[]).expect_err("zip is not supported");
         assert!(format!("{error:#}").contains("unsupported file type"));
     }
 
@@ -345,12 +348,12 @@ mod tests {
         let dir = tempfile::tempdir().expect("temporary directory");
         let path = dir.path().join("README");
         std::fs::write(&path, "text").expect("writing");
-        assert!(read(&path).is_err());
+        assert!(read(&path, &[]).is_err());
     }
 
     #[test]
     fn reports_a_missing_file_with_its_path() {
-        let error = read(Path::new("/nonexistent/file.txt")).expect_err("missing file");
+        let error = read(Path::new("/nonexistent/file.txt"), &[]).expect_err("missing file");
         assert!(format!("{error:#}").contains("file.txt"));
     }
 
@@ -359,7 +362,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("temporary directory");
         let path = dir.path().join("latin.txt");
         std::fs::write(&path, [0xff, 0xfe, 0x00]).expect("writing");
-        assert!(read(&path).is_err());
+        assert!(read(&path, &[]).is_err());
     }
 
     #[test]
@@ -409,7 +412,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("temporary directory");
         let path = dir.path().join("scan.png");
         std::fs::write(&path, [0x89, b'P', b'N', b'G']).expect("writing");
-        let error = read(&path).expect_err("no ocr in this build");
+        let error = read(&path, &[]).expect_err("no ocr in this build");
         assert!(format!("{error:#}").contains("--features ocr"));
     }
 

@@ -57,7 +57,7 @@ impl Document {
     ///
     /// Returns an error if the file cannot be read or detection fails.
     pub fn open_all(path: &Path, root: Option<&Path>, detector: &Detector) -> Result<Vec<Self>> {
-        crate::convert::read(path)?
+        crate::convert::read(path, &detector.config().ocr_languages)?
             .into_parts()
             .into_iter()
             .map(|(sheet, text)| {
@@ -413,6 +413,7 @@ mod tests {
         // recognition model happens to be installed.
         let mut config = crate::config::Config::default();
         config.ner_enabled = false;
+        config.regions = vec![phonenumber::country::Id::FR];
         let detector = Detector::new(&config).expect("detector");
         let decisions = crate::pipeline::detect(text, &detector)
             .expect("detecting")
@@ -449,6 +450,7 @@ mod tests {
         let mut vault2 = open_vault(&dir2);
         let mut config = crate::config::Config::default();
         config.ner_enabled = false;
+        config.regions = vec![phonenumber::country::Id::FR];
         let detector = Detector::new(&config).expect("detector");
         let cleaned = crate::pipeline::clean(&doc.text, &detector, &mut vault2).expect("cleaning");
         assert_eq!(reviewed.text, cleaned.text);
@@ -508,6 +510,7 @@ mod tests {
     fn sheet_fragments_differing_only_by_case_are_numbered_apart() {
         let mut config = crate::config::Config::default();
         config.ner_enabled = false;
+        config.regions = vec![phonenumber::country::Id::FR];
         let detector = Detector::new(&config).expect("detector");
         let dir = tempfile::tempdir().expect("temporary directory");
         let mut vault = open_vault(&dir);
@@ -647,6 +650,7 @@ mod tests {
     fn colliding_sheet_fragments_are_numbered_apart() {
         let mut config = crate::config::Config::default();
         config.ner_enabled = false;
+        config.regions = vec![phonenumber::country::Id::FR];
         let detector = Detector::new(&config).expect("detector");
         let dir = tempfile::tempdir().expect("temporary directory");
         let mut vault = open_vault(&dir);

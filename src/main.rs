@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{Args, Parser, Subcommand};
 
-use oboro::config::Config;
+use oboro::config::{self, Config, RegionSource};
 use oboro::convert;
 use oboro::detect::Detector;
 use oboro::pipeline;
@@ -285,7 +285,7 @@ fn clean(
     let mut written = oboro::review::WrittenOutputs::new();
     for input in &resolved.inputs {
         let file = &input.path;
-        let parts = convert::read(file)?.into_parts();
+        let parts = convert::read(file, &config.ocr_languages)?.into_parts();
 
         if to_stdout {
             // A workbook maps to one file per sheet, which a single stream
@@ -481,6 +481,22 @@ fn map_purge(confirmed: bool, store: &StoreArgs) -> Result<()> {
     Ok(())
 }
 
+/// Describes the phone regions in force and where they came from, since an
+/// unset `regions` follows the locale and that is worth seeing.
+fn describe_regions(config: &Config) -> String {
+    let codes = config.region_codes();
+    match (&config.regions_source, codes.is_empty()) {
+        (_, true) => "none (international + numbers only)".to_owned(),
+        (RegionSource::Configured, _) => {
+            format!("{} (from {})", codes.join(", "), config::CONFIG_FILE)
+        }
+        (RegionSource::Locale(variable), _) => {
+            format!("{} (from ${variable})", codes.join(", "))
+        }
+        (RegionSource::Unknown, _) => codes.join(", "),
+    }
+}
+
 fn doctor(store: &StoreArgs) -> Result<()> {
     let (db, key) = store.paths()?;
     println!("vault:      {}", db.display());
@@ -507,7 +523,7 @@ fn doctor(store: &StoreArgs) -> Result<()> {
     }
 
     let config = Config::load(config_path.as_deref())?;
-    println!("region:     {}", config.default_region);
+    println!("regions:    {}", describe_regions(&config));
     println!("allowlist:  {} entr(y/ies)", config.allowlist.len());
     println!("denylist:   {} term(s)", config.denylist.len());
     println!("patterns:   {} custom", config.patterns.len());
@@ -528,6 +544,16 @@ fn doctor(store: &StoreArgs) -> Result<()> {
             "not compiled in; images cannot be read"
         }
     );
+    if convert::ocr_available() {
+        println!(
+            "ocr langs:  {}",
+            if config.ocr_languages.is_empty() {
+                "not set; whatever Tesseract has installed".to_owned()
+            } else {
+                config.ocr_languages.join(", ")
+            }
+        );
+    }
     #[cfg(feature = "ner")]
     {
         let installed = oboro::models::is_installed().unwrap_or(false);
