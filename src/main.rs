@@ -29,7 +29,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Anonymise files into sanitised markdown
+    /// Anonymise files into sanitised copies
     Clean {
         /// Files or directories to anonymise
         #[arg(required = true, value_name = "PATH")]
@@ -229,8 +229,15 @@ fn prepare(
 /// their collisions are caught against the destinations actually claimed
 /// during the run instead.
 fn ensure_distinct_outputs(inputs: &[oboro::walk::Input], output: Option<&Path>) -> Result<()> {
+    let mut seen_inputs = std::collections::HashSet::new();
     let mut seen = std::collections::HashSet::new();
     for input in inputs {
+        if !seen_inputs.insert(input.path.clone()) {
+            bail!(
+                "{} is listed twice; each input is processed once",
+                input.path.display()
+            );
+        }
         if convert::format_of(&input.path) == Some(convert::Format::Xlsx) {
             continue;
         }
@@ -272,7 +279,9 @@ fn clean(
     let detector = Detector::new(&config)?;
 
     // Destinations written this run, catching per-sheet collisions that the
-    // input-level guard in `ensure_distinct_outputs` cannot see.
+    // input-level guard in `ensure_distinct_outputs` cannot see. Compared
+    // case-insensitively, since APFS and NTFS treat names differing only by
+    // case as one file.
     let mut written = std::collections::HashSet::new();
     for input in &resolved.inputs {
         let file = &input.path;
@@ -283,8 +292,8 @@ fn clean(
             // cannot represent; a lone sheet is unambiguous.
             if parts.len() > 1 {
                 bail!(
-                    "--stdout cannot represent {}: the workbook holds {} sheets, \
-                     each written to its own file; use --output",
+                    "--stdout cannot represent {}: the workbook holds {} non-empty \
+                     sheets, each written to its own file; use --output",
                     file.display(),
                     parts.len()
                 );
@@ -320,7 +329,7 @@ fn clean(
             )?;
             // Refused before the body is cleaned, so no placeholder is
             // allocated for values that are never written anywhere.
-            if !written.insert(destination.clone()) {
+            if !written.insert(destination.to_string_lossy().to_lowercase()) {
                 bail!(
                     "two inputs would both be written to {}; clean them separately \
                      or into different output directories",

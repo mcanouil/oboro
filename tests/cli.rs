@@ -211,6 +211,24 @@ fn a_refused_output_allocates_no_vault_entries() {
         .stdout(predicate::str::contains("colliding@refused.example").not());
 }
 
+/// Passing one workbook twice must be refused up front, as duplicates of any
+/// other format are, rather than discovered sheet by sheet.
+#[test]
+fn clean_refuses_the_same_input_listed_twice() {
+    let workspace = Workspace::new();
+    let book = workspace.path().join("book.xlsx");
+    support::write_xlsx(&book, &[("Clients", &[&["value"]])]);
+
+    workspace
+        .command()
+        .arg("clean")
+        .arg(&book)
+        .arg(&book)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("listed twice"));
+}
+
 /// A workbook's outputs carry sheet fragments, so it cannot collide with a
 /// plain input that shares only its stem.
 #[test]

@@ -6,7 +6,7 @@ Every command accepts `--vault` and `--key` to point at a store other than the d
 
 ## `clean`
 
-Anonymises files into sanitised markdown.
+Anonymises files into sanitised copies.
 
 ```bash
 oboro clean <PATH>... [OPTIONS]
@@ -25,7 +25,7 @@ A directory is walked for the formats this build reads, skipping hidden entries,
 Output is named after the input, with a suffix following its format: `report.docx` becomes `report.clean.md` and `data.csv` becomes `data.clean.csv`.
 A workbook becomes one TSV per sheet, so `book.xlsx` with a sheet `Clients` becomes `book.Clients.clean.tsv`.
 With `--output`, a directory's subfolders are mirrored under it.
-`--stdout` works for a workbook only when it holds a single sheet, since one stream cannot carry several files.
+`--stdout` works for a workbook only when it holds a single non-empty sheet, since one stream cannot carry several files.
 
 ## `review`
 

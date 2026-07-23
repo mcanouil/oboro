@@ -155,7 +155,13 @@ impl Document {
             stem_override,
             sheet_fragment,
         )?;
-        if written.contains(&destination) {
+        // Compared case-insensitively, since APFS and NTFS treat names
+        // differing only by case as one file.
+        let folded = destination.to_string_lossy().to_lowercase();
+        if written
+            .iter()
+            .any(|path| path.to_string_lossy().to_lowercase() == folded)
+        {
             bail!(
                 "two inputs would both be written to {}; review them separately \
                  or into different output directories",
@@ -279,6 +285,8 @@ pub fn sheet_fragment(name: &str, index: usize) -> String {
 ///
 /// The namer remembers every fragment it hands out, so uniqueness is its own
 /// property rather than bookkeeping each caller must carry correctly.
+/// Fragments are compared case-insensitively, since APFS and NTFS treat names
+/// differing only by case as one file and would silently overwrite.
 #[derive(Default)]
 pub struct SheetNamer {
     used: std::collections::HashSet<String>,
@@ -317,7 +325,7 @@ impl SheetNamer {
         let fragment = sheet_fragment(&base, index);
         let mut candidate = fragment.clone();
         let mut attempt = 2;
-        while !self.used.insert(candidate.clone()) {
+        while !self.used.insert(candidate.to_lowercase()) {
             candidate = format!("{fragment}_{attempt}");
             attempt += 1;
         }
@@ -429,6 +437,27 @@ mod tests {
             vault.entries().expect("listing").is_empty(),
             "rejecting a detection must not record it"
         );
+    }
+
+    /// APFS and NTFS treat names differing only by case as one file, so two
+    /// such fragments would silently overwrite each other there.
+    #[test]
+    fn sheet_fragments_differing_only_by_case_are_numbered_apart() {
+        let mut config = crate::config::Config::default();
+        config.ner_enabled = false;
+        let detector = Detector::new(&config).expect("detector");
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let mut vault = open_vault(&dir);
+        let mut namer = SheetNamer::new();
+
+        let first = namer
+            .fragment("Clients", 0, false, &detector, &mut vault)
+            .expect("first fragment");
+        let second = namer
+            .fragment("clients", 1, false, &detector, &mut vault)
+            .expect("second fragment");
+        assert_eq!(first, "Clients");
+        assert_eq!(second, "clients_2");
     }
 
     #[test]

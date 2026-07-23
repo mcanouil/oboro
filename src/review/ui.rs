@@ -86,7 +86,10 @@ pub fn run(
     let mut quit = false;
     let mut namings: std::collections::HashMap<std::path::PathBuf, Naming> =
         std::collections::HashMap::new();
-    {
+    // The loop's result is held rather than propagated with `?`, so the
+    // summary below still reports what was written before a failure; the
+    // guard's Drop has already restored the terminal by then.
+    let outcome = (|| -> Result<()> {
         // One alternate screen for the whole batch, restored by the guard's
         // Drop even if a draw or a write below fails or panics.
         let mut guard = TerminalGuard::new().context("preparing the terminal")?;
@@ -132,7 +135,8 @@ pub fn run(
                 }
             }
         }
-    }
+        Ok(())
+    })();
 
     for path in &skipped {
         eprintln!("{}: skipped, nothing written", path.display());
@@ -143,7 +147,7 @@ pub fn run(
     if quit {
         eprintln!("stopped; {} file(s) written", written.len());
     }
-    Ok(())
+    outcome
 }
 
 type Screen = Terminal<CrosstermBackend<Stdout>>;
