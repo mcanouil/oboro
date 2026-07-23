@@ -146,7 +146,7 @@ impl Document {
         output_dir: Option<&Path>,
         stem_override: Option<&str>,
         sheet_fragment: Option<&str>,
-        written: &mut Vec<PathBuf>,
+        written: &mut WrittenOutputs,
     ) -> Result<PathBuf> {
         let destination = output_path(
             &self.path,
@@ -155,24 +155,87 @@ impl Document {
             stem_override,
             sheet_fragment,
         )?;
-        // Compared case-insensitively, since APFS and NTFS treat names
-        // differing only by case as one file.
-        let folded = destination.to_string_lossy().to_lowercase();
-        if written
-            .iter()
-            .any(|path| path.to_string_lossy().to_lowercase() == folded)
-        {
+        written.claim(&destination)?;
+        let report = self.apply(vault)?;
+        write_output(&destination, &report.text)?;
+        written.record(&destination)?;
+        Ok(destination)
+    }
+}
+
+/// Destinations already produced by this run, for refusing collisions.
+///
+/// Two layers close different gaps: folded path strings catch
+/// case-insensitive collisions before the second file even exists (APFS and
+/// NTFS treat names differing only by case as one file), and file identity
+/// (device and inode) catches aliases the string form cannot see, such as
+/// `./x` beside `x`, `dir/../x`, or names the filesystem case-folds beyond
+/// simple lowercasing.
+#[derive(Default)]
+pub struct WrittenOutputs {
+    folded: std::collections::HashSet<String>,
+    identities: std::collections::HashSet<(u64, u64)>,
+}
+
+impl WrittenOutputs {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Claims `destination`, refusing it when this run already produced an
+    /// output the write would replace.
+    ///
+    /// Called before a document's values are stored, so a refused output
+    /// allocates no placeholders.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the destination collides with an output already
+    /// written this run, or if it cannot be inspected.
+    pub fn claim(&mut self, destination: &Path) -> Result<()> {
+        let collided = !self
+            .folded
+            .insert(destination.to_string_lossy().to_lowercase())
+            || matches!(identity_of(destination)?, Some(identity) if self.identities.contains(&identity));
+        if collided {
             bail!(
-                "two inputs would both be written to {}; review them separately \
+                "two inputs would both be written to {}; process them separately \
                  or into different output directories",
                 destination.display()
             );
         }
-        let report = self.apply(vault)?;
-        write_output(&destination, &report.text)?;
-        written.push(destination.clone());
-        Ok(destination)
+        Ok(())
     }
+
+    /// Records the identity of `destination` after it was written.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the freshly written file cannot be inspected.
+    pub fn record(&mut self, destination: &Path) -> Result<()> {
+        if let Some(identity) = identity_of(destination)? {
+            self.identities.insert(identity);
+        }
+        Ok(())
+    }
+}
+
+/// The (device, inode) pair identifying `path`, or `None` when it does not
+/// exist or the platform has no such notion.
+#[cfg(unix)]
+fn identity_of(path: &Path) -> Result<Option<(u64, u64)>> {
+    use std::os::unix::fs::MetadataExt;
+    match std::fs::metadata(path) {
+        Ok(metadata) => Ok(Some((metadata.dev(), metadata.ino()))),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error).with_context(|| format!("inspecting {}", path.display())),
+    }
+}
+
+#[cfg(not(unix))]
+fn identity_of(_path: &Path) -> Result<Option<(u64, u64)>> {
+    Ok(None)
 }
 
 /// Writes sanitised `text` at `destination`, creating parent directories.
@@ -467,7 +530,7 @@ mod tests {
         let first = document("Mail a@example.com.");
         let second = document("Mail b@example.com.");
         let mut vault = open_vault(&dir);
-        let mut written = Vec::new();
+        let mut written = WrittenOutputs::new();
 
         first
             .write(&mut vault, Some(&out), None, None, &mut written)

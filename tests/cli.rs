@@ -211,6 +211,26 @@ fn a_refused_output_allocates_no_vault_entries() {
         .stdout(predicate::str::contains("colliding@refused.example").not());
 }
 
+/// Two spellings of one destination must collide even when the paths differ
+/// textually: the file the second write would replace is the same inode.
+#[test]
+fn clean_refuses_aliased_paths_naming_one_destination() {
+    let workspace = Workspace::new();
+    std::fs::write(workspace.path().join("note.txt"), "Mail a@example.com.\n").expect("writing");
+    std::fs::write(workspace.path().join("note.md"), "Mail b@example.com.\n").expect("writing");
+
+    // Relative and dot-prefixed spellings produce textually distinct
+    // destinations (`note.clean.md` vs `./note.clean.md`) that are one file.
+    workspace
+        .command()
+        .arg("clean")
+        .arg("note.txt")
+        .arg("./note.md")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("both be written to"));
+}
+
 /// Passing one workbook twice must be refused up front, as duplicates of any
 /// other format are, rather than discovered sheet by sheet.
 #[test]

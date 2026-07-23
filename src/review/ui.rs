@@ -82,6 +82,7 @@ pub fn run(
     }
 
     let mut written = Vec::new();
+    let mut written_outputs = super::WrittenOutputs::new();
     let mut skipped = Vec::new();
     let mut quit = false;
     let mut namings: std::collections::HashMap<std::path::PathBuf, Naming> =
@@ -120,15 +121,15 @@ pub fn run(
                         )?),
                         None => None,
                     };
-                    document.write(
+                    written.push(document.write(
                         vault,
                         output_dir,
                         naming.stem.as_deref(),
                         fragment.as_deref(),
-                        &mut written,
-                    )?;
+                        &mut written_outputs,
+                    )?);
                 }
-                Outcome::Skip => skipped.push(document.path.clone()),
+                Outcome::Skip => skipped.push(document.describe()),
                 Outcome::Quit => {
                     quit = true;
                     break;
@@ -138,8 +139,8 @@ pub fn run(
         Ok(())
     })();
 
-    for path in &skipped {
-        eprintln!("{}: skipped, nothing written", path.display());
+    for document in &skipped {
+        eprintln!("{document}: skipped, nothing written");
     }
     for path in &written {
         eprintln!("wrote {}", path.display());

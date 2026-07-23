@@ -223,11 +223,12 @@ fn prepare(
 /// Guards against two inputs sharing one output.
 ///
 /// The output is named after the stem, so `contract.txt` and `contract.md`
-/// both want `contract.clean.md`; writing both would silently lose one. Caught
-/// before anything is written so nothing is half-done. Workbooks are excluded:
-/// their outputs carry sheet fragments unknown until the file is read, so
-/// their collisions are caught against the destinations actually claimed
-/// during the run instead.
+/// both want `contract.clean.md`; writing both would silently lose one. This
+/// upfront pass catches duplicate inputs and exact-name collisions before any
+/// work is done; everything it cannot see, such as workbook sheet fragments,
+/// case folds, and aliased spellings of one path, is caught against the
+/// destinations actually claimed during the run by
+/// [`oboro::review::WrittenOutputs`].
 fn ensure_distinct_outputs(inputs: &[oboro::walk::Input], output: Option<&Path>) -> Result<()> {
     let mut seen_inputs = std::collections::HashSet::new();
     let mut seen = std::collections::HashSet::new();
@@ -278,11 +279,10 @@ fn clean(
     // time instead of on every file.
     let detector = Detector::new(&config)?;
 
-    // Destinations written this run, catching per-sheet collisions that the
-    // input-level guard in `ensure_distinct_outputs` cannot see. Compared
-    // case-insensitively, since APFS and NTFS treat names differing only by
-    // case as one file.
-    let mut written = std::collections::HashSet::new();
+    // Destinations written this run, catching per-sheet and aliased-path
+    // collisions that the input-level guard in `ensure_distinct_outputs`
+    // cannot see.
+    let mut written = oboro::review::WrittenOutputs::new();
     for input in &resolved.inputs {
         let file = &input.path;
         let parts = convert::read(file)?.into_parts();
@@ -327,17 +327,12 @@ fn clean(
                 stem.as_deref(),
                 fragment.as_deref(),
             )?;
-            // Refused before the body is cleaned, so no placeholder is
+            // Claimed before the body is cleaned, so no placeholder is
             // allocated for values that are never written anywhere.
-            if !written.insert(destination.to_string_lossy().to_lowercase()) {
-                bail!(
-                    "two inputs would both be written to {}; clean them separately \
-                     or into different output directories",
-                    destination.display()
-                );
-            }
+            written.claim(&destination)?;
             let report = pipeline::clean(&text, &detector, &mut vault)?;
             oboro::review::write_output(&destination, &report.text)?;
+            written.record(&destination)?;
             eprintln!(
                 "{} -> {} ({} replaced{})",
                 file.display(),
