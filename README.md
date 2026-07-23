@@ -111,8 +111,8 @@ a name in different subfolders do not collide.
 
 | Format                 | How                                                               |
 | ---------------------- | ----------------------------------------------------------------- |
-| `.txt`, `.md`          | Read directly                                                     |
-| `.csv`, `.tsv`         | Read directly; the output keeps the tabular extension             |
+| `.txt`, `.md`          | Read directly; trailing spaces and blank-line runs tidied         |
+| `.csv`, `.tsv`         | Read byte for byte; the output keeps the tabular extension        |
 | `.docx`                | Text runs from the body, headers, footers, footnotes and comments |
 | `.xlsx`, `.xlsm`       | One TSV file per sheet, named `book.<sheet>.clean.tsv`            |
 | `.pdf`                 | Embedded text; scanned PDFs are refused, not half-read            |
