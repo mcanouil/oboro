@@ -9,6 +9,7 @@ All notable changes to this project will be documented in this file.
 - feat: Write each workbook sheet to its own TSV file (`book.xlsx` with a sheet `Clients` becomes `book.Clients.clean.tsv`), keeping the tabular structure openable in a spreadsheet tool instead of flattening the workbook into one markdown file; sheet names are sanitised for the filesystem, redacted like filenames when `redact_filenames` is on, and numbered apart when they collide.
 - feat: Read `.csv` and `.tsv` files, passed through as plain text so the cleaned output stays a valid tabular file.
 - feat: Name each output after its input's format, so `data.csv` becomes `data.clean.csv` and `data.tsv` becomes `data.clean.tsv` while documents keep `.clean.md`; `restore` needs no change since it rewrites placeholders in any text file.
+- feat: Refuse any two inputs whose sanitised outputs would land on one file, including sheet outputs, case-folded names, and aliased spellings of one path, before the refused document's values are stored in the vault.
 
 ## 0.3.0 (2026-07-22)
 
