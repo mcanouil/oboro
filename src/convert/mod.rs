@@ -57,9 +57,12 @@ const FORMATS: &[(&str, Format)] = &[
 /// One sheet of a workbook, read as tab-separated rows.
 #[derive(Debug)]
 pub struct Sheet {
+    /// Zero-based position in the workbook, kept explicitly so fallback
+    /// output names (`sheet<N>`) still count skipped empty sheets.
+    pub index: usize,
     /// The sheet's name as stored in the workbook. It may hold PII and
     /// path-hostile characters, so it must not be used in a path as-is; see
-    /// [`crate::review::sheet_output_fragment`].
+    /// [`crate::review::SheetNamer`].
     pub name: String,
     /// Tab-separated rows, one line per non-empty row.
     pub text: String,
@@ -85,8 +88,7 @@ impl Conversion {
             Self::Document(text) => vec![(None, text)],
             Self::Sheets(sheets) => sheets
                 .into_iter()
-                .enumerate()
-                .map(|(index, sheet)| (Some((index, sheet.name)), sheet.text))
+                .map(|sheet| (Some((sheet.index, sheet.name)), sheet.text))
                 .collect(),
         }
     }

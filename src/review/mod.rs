@@ -11,7 +11,7 @@ mod ui;
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 
 use crate::detect::{Detector, Span};
 use crate::vault::Vault;
@@ -34,8 +34,8 @@ pub struct Document {
     pub root: Option<PathBuf>,
     /// The workbook sheet this document came from, as its zero-based position
     /// and raw name. `None` for a whole-file document. The name may hold PII
-    /// and path-hostile characters; [`sheet_output_fragment`] turns it into a
-    /// filename part.
+    /// and path-hostile characters; [`SheetNamer`] turns it into a filename
+    /// part.
     pub sheet: Option<(usize, String)>,
     pub text: String,
     pub decisions: Vec<Decision>,
@@ -132,17 +132,22 @@ impl Document {
 
     /// Writes the reviewed result beside the input, as `clean` does.
     ///
+    /// `written` records every destination this run has produced; a second
+    /// document resolving to one of them is refused before its values are
+    /// stored, so an earlier reviewed output is never silently replaced.
+    ///
     /// # Errors
     ///
-    /// Returns an error if the vault fails or the file cannot be written.
+    /// Returns an error if the destination was already written this run, the
+    /// vault fails, or the file cannot be written.
     pub fn write(
         &self,
         vault: &mut Vault,
         output_dir: Option<&Path>,
         stem_override: Option<&str>,
         sheet_fragment: Option<&str>,
+        written: &mut Vec<PathBuf>,
     ) -> Result<PathBuf> {
-        let report = self.apply(vault)?;
         let destination = output_path(
             &self.path,
             output_dir,
@@ -150,7 +155,16 @@ impl Document {
             stem_override,
             sheet_fragment,
         )?;
+        if written.contains(&destination) {
+            bail!(
+                "two inputs would both be written to {}; review them separately \
+                 or into different output directories",
+                destination.display()
+            );
+        }
+        let report = self.apply(vault)?;
         write_output(&destination, &report.text)?;
+        written.push(destination.clone());
         Ok(destination)
     }
 }
@@ -184,7 +198,7 @@ pub fn write_output(destination: &Path, text: &str) -> Result<()> {
 /// `stem_override` supplies a redacted stem in place of the input's own, so PII
 /// in the filename does not survive into the output name; `None` keeps the
 /// input stem verbatim. `sheet_fragment` names the workbook sheet this output
-/// holds, from [`sheet_output_fragment`]; `None` for whole-file outputs.
+/// holds, from [`SheetNamer`]; `None` for whole-file outputs.
 ///
 /// # Errors
 ///
@@ -414,6 +428,29 @@ mod tests {
         assert!(
             vault.entries().expect("listing").is_empty(),
             "rejecting a detection must not record it"
+        );
+    }
+
+    #[test]
+    fn a_second_document_for_one_destination_is_refused_not_overwritten() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let out = dir.path().join("out");
+        let first = document("Mail a@example.com.");
+        let second = document("Mail b@example.com.");
+        let mut vault = open_vault(&dir);
+        let mut written = Vec::new();
+
+        first
+            .write(&mut vault, Some(&out), None, None, &mut written)
+            .expect("first write");
+        let error = second
+            .write(&mut vault, Some(&out), None, None, &mut written)
+            .expect_err("a second write to one destination must be refused");
+        assert!(format!("{error:#}").contains("both be written to"));
+        assert_eq!(
+            vault.entries().expect("listing").len(),
+            1,
+            "the refused document must not allocate placeholders"
         );
     }
 

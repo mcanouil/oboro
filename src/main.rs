@@ -224,13 +224,16 @@ fn prepare(
 ///
 /// The output is named after the stem, so `contract.txt` and `contract.md`
 /// both want `contract.clean.md`; writing both would silently lose one. Caught
-/// before anything is written so nothing is half-done. Workbooks are keyed by
-/// their base path without a sheet fragment, since sheet names are unknown
-/// until read; per-sheet collisions are caught against the destinations
-/// actually written in the `clean` loop.
+/// before anything is written so nothing is half-done. Workbooks are excluded:
+/// their outputs carry sheet fragments unknown until the file is read, so
+/// their collisions are caught against the destinations actually claimed
+/// during the run instead.
 fn ensure_distinct_outputs(inputs: &[oboro::walk::Input], output: Option<&Path>) -> Result<()> {
     let mut seen = std::collections::HashSet::new();
     for input in inputs {
+        if convert::format_of(&input.path) == Some(convert::Format::Xlsx) {
+            continue;
+        }
         let destination =
             oboro::review::output_path(&input.path, output, input.root.as_deref(), None, None)?;
         if !seen.insert(destination.clone()) {
@@ -308,7 +311,6 @@ fn clean(
                 )?),
                 None => None,
             };
-            let report = pipeline::clean(&text, &detector, &mut vault)?;
             let destination = oboro::review::output_path(
                 file,
                 output,
@@ -316,6 +318,8 @@ fn clean(
                 stem.as_deref(),
                 fragment.as_deref(),
             )?;
+            // Refused before the body is cleaned, so no placeholder is
+            // allocated for values that are never written anywhere.
             if !written.insert(destination.clone()) {
                 bail!(
                     "two inputs would both be written to {}; clean them separately \
@@ -323,6 +327,7 @@ fn clean(
                     destination.display()
                 );
             }
+            let report = pipeline::clean(&text, &detector, &mut vault)?;
             oboro::review::write_output(&destination, &report.text)?;
             eprintln!(
                 "{} -> {} ({} replaced{})",

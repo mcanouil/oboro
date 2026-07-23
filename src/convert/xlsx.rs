@@ -27,7 +27,7 @@ pub fn to_sheets(path: &Path) -> Result<Vec<Sheet>> {
         .with_context(|| format!("{} is not a readable spreadsheet", path.display()))?;
 
     let mut sheets = Vec::new();
-    for name in workbook.sheet_names() {
+    for (index, name) in workbook.sheet_names().into_iter().enumerate() {
         let range = workbook
             .worksheet_range(&name)
             .with_context(|| format!("reading sheet '{name}' of {}", path.display()))?;
@@ -43,7 +43,7 @@ pub fn to_sheets(path: &Path) -> Result<Vec<Sheet>> {
             text.push('\n');
         }
         if !text.is_empty() {
-            sheets.push(Sheet { name, text });
+            sheets.push(Sheet { index, name, text });
         }
     }
 
@@ -110,11 +110,16 @@ mod tests {
     fn an_empty_sheet_is_skipped_rather_than_written_empty() {
         let dir = tempfile::tempdir().expect("temporary directory");
         let path = dir.path().join("book.xlsx");
-        write_xlsx(&path, &[("Data", &[&["value"]]), ("Blank", &[])]);
+        write_xlsx(&path, &[("Blank", &[]), ("Data", &[&["value"]])]);
 
         let sheets = to_sheets(&path).expect("reading");
         assert_eq!(sheets.len(), 1);
         assert_eq!(sheets[0].name, "Data");
+        assert_eq!(
+            sheets[0].index, 1,
+            "the workbook position must count skipped empty sheets, \
+             so a fallback name points at the right sheet"
+        );
     }
 
     #[test]

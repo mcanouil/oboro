@@ -117,12 +117,13 @@ pub fn run(
                         )?),
                         None => None,
                     };
-                    written.push(document.write(
+                    document.write(
                         vault,
                         output_dir,
                         naming.stem.as_deref(),
                         fragment.as_deref(),
-                    )?);
+                        &mut written,
+                    )?;
                 }
                 Outcome::Skip => skipped.push(document.path.clone()),
                 Outcome::Quit => {

@@ -181,6 +181,57 @@ fn clean_refuses_a_sheet_output_colliding_with_another_input() {
         .stderr(predicate::str::contains("both be written to"));
 }
 
+/// A refused output must leave nothing in the vault: the collision is
+/// detected before the document body is cleaned, so no placeholder is
+/// allocated for values that were never written anywhere.
+#[test]
+fn a_refused_output_allocates_no_vault_entries() {
+    let workspace = Workspace::new();
+    let dir = workspace.path().join("docs");
+    std::fs::create_dir_all(&dir).expect("creating the tree");
+    std::fs::write(dir.join("book.Clients.tsv"), "note\nnothing sensitive\n").expect("writing");
+    support::write_xlsx(
+        &dir.join("book.xlsx"),
+        &[("Clients", &[&["email"], &["colliding@refused.example"]])],
+    );
+
+    workspace
+        .command()
+        .arg("clean")
+        .arg(&dir)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("both be written to"));
+
+    workspace
+        .command()
+        .args(["map", "list", "--reveal"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("colliding@refused.example").not());
+}
+
+/// A workbook's outputs carry sheet fragments, so it cannot collide with a
+/// plain input that shares only its stem.
+#[test]
+fn clean_accepts_a_workbook_beside_a_tabular_file_sharing_its_stem() {
+    let workspace = Workspace::new();
+    let dir = workspace.path().join("docs");
+    std::fs::create_dir_all(&dir).expect("creating the tree");
+    std::fs::write(dir.join("book.tsv"), "note\nnothing sensitive\n").expect("writing");
+    support::write_xlsx(&dir.join("book.xlsx"), &[("Clients", &[&["value"]])]);
+
+    workspace
+        .command()
+        .arg("clean")
+        .arg(&dir)
+        .assert()
+        .success();
+
+    assert!(dir.join("book.clean.tsv").is_file());
+    assert!(dir.join("book.Clients.clean.tsv").is_file());
+}
+
 #[test]
 fn clean_refuses_stdout_for_a_multi_sheet_workbook() {
     let workspace = Workspace::new();
