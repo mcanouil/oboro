@@ -10,6 +10,7 @@ All notable changes to this project will be documented in this file.
 - feat: Read `.csv` and `.tsv` files, passed through as plain text so the cleaned output stays a valid tabular file.
 - feat: Name each output after its input's format, so `data.csv` becomes `data.clean.csv` and `data.tsv` becomes `data.clean.tsv` while documents keep `.clean.md`; `restore` needs no change since it rewrites placeholders in any text file.
 - feat: Refuse any two inputs whose sanitised outputs would land on one file, including sheet outputs, case-folded names, and aliased spellings of one path, before the refused document's values are stored in the vault.
+- feat: Match a denylist term against its exact case with `case_sensitive = true`, so a short name such as `Bell` is redacted without also redacting the ordinary word `bell`; terms still ignore case by default, and no regular expression is needed to make one case-sensitive.
 
 ## 0.3.0 (2026-07-22)
 

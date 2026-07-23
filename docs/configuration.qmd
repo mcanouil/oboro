@@ -72,13 +72,19 @@ This is how you handle a client list you already know.
 [[denylist]]
 term = "Globex Industries"
 kind = "company"
+
+[[denylist]]
+term = "Bell"
+case_sensitive = true
 ```
 
 `kind` decides which placeholder the value gets, and defaults to `organisation`.
 Recognised values are `person`, `organisation`, `address`, `phone` and `email`, along with a few synonyms such as `client`, `provider` and `company`.
 Anything else becomes a placeholder of its own name.
 
-Matching ignores case and respects word boundaries, so `Acme` matches `ACME` but not `acmentioned`.
+Matching respects word boundaries, so `Acme` matches `ACME` but not `acmentioned`.
+It ignores case by default.
+Set `case_sensitive = true` on a term to match its exact case only, which is how you redact a short name such as `Bell` without also redacting the ordinary word `bell`.
 
 ## `patterns`
 

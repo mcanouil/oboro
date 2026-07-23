@@ -176,6 +176,8 @@ struct RawDenyTerm {
     term: String,
     #[serde(default)]
     kind: Option<String>,
+    #[serde(default)]
+    case_sensitive: bool,
 }
 
 #[derive(Deserialize)]
@@ -217,7 +219,7 @@ impl RawConfig {
                     .as_deref()
                     .map_or(EntityKind::Organisation, parse_kind);
                 let regex = RegexBuilder::new(&word_bounded(term))
-                    .case_insensitive(true)
+                    .case_insensitive(!entry.case_sensitive)
                     .build()
                     .with_context(|| format!("compiling denylist term '{term}'"))?;
                 Ok(DenyTerm { kind, regex })
@@ -332,6 +334,23 @@ term = "Acme"
         let regex = &config.denylist[0].regex;
         assert!(regex.is_match("invoice from ACME today"));
         assert!(!regex.is_match("acmentioned"));
+    }
+
+    #[test]
+    fn case_sensitive_denylist_terms_match_exact_case_only() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let path = write(
+            dir.path(),
+            r#"
+[[denylist]]
+term = "IT"
+case_sensitive = true
+"#,
+        );
+        let config = Config::load(Some(&path)).expect("configuration must load");
+        let regex = &config.denylist[0].regex;
+        assert!(regex.is_match("the IT department"));
+        assert!(!regex.is_match("read it now"));
     }
 
     #[test]
