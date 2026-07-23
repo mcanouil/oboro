@@ -141,7 +141,8 @@ impl<'a> Rules<'a> {
     }
 
     /// Applies literal terms the user always wants redacted, such as a known
-    /// client list. Matching is case-insensitive and whole-word.
+    /// client list. Matching is whole-word, and case-insensitive unless the
+    /// term sets `case_sensitive`.
     fn push_denylist(&self, spans: &mut Vec<Span>, text: &str) {
         for entry in &self.config.denylist {
             push_matches(spans, text, &entry.regex, &entry.kind, |_| true);

@@ -204,6 +204,7 @@ redact_filenames = true
 allowlist = ["My Own Company Ltd"]
 
 # Terms that must always be redacted.
+# Case is ignored unless case_sensitive = true.
 [[denylist]]
 term = "Acme Consulting SARL"
 kind = "provider"
