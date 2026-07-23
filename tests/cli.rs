@@ -71,6 +71,172 @@ fn clean_keeps_the_filename_when_redaction_is_disabled() {
 }
 
 #[test]
+fn clean_keeps_tabular_extensions_in_the_output_name() {
+    for (name, cleaned_name) in [
+        ("data.csv", "data.clean.csv"),
+        ("data.tsv", "data.clean.tsv"),
+    ] {
+        let workspace = Workspace::new();
+        let input = workspace.path().join(name);
+        std::fs::write(&input, "phone\n06 12 34 56 78\n").expect("writing the input");
+
+        workspace
+            .command()
+            .arg("clean")
+            .arg(&input)
+            .assert()
+            .success();
+
+        let output = std::fs::read_to_string(workspace.path().join(cleaned_name))
+            .expect("the sanitised tabular file must exist");
+        assert!(!output.contains("06 12 34 56 78"));
+        assert!(
+            !workspace.path().join("data.clean.md").exists(),
+            "a tabular input must not produce a markdown output"
+        );
+    }
+}
+
+#[test]
+fn clean_writes_one_tsv_per_workbook_sheet() {
+    let workspace = Workspace::new();
+    let book = workspace.path().join("book.xlsx");
+    support::write_xlsx(
+        &book,
+        &[
+            (
+                "Clients",
+                &[&["name", "phone"], &["Jean", "06 12 34 56 78"]],
+            ),
+            ("Notes", &[&["topic"], &["Renewal"]]),
+        ],
+    );
+
+    workspace
+        .command()
+        .arg("clean")
+        .arg(&book)
+        .assert()
+        .success();
+
+    let clients = std::fs::read_to_string(workspace.path().join("book.Clients.clean.tsv"))
+        .expect("the first sheet must be written");
+    assert!(!clients.contains("06 12 34 56 78"));
+    assert!(
+        !clients.contains("## "),
+        "sheet headings must not appear in tabular output"
+    );
+    assert!(
+        clients.contains("name\tphone"),
+        "cells must stay tab-separated: {clients}"
+    );
+
+    assert!(
+        workspace.path().join("book.Notes.clean.tsv").is_file(),
+        "the second sheet must be written to its own file"
+    );
+    assert!(
+        !workspace.path().join("book.clean.md").exists(),
+        "a workbook must not produce a markdown output"
+    );
+}
+
+#[test]
+fn clean_numbers_sheets_whose_names_collide_after_sanitisation() {
+    let workspace = Workspace::new();
+    let book = workspace.path().join("book.xlsx");
+    support::write_xlsx(&book, &[("a:b", &[&["first"]]), ("a*b", &[&["second"]])]);
+
+    workspace
+        .command()
+        .arg("clean")
+        .arg(&book)
+        .assert()
+        .success();
+
+    assert!(workspace.path().join("book.a_b.clean.tsv").is_file());
+    assert!(
+        workspace.path().join("book.a_b_2.clean.tsv").is_file(),
+        "a colliding fragment must be numbered apart, not overwritten"
+    );
+}
+
+/// The input-level guard cannot see sheet names, so a sheet output clashing
+/// with a plain input's output is caught against the destinations actually
+/// written.
+#[test]
+fn clean_refuses_a_sheet_output_colliding_with_another_input() {
+    let workspace = Workspace::new();
+    let dir = workspace.path().join("docs");
+    std::fs::create_dir_all(&dir).expect("creating the tree");
+    std::fs::write(dir.join("book.Clients.tsv"), "phone\n06 12 34 56 78\n").expect("writing");
+    support::write_xlsx(&dir.join("book.xlsx"), &[("Clients", &[&["value"]])]);
+
+    workspace
+        .command()
+        .arg("clean")
+        .arg(&dir)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("both be written to"));
+}
+
+#[test]
+fn clean_refuses_stdout_for_a_multi_sheet_workbook() {
+    let workspace = Workspace::new();
+    let book = workspace.path().join("book.xlsx");
+    support::write_xlsx(&book, &[("One", &[&["a"]]), ("Two", &[&["b"]])]);
+
+    workspace
+        .command()
+        .arg("clean")
+        .arg(&book)
+        .arg("--stdout")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("sheets"));
+}
+
+#[test]
+fn clean_accepts_stdout_for_a_single_sheet_workbook() {
+    let workspace = Workspace::new();
+    let book = workspace.path().join("book.xlsx");
+    support::write_xlsx(&book, &[("Only", &[&["phone"], &["06 12 34 56 78"]])]);
+
+    workspace
+        .command()
+        .arg("clean")
+        .arg(&book)
+        .arg("--stdout")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("06 12 34 56 78").not());
+}
+
+#[test]
+fn clean_does_not_walk_its_own_tabular_outputs() {
+    let workspace = Workspace::new();
+    let dir = workspace.path().join("docs");
+    std::fs::create_dir_all(&dir).expect("creating the tree");
+    std::fs::write(dir.join("data.csv"), "phone\n06 12 34 56 78\n").expect("writing");
+    std::fs::write(dir.join("done.clean.csv"), "already sanitised").expect("writing");
+    std::fs::write(dir.join("done.clean.tsv"), "already sanitised").expect("writing");
+
+    workspace
+        .command()
+        .arg("clean")
+        .arg(&dir)
+        .assert()
+        .success();
+
+    assert!(dir.join("data.clean.csv").is_file());
+    assert!(
+        !dir.join("done.clean.clean.csv").exists() && !dir.join("done.clean.clean.tsv").exists(),
+        "existing outputs must not be cleaned again"
+    );
+}
+
+#[test]
 fn clean_honours_an_output_directory() {
     let workspace = Workspace::new();
     let input = workspace.path().join("note.txt");

@@ -40,6 +40,8 @@ const DOCUMENTS: &[&str] = &[
     "contract.txt",
     "contract.docx",
     "clients.xlsx",
+    "clients.csv",
+    "clients.tsv",
     "invoice.pdf",
 ];
 
@@ -141,6 +143,90 @@ fn every_planted_value_round_trips_back() {
     assert_eq!(
         restored, original,
         "restoring must reproduce the original document exactly"
+    );
+}
+
+/// A workbook is written as one TSV per sheet, and neither the cell values
+/// nor a PII-bearing sheet name may survive into the outputs or their names.
+#[test]
+fn a_workbook_leaks_nothing_through_sheet_content_or_names() {
+    let workspace = Workspace::new();
+    let book = workspace.path().join("book.xlsx");
+    support::write_xlsx(
+        &book,
+        &[
+            (
+                "Jean Dupont",
+                &[
+                    &["name", "email"],
+                    &["Jean Dupont", "jean.dupont@acme-consulting.example"],
+                ],
+            ),
+            ("Notes", &[&["phone"], &["06 12 34 56 78"]]),
+        ],
+    );
+    let out_dir = workspace.path().join("sanitised");
+
+    let output = workspace
+        .command()
+        .arg("clean")
+        .arg(&book)
+        .arg("--config")
+        .arg(support::fixture("oboro.toml"))
+        .arg("--output")
+        .arg(&out_dir)
+        .output()
+        .expect("running oboro clean");
+    assert!(
+        output.status.success(),
+        "oboro clean failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let mut outputs: Vec<std::path::PathBuf> = std::fs::read_dir(&out_dir)
+        .expect("reading the output directory")
+        .map(|entry| entry.expect("directory entry").path())
+        .collect();
+    outputs.sort();
+    assert_eq!(
+        outputs.len(),
+        2,
+        "each sheet must become its own file: {outputs:#?}"
+    );
+
+    for path in &outputs {
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("file name");
+        assert!(
+            name.ends_with(".clean.tsv"),
+            "a workbook output must be TSV: {name}"
+        );
+        assert!(
+            !name.contains("Jean Dupont"),
+            "the sheet name PII must not survive into a filename: {name}"
+        );
+
+        let cleaned = std::fs::read_to_string(path).expect("reading an output");
+        let leaked: Vec<&str> = PLANTED
+            .iter()
+            .copied()
+            .filter(|planted| cleaned.contains(planted))
+            .collect();
+        assert!(
+            leaked.is_empty(),
+            "{name} leaked {} value(s): {leaked:#?}\n\n--- output ---\n{cleaned}",
+            leaked.len()
+        );
+    }
+    assert!(
+        outputs.iter().any(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.contains("PERSON_1"))
+        }),
+        "the PII sheet name must be replaced by its placeholder: {outputs:#?}"
     );
 }
 

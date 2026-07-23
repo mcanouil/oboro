@@ -52,6 +52,7 @@ Whether PII in the input filename is redacted in the output name, on by default.
 With it on, `jean@example.com.txt` is written as `EMAIL_1.clean.md` rather than leaking the address into the name.
 
 The filename shares placeholders with the document body, so a name appearing in both gets the same tag.
+Workbook sheet names go through the same redaction, since each sheet's name becomes part of its output filename.
 Placeholders are rendered without their brackets in the name (`EMAIL_1`, not `[[EMAIL_1]]`) to stay shell-safe.
 Set it to `false` to keep the original filename.
 

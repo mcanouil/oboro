@@ -94,7 +94,7 @@ After that, `oboro clean contract.docx` behaves as though it were installed.
 Optical character recognition needs the Tesseract system libraries, and the recognition model links ONNX Runtime, which has no musl build and so cannot sit in this static image; the model also needs a 348 MB download.
 Putting either in this image would cost every user the weight of a capability most of them will not enable, so neither is included.
 
-The default image therefore reads `.txt`, `.md`, `.docx`, `.xlsx` and text-based `.pdf`, and finds structured values along with anything on your denylist.
+The default image therefore reads `.txt`, `.md`, `.csv`, `.tsv`, `.docx`, `.xlsx` and text-based `.pdf`, and finds structured values along with anything on your denylist.
 Names it has not been told about need the [ner image](#the-ner-image) below, or a binary built with `--features ner` as described in the [quickstart](quickstart.qmd).
 
 Run `doctor` to see what any given build can do:

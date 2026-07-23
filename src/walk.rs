@@ -11,10 +11,6 @@ use anyhow::{Context, Result};
 
 use crate::convert;
 
-/// The suffix `output_path` gives sanitised files, excluded from walks so a
-/// second run does not try to clean its own output.
-const OUTPUT_SUFFIX: &str = ".clean.md";
-
 /// A single file to process.
 pub struct Input {
     pub path: PathBuf,
@@ -38,7 +34,8 @@ pub struct Resolved {
 ///
 /// A file argument is kept as-is. A directory argument is walked, top level
 /// only unless `recursive`, skipping hidden entries, symlinks, and existing
-/// `*.clean.md` outputs, and counting unreadable formats as skipped.
+/// `*.clean.*` outputs (see [`convert::OUTPUT_SUFFIXES`]), and counting
+/// unreadable formats as skipped.
 ///
 /// # Errors
 ///
@@ -113,11 +110,16 @@ fn is_hidden(path: &Path) -> bool {
         .is_some_and(|name| name.starts_with('.'))
 }
 
-/// Whether the file name ends with the sanitised-output suffix.
+/// Whether the file name ends with one of the sanitised-output suffixes,
+/// excluded from walks so a second run does not try to clean its own output.
 fn ends_with_output_suffix(path: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
-        .is_some_and(|name| name.ends_with(OUTPUT_SUFFIX))
+        .is_some_and(|name| {
+            convert::OUTPUT_SUFFIXES
+                .iter()
+                .any(|suffix| name.ends_with(suffix))
+        })
 }
 
 #[cfg(test)]
@@ -137,8 +139,12 @@ mod tests {
         let root = dir.path();
         write(&root.join("note.txt"), "top");
         write(&root.join("report.md"), "top");
+        write(&root.join("data.csv"), "a,b");
+        write(&root.join("data.tsv"), "a\tb");
         write(&root.join("archive.zip"), "binary");
         write(&root.join("already.clean.md"), "output");
+        write(&root.join("already.clean.tsv"), "output");
+        write(&root.join("already.clean.csv"), "output");
         write(&root.join(".secret.txt"), "hidden");
         write(&root.join("sub/nested.txt"), "deep");
         write(&root.join(".hidden/buried.txt"), "in hidden dir");
@@ -166,7 +172,10 @@ mod tests {
     fn non_recursive_keeps_only_top_level_supported_files() {
         let dir = tree();
         let resolved = resolve(&[dir.path().to_path_buf()], false).expect("resolving");
-        assert_eq!(names(&resolved), vec!["note.txt", "report.md"]);
+        assert_eq!(
+            names(&resolved),
+            vec!["data.csv", "data.tsv", "note.txt", "report.md"]
+        );
         // Only the top-level archive.zip counts; the hidden and nested trees
         // are not descended into.
         assert_eq!(resolved.skipped, 1);
@@ -178,7 +187,13 @@ mod tests {
         let resolved = resolve(&[dir.path().to_path_buf()], true).expect("resolving");
         assert_eq!(
             names(&resolved),
-            vec!["nested.txt", "note.txt", "report.md"]
+            vec![
+                "data.csv",
+                "data.tsv",
+                "nested.txt",
+                "note.txt",
+                "report.md"
+            ]
         );
         // The hidden directory is skipped whole, so its file is not counted.
         assert_eq!(resolved.skipped, 1);
@@ -199,6 +214,8 @@ mod tests {
         let resolved = resolve(&[dir.path().to_path_buf()], true).expect("resolving");
         let names = names(&resolved);
         assert!(!names.iter().any(|name| name == "already.clean.md"));
+        assert!(!names.iter().any(|name| name == "already.clean.tsv"));
+        assert!(!names.iter().any(|name| name == "already.clean.csv"));
         assert!(!names.iter().any(|name| name == ".secret.txt"));
         assert!(!names.iter().any(|name| name == "archive.zip"));
     }

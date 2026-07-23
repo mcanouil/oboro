@@ -1,28 +1,38 @@
 //! Spreadsheet text extraction.
 //!
-//! Every sheet is flattened to tab-separated rows under a heading, which
-//! keeps cells apart so neighbouring numbers cannot merge into an entity that
-//! exists in neither.
+//! Every sheet becomes its own tab-separated table, so a workbook turns into
+//! one TSV output per sheet instead of a flattened document. Tabs keep cells
+//! apart so neighbouring numbers cannot merge into an entity that exists in
+//! neither.
 
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use calamine::{Data, Reader};
 
-pub fn to_text(path: &Path) -> Result<String> {
+use super::Sheet;
+
+// The workbook builder lives with the integration-test support code; this
+// source include shares that one copy with the unit tests below.
+#[cfg(test)]
+#[path = "../../tests/support/xlsx_builder.rs"]
+mod xlsx_builder;
+
+/// Reads every non-empty sheet of the workbook as tab-separated rows.
+///
+/// Sheets holding no cell values are skipped entirely rather than producing
+/// empty outputs.
+pub fn to_sheets(path: &Path) -> Result<Vec<Sheet>> {
     let mut workbook = calamine::open_workbook_auto(path)
         .with_context(|| format!("{} is not a readable spreadsheet", path.display()))?;
 
-    let mut text = String::new();
+    let mut sheets = Vec::new();
     for name in workbook.sheet_names() {
         let range = workbook
             .worksheet_range(&name)
             .with_context(|| format!("reading sheet '{name}' of {}", path.display()))?;
 
-        text.push_str("## ");
-        text.push_str(&name);
-        text.push_str("\n\n");
-
+        let mut text = String::new();
         for row in range.rows() {
             let cells: Vec<String> = row.iter().map(render).collect();
             // Skip rows that hold nothing, which spreadsheets have in bulk.
@@ -32,16 +42,15 @@ pub fn to_text(path: &Path) -> Result<String> {
             text.push_str(&cells.join("\t"));
             text.push('\n');
         }
-        text.push('\n');
+        if !text.is_empty() {
+            sheets.push(Sheet { name, text });
+        }
     }
 
-    if text
-        .lines()
-        .all(|line| line.is_empty() || line.starts_with("## "))
-    {
+    if sheets.is_empty() {
         bail!("{} contains no cell values to read", path.display());
     }
-    Ok(text)
+    Ok(sheets)
 }
 
 /// Renders a cell as the text a reader would see.
@@ -71,6 +80,53 @@ fn render(cell: &Data) -> String {
 mod tests {
     use super::*;
 
+    use super::xlsx_builder::write_xlsx;
+
+    #[test]
+    fn each_sheet_becomes_its_own_tab_separated_table() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let path = dir.path().join("book.xlsx");
+        write_xlsx(
+            &path,
+            &[
+                ("Clients", &[&["Name", "Email"], &["Jean", "a@example.com"]]),
+                ("Notes", &[&["Topic"], &["Renewal"]]),
+            ],
+        );
+
+        let sheets = to_sheets(&path).expect("reading");
+        assert_eq!(sheets.len(), 2);
+        assert_eq!(sheets[0].name, "Clients");
+        assert_eq!(sheets[0].text, "Name\tEmail\nJean\ta@example.com\n");
+        assert_eq!(sheets[1].name, "Notes");
+        assert_eq!(sheets[1].text, "Topic\nRenewal\n");
+        assert!(
+            sheets.iter().all(|sheet| !sheet.text.contains("## ")),
+            "sheet names must not leak into the content"
+        );
+    }
+
+    #[test]
+    fn an_empty_sheet_is_skipped_rather_than_written_empty() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let path = dir.path().join("book.xlsx");
+        write_xlsx(&path, &[("Data", &[&["value"]]), ("Blank", &[])]);
+
+        let sheets = to_sheets(&path).expect("reading");
+        assert_eq!(sheets.len(), 1);
+        assert_eq!(sheets[0].name, "Data");
+    }
+
+    #[test]
+    fn a_workbook_with_no_values_anywhere_is_rejected() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let path = dir.path().join("book.xlsx");
+        write_xlsx(&path, &[("Blank", &[]), ("AlsoBlank", &[])]);
+
+        let error = to_sheets(&path).expect_err("must reject");
+        assert!(format!("{error:#}").contains("no cell values"));
+    }
+
     #[test]
     fn whole_numbers_keep_their_digits() {
         assert_eq!(render(&Data::Float(612_345_678.0)), "612345678");
@@ -96,7 +152,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("temporary directory");
         let path = dir.path().join("fake.xlsx");
         std::fs::write(&path, "not a spreadsheet").expect("writing");
-        let error = to_text(&path).expect_err("must reject");
+        let error = to_sheets(&path).expect_err("must reject");
         assert!(format!("{error:#}").contains("readable spreadsheet"));
     }
 }

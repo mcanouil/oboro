@@ -112,8 +112,9 @@ a name in different subfolders do not collide.
 | Format                 | How                                                               |
 | ---------------------- | ----------------------------------------------------------------- |
 | `.txt`, `.md`          | Read directly                                                     |
+| `.csv`, `.tsv`         | Read directly; the output keeps the tabular extension             |
 | `.docx`                | Text runs from the body, headers, footers, footnotes and comments |
-| `.xlsx`, `.xlsm`       | Every sheet flattened to tab-separated rows                       |
+| `.xlsx`, `.xlsm`       | One TSV file per sheet, named `book.<sheet>.clean.tsv`            |
 | `.pdf`                 | Embedded text; scanned PDFs are refused, not half-read            |
 | `.png`, `.jpg`, `.tif` | Tesseract, with a build compiled `--features ocr`                 |
 

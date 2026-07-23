@@ -222,14 +222,17 @@ fn prepare(
 
 /// Guards against two inputs sharing one output.
 ///
-/// The output is named after the stem, so `contract.txt` and `contract.docx`
+/// The output is named after the stem, so `contract.txt` and `contract.md`
 /// both want `contract.clean.md`; writing both would silently lose one. Caught
-/// before anything is written so nothing is half-done.
+/// before anything is written so nothing is half-done. Workbooks are keyed by
+/// their base path without a sheet fragment, since sheet names are unknown
+/// until read; per-sheet collisions are caught against the destinations
+/// actually written in the `clean` loop.
 fn ensure_distinct_outputs(inputs: &[oboro::walk::Input], output: Option<&Path>) -> Result<()> {
     let mut seen = std::collections::HashSet::new();
     for input in inputs {
         let destination =
-            oboro::review::output_path(&input.path, output, input.root.as_deref(), None)?;
+            oboro::review::output_path(&input.path, output, input.root.as_deref(), None, None)?;
         if !seen.insert(destination.clone()) {
             bail!(
                 "two inputs would both be written to {}; clean them separately \
@@ -265,27 +268,62 @@ fn clean(
     // time instead of on every file.
     let detector = Detector::new(&config)?;
 
+    // Destinations written this run, catching per-sheet collisions that the
+    // input-level guard in `ensure_distinct_outputs` cannot see.
+    let mut written = std::collections::HashSet::new();
     for input in &resolved.inputs {
         let file = &input.path;
-        let text = convert::to_text(file)?;
-        let report = pipeline::clean(&text, &detector, &mut vault)?;
+        let parts = convert::read(file)?.into_parts();
 
         if to_stdout {
-            print!("{}", report.text);
-        } else {
-            let stem = if config.redact_filenames {
-                Some(oboro::review::redacted_stem(file, &detector, &mut vault)?)
-            } else {
-                None
-            };
-            let destination =
-                oboro::review::output_path(file, output, input.root.as_deref(), stem.as_deref())?;
-            if let Some(parent) = destination.parent() {
-                std::fs::create_dir_all(parent)
-                    .with_context(|| format!("creating output directory {}", parent.display()))?;
+            // A workbook maps to one file per sheet, which a single stream
+            // cannot represent; a lone sheet is unambiguous.
+            if parts.len() > 1 {
+                bail!(
+                    "--stdout cannot represent {}: the workbook holds {} sheets, \
+                     each written to its own file; use --output",
+                    file.display(),
+                    parts.len()
+                );
             }
-            std::fs::write(&destination, &report.text)
-                .with_context(|| format!("writing {}", destination.display()))?;
+            let report = pipeline::clean(&parts[0].1, &detector, &mut vault)?;
+            print!("{}", report.text);
+            continue;
+        }
+
+        let stem = if config.redact_filenames {
+            Some(oboro::review::redacted_stem(file, &detector, &mut vault)?)
+        } else {
+            None
+        };
+        let mut namer = oboro::review::SheetNamer::new();
+        for (sheet, text) in parts {
+            let fragment = match &sheet {
+                Some((index, name)) => Some(namer.fragment(
+                    name,
+                    *index,
+                    config.redact_filenames,
+                    &detector,
+                    &mut vault,
+                )?),
+                None => None,
+            };
+            let report = pipeline::clean(&text, &detector, &mut vault)?;
+            let destination = oboro::review::output_path(
+                file,
+                output,
+                input.root.as_deref(),
+                stem.as_deref(),
+                fragment.as_deref(),
+            )?;
+            if !written.insert(destination.clone()) {
+                bail!(
+                    "two inputs would both be written to {}; clean them separately \
+                     or into different output directories",
+                    destination.display()
+                );
+            }
+            oboro::review::write_output(&destination, &report.text)?;
             eprintln!(
                 "{} -> {} ({} replaced{})",
                 file.display(),

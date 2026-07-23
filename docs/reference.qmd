@@ -20,10 +20,12 @@ oboro clean <PATH>... [OPTIONS]
 | `--config <FILE>` | Use this configuration instead of the nearest `oboro.toml`. |
 
 A `<PATH>` is a file or a directory.
-A directory is walked for the formats this build reads, skipping hidden entries, symlinks and existing `.clean.md` outputs, and reporting how many files it could not read.
+A directory is walked for the formats this build reads, skipping hidden entries, symlinks and existing `.clean.md`, `.clean.csv` and `.clean.tsv` outputs, and reporting how many files it could not read.
 
-Output is named after the input, so `report.docx` becomes `report.clean.md`.
+Output is named after the input, with a suffix following its format: `report.docx` becomes `report.clean.md` and `data.csv` becomes `data.clean.csv`.
+A workbook becomes one TSV per sheet, so `book.xlsx` with a sheet `Clients` becomes `book.Clients.clean.tsv`.
 With `--output`, a directory's subfolders are mirrored under it.
+`--stdout` works for a workbook only when it holds a single sheet, since one stream cannot carry several files.
 
 ## `review`
 
@@ -123,7 +125,7 @@ allowlist:  1 entr(y/ies)
 denylist:   3 term(s)
 patterns:   1 custom
 filenames:  redacted
-formats:    txt, text, md, markdown, docx, xlsx, xlsm, pdf
+formats:    txt, text, md, markdown, csv, tsv, docx, xlsx, xlsm, pdf
 ocr:        not compiled in; images cannot be read
 model:      installed
 network:    only `models pull`, and only when you run it
