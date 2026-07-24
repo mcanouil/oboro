@@ -27,30 +27,6 @@ $line-height-base: 1.65;
   @return mix($body-bg, $body-color, $weight);
 }
 
-// One pill shell for the navbar-right control group (search, colour-scheme
-// toggle, GitHub widget trigger) so they read as one set. The navbar is dark
-// in both schemes, so these are painted from navbar tokens, not page ones.
-@mixin navbar-tool-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: transparent;
-  border: 1px solid var(--oboro-navbar-border);
-  border-radius: $border-radius-sm;
-  color: var(--oboro-navbar-fg) !important;
-  cursor: pointer; // iOS needs this for a <div> to fire click.
-  transition:
-    background 150ms ease,
-    border-color 150ms ease,
-    color 150ms ease;
-}
-
-@mixin navbar-tool-pill-active {
-  background: var(--oboro-navbar-accent-soft);
-  border-color: var(--oboro-navbar-accent);
-  color: var(--oboro-navbar-accent) !important;
-}
-
 /*-- scss:rules --*/
 
 // Self-hosted typefaces.
@@ -216,53 +192,21 @@ h2 {
   margin-left: 0.4rem;
 }
 
-.gh-widget-trigger,
-.navbar #quarto-search .aa-DetachedSearchButton,
-.navbar .quarto-navbar-tools .quarto-color-scheme-toggle {
-  @include navbar-tool-pill;
+// The pill shell for the navbar-right control group (search, colour-scheme
+// toggle, gitlink widget trigger) ships with the gitlink extension
+// (widget.css and widget-navbar-tools.css via `widget.style-navbar-tools`);
+// these tokens repaint it from the navbar palette, dark in both schemes.
+.navbar {
+  --gitlink-widget-border: var(--oboro-navbar-border);
+  --gitlink-widget-accent: var(--oboro-navbar-accent);
+  --gitlink-widget-accent-soft: var(--oboro-navbar-accent-soft);
+  --gitlink-widget-menu-bg: var(--oboro-navbar-bg);
+  --gitlink-widget-menu-fg: var(--oboro-navbar-fg);
 }
 
-.navbar .navbar-nav.ms-auto > .nav-item > .nav-link,
-.gh-widget-trigger {
+.navbar .navbar-nav.ms-auto > .nav-item > .nav-link {
   padding: 0.3rem 0.6rem;
   font-size: 0.85rem;
-}
-
-.navbar #quarto-search .aa-DetachedSearchButton,
-.navbar .quarto-navbar-tools .quarto-color-scheme-toggle {
-  justify-content: center;
-  width: 2rem;
-  height: 2rem;
-  padding: 0;
-  box-shadow: none;
-}
-
-.gh-widget-trigger:hover,
-.gh-widget-open .gh-widget-trigger,
-.navbar #quarto-search .aa-DetachedSearchButton:hover,
-.navbar #quarto-search .aa-DetachedSearchButton:focus-visible,
-.navbar .quarto-navbar-tools .quarto-color-scheme-toggle:hover,
-.navbar .quarto-navbar-tools .quarto-color-scheme-toggle:focus-visible {
-  @include navbar-tool-pill-active;
-}
-
-// Collapse the search library's own icon and hide its empty slots so the
-// detached button stays a square like the toggle.
-.navbar #quarto-search .aa-DetachedSearchButtonIcon {
-  width: auto;
-  margin: 0;
-  padding: 0;
-  color: currentColor;
-}
-
-.navbar #quarto-search .aa-DetachedSearchButtonIcon svg {
-  width: 1.05rem;
-  height: 1.05rem;
-}
-
-.navbar #quarto-search .aa-DetachedSearchButtonPlaceholder,
-.navbar #quarto-search .aa-DetachedSearchButtonQuery {
-  display: none;
 }
 
 // --- Colour-scheme toggle icon --------------------------------------------
@@ -287,14 +231,23 @@ $oboro-icon-moon: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg
   -webkit-mask-position: center;
 }
 
-.quarto-color-scheme-toggle:not(.alternate) .bi::before {
-  mask-image: $oboro-icon-sun;
-  -webkit-mask-image: $oboro-icon-sun;
-}
+// Scope to every place the toggle can render so these win over Quarto's default
+// toggle-switch glyph on order; clear its background-image so the sun/moon mask
+// fills instead of clipping a switch shape.
+.navbar .quarto-color-scheme-toggle,
+.sidebar-navigation .quarto-color-scheme-toggle,
+.top-right.quarto-color-scheme-toggle {
+  &:not(.alternate) .bi::before {
+    background-image: none;
+    mask-image: $oboro-icon-sun;
+    -webkit-mask-image: $oboro-icon-sun;
+  }
 
-.quarto-color-scheme-toggle.alternate .bi::before {
-  mask-image: $oboro-icon-moon;
-  -webkit-mask-image: $oboro-icon-moon;
+  &.alternate .bi::before {
+    background-image: none;
+    mask-image: $oboro-icon-moon;
+    -webkit-mask-image: $oboro-icon-moon;
+  }
 }
 
 // ===========================================================================
@@ -454,110 +407,13 @@ div.callout-important {
 }
 
 // ===========================================================================
-// GITHUB WIDGET
+// GITLINK WIDGET
 // ===========================================================================
-// The class names here must match those the widget script emits. The menu is
-// scoped under .navbar so it outranks Quarto's `.navbar a` colour, and painted
-// from the navbar tokens because the navbar is dark in both schemes.
+// Structure ships with the extension's widget.css; the site keeps its own
+// menu radius, painted from the navbar tokens set above.
 
-#github-widget {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-}
-
-.gh-icon {
-  flex-shrink: 0;
-}
-
-.gh-stats {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.gh-stat {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
-}
-
-.gh-stat svg {
-  opacity: 0.85;
-}
-
-.gh-count {
-  min-width: 1rem;
-  text-align: center;
-}
-
-.gh-dropdown-arrow {
-  opacity: 0.7;
-  transition: transform 150ms ease;
-}
-
-.gh-widget-open .gh-dropdown-arrow {
-  transform: rotate(180deg);
-}
-
-.navbar .gh-dropdown {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  min-width: 14rem;
-  background: var(--oboro-navbar-bg);
-  border: 1px solid var(--oboro-navbar-border);
+body .navbar .gitlink-widget-dropdown {
   border-radius: $border-radius;
-  box-shadow: 0 12px 30px -16px rgba(0, 0, 0, 0.55);
-  padding: 0.35rem;
-  opacity: 0;
-  visibility: hidden;
-  transform: translateY(-8px);
-  transition:
-    opacity 150ms ease,
-    transform 150ms ease,
-    visibility 150ms ease;
-  z-index: 1000;
-}
-
-.navbar .gh-widget-open .gh-dropdown {
-  opacity: 1;
-  visibility: visible;
-  transform: translateY(0);
-}
-
-.navbar .gh-dropdown-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 0.4rem 0.7rem;
-  color: var(--oboro-navbar-fg);
-  text-decoration: none;
-  font-size: 0.9rem;
-  font-weight: 500;
-  border-radius: $border-radius-sm;
-  transition:
-    background 150ms ease,
-    color 150ms ease;
-
-  svg {
-    flex-shrink: 0;
-  }
-
-  &:hover,
-  &:focus-visible {
-    background: var(--oboro-navbar-accent-soft);
-    color: var(--oboro-navbar-accent);
-    text-decoration: none;
-  }
-}
-
-.navbar .gh-dropdown-divider {
-  height: 1px;
-  margin: 0.35rem 0;
-  background: var(--oboro-navbar-border);
 }
 
 // ===========================================================================
@@ -599,12 +455,6 @@ div.callout-important {
     position: absolute;
     top: 100%;
     left: 0;
-  }
-
-  // Anchor the widget menu to its left edge on mobile so it stays on screen.
-  .navbar .gh-dropdown {
-    left: 0;
-    right: auto;
   }
 }
 
@@ -719,13 +569,10 @@ $scrollbar-thumb: body-mix(72%);
 // ===========================================================================
 // REDUCED MOTION
 // ===========================================================================
+// The gitlink widget ships its own reduced-motion guard.
 
 @media (prefers-reduced-motion: reduce) {
-  .navbar .nav-link::after,
-  .gh-widget-trigger,
-  .gh-dropdown-arrow,
-  .gh-dropdown,
-  .gh-dropdown-item {
+  .navbar .nav-link::after {
     transition: none;
   }
 }
