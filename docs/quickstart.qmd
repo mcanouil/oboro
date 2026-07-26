@@ -1,5 +1,6 @@
 ---
 title: "Quickstart"
+description: "Install oboro, clean your first document, and restore a model's answer to the real names."
 ---
 
 ## Install

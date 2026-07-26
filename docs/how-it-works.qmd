@@ -1,5 +1,6 @@
 ---
 title: "How it works"
+description: "Detection runs in layers, cheapest first: rules, a local recognition model, and the merge step that decides between them."
 ---
 
 ## The three layers

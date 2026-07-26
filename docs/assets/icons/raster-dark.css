@@ -1,0 +1,15 @@
+/* Force the dark-scheme colours when rasterising icon.svg.
+
+   librsvg does not evaluate `prefers-color-scheme`, so it would render the
+   light variant: a slate disc, which all but disappears once flattened onto the
+   dark navbar plate the PNG and ICO files use. `rsvg-convert --stylesheet`
+   applies this as a user stylesheet, hence `!important` to beat the
+   presentation attributes on the shapes. */
+
+.disc {
+  fill: #7fa8c4 !important;
+}
+
+.bar {
+  fill: #e6c558 !important;
+}

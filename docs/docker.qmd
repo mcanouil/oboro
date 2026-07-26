@@ -1,5 +1,6 @@
 ---
 title: "Running it in Docker"
+description: "Run oboro from a distroless image with no shell and no network, and keep the vault outside the container so documents can still be restored."
 ---
 
 A tool that asks you to trust it with confidential documents should be easy to inspect and easy to try.

@@ -1,6 +1,7 @@
 ---
 title: "Oboro"
 subtitle: "An anonymisation layer between your files and a language model."
+description: "Replace the sensitive parts of a document with stable placeholders, reason about it with a model, then turn the answer back into the real thing."
 ---
 
 You have a contract to reason about, and a model that could help.

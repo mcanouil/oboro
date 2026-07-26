@@ -7,10 +7,15 @@
 	document.addEventListener("DOMContentLoaded", () => {
 		// Logo link: Quarto emits <a class="navbar-brand"> with an inner <img alt>,
 		// but the accessible name is lost when the image is styled away.
+		const siteName = (
+			document.querySelector(".navbar-title")?.textContent ||
+			document.title ||
+			"Site"
+		).trim();
 		document
 			.querySelectorAll("a.navbar-brand:not([aria-label]), a.navbar-brand-logo:not([aria-label])")
 			.forEach((a) => {
-				a.setAttribute("aria-label", "oboro — home");
+				a.setAttribute("aria-label", `${siteName} — home`);
 			});
 
 		// Colour scheme toggle: Quarto adds title= but no aria-label.

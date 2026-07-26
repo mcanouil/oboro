@@ -1,6 +1,7 @@
 ---
 title: "Changelog"
 subtitle: "What changed, and when."
+description: "Every released version of oboro, and what each one changed."
 filters:
   - path: gitlink
     at: post-quarto

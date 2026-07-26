@@ -1,5 +1,6 @@
 ---
 title: "Command reference"
+description: "Every oboro command and the options it accepts: clean, review, restore, map, models, and doctor."
 ---
 
 Every command accepts `--vault` and `--key` to point at a store other than the default, which is useful for keeping one vault per project.

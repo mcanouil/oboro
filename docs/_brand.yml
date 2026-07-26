@@ -19,6 +19,10 @@ color:
     moonglow: "#e8edf2"
     slate: "#3e6076"
     haze: "#7fa8c4"
+    # The moon: oboro's signature accent, shared by the stylesheet, the icon and
+    # the social card. `moon` is the light-scheme mark, `moonbright` the dark one.
+    moon: "#c9a227"
+    moonbright: "#e6c558"
   background:
     light: mist
     dark: nightfall

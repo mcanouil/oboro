@@ -1,5 +1,6 @@
 ---
 title: "Development"
+description: "Build oboro in the devcontainer, run the checks CI runs, and find your way around adding a recogniser or a format."
 ---
 
 ## The devcontainer

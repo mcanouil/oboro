@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-labelledby="oboro-icon-title">
+  <title id="oboro-icon-title">Oboro</title>
+  <style>
+    /* Colours come from ../../_brand.yml: slate and moon in the light scheme,
+       haze and moonbright in the dark one. The mark is what the tool does: the
+       hazy moon of its name, struck through by a redaction bar.
+
+       The light values are presentation attributes on the shapes below, so a
+       renderer that ignores `prefers-color-scheme` still gets a valid icon;
+       raster-dark.css forces the dark pair when rasterising. */
+    @media (prefers-color-scheme: dark) {
+      .disc { fill: #7fa8c4; }
+      .bar { fill: #e6c558; }
+    }
+  </style>
+  <circle class="disc" cx="16" cy="16" r="13" fill="#3e6076"/>
+  <rect class="bar" x="0" y="13" width="32" height="6" fill="#c9a227"/>
+</svg>

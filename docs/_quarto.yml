@@ -1,36 +1,33 @@
 project:
-  type: website
-  output-dir: _site
+  type: atelier
   resources:
     # Published verbatim so `curl -fsSL .../install.sh | bash` works.
     - install.sh
-
-lang: en-GB
-date-format: "dddd[, the] Do [of] MMMM, YYYY"
+    # Quarto copies only these globs, plus files it finds behind an `href` or
+    # `src` in the rendered HTML. The manifest names its icons in JSON, which is
+    # not scanned, so they are listed here. `assets/icons/icon.svg` is not: the
+    # social-metadata filter emits it behind a `link[href]`, so the resource
+    # scan finds it.
+    - favicon.ico
+    - site.webmanifest
+    - assets/icons/*.png
+    - assets/social/og-image.png
 
 website:
   title: "Oboro"
   description: "An anonymisation layer between your files and a language model."
-  site-url: "https://m.canouil.dev/oboro/"
+  # No trailing slash: Quarto builds the social image URL by concatenating this
+  # with the leading-slash `image` path below, without normalising, so a
+  # trailing slash would yield `/oboro//assets/...`.
+  site-url: &site-url https://m.canouil.dev/oboro
   repo-url: "https://github.com/mcanouil/oboro"
-  repo-actions: [edit, issue]
-  repo-link-target: _blank
-  repo-link-rel: noopener noreferrer
-  open-graph: true
-  page-navigation: true
-  back-to-top-navigation: true
-  llms-txt: true
-  search:
-    location: navbar
-    type: overlay
+  favicon: favicon.ico
+  # The leading slash marks a project-relative path, which Quarto resolves
+  # against `site-url` and measures to fill the image width and height tags.
+  image: /assets/social/og-image.png
+  image-alt: "The Oboro social card: a pale moon disc struck through by a single gold bar, beside the name Oboro and the line 'An anonymisation layer between your files and a language model.', on a dark slate background."
   navbar:
     title: "Oboro"
-    # Pinned to the night palette in both schemes: the navbar-scoped tokens in
-    # theme.scss are then identical in the light and dark compiles, so the
-    # widget menu and the toggle cannot invert or go invisible.
-    background: dark
-    foreground: light
-    search: true
     left:
       # - href: index.qmd
       #   text: "{{< iconify octicon:home-16 title='Home' label='Home' >}} Home"
@@ -69,9 +66,6 @@ website:
           - development.qmd
       - changelog.qmd
   page-footer:
-    border: true
-    background: dark
-    foreground: light
     left: |
       Powered by [{{< iconify simple-icons:quarto title="Quarto" label="Quarto" >}} Quarto](https://quarto.org).
     center: |
@@ -82,34 +76,23 @@ website:
 brand: _brand.yml
 
 format:
-  html:
-    # brand drives the per-mode palette from _brand.yml, so the light and dark
-    # stylesheets compile with different $body-bg/$body-color; theme.scss reads
-    # those through body-mix(). The same list serves both modes, via an anchor.
+  # Configure the extension format by name. Declaring `html` would replace
+  # `atelier-html` rather than configure it, silently dropping the theme, the
+  # bundled scripts, and the social-metadata filter.
+  atelier-html:
+    # Both lists are written out because a YAML anchor shared between them is
+    # rejected by the schema check. The extension stylesheet is applied first,
+    # so this one wins the cascade and can use its `body-mix()` and the
+    # `$brand-*` variables generated from `_brand.yml`.
     theme:
-      light: &theme
+      light:
         - brand
         - assets/theme.scss
-      dark: *theme
-    respect-user-color-scheme: true
-    syntax-highlighting:
-      light: github-light
-      dark: github-dark
-    include-before-body:
-      - file: assets/scripts/skip-link.html
+      dark:
+        - brand
+        - assets/theme.scss
     include-after-body:
       - file: assets/scripts/placeholders.html
-      - file: assets/scripts/current-year.html
-      - file: assets/scripts/external-links.html
-      - file: assets/scripts/ordinal-dates.html
-      - file: assets/scripts/a11y-fixes.html
-      - file: assets/scripts/navbar-tooltips.html
-    toc: true
-    toc-depth: 3
-    code-copy: true
-    code-overflow: wrap
-    anchor-sections: true
-    link-external-newwindow: true
 
 filters:
   - at: pre-quarto
@@ -118,6 +101,20 @@ filters:
     path: gitlink
 
 extensions:
+  # Quarto keeps the `website` block out of the metadata it hands to Lua
+  # filters, so the social-metadata filter cannot read `website.site-url` to
+  # build `og:url` and the canonical link. The anchor above republishes the same
+  # scalar here, without a second copy of the string.
+  atelier:
+    site-url: *site-url
+    icon: assets/icons/icon.svg
+    apple-touch-icon: assets/icons/apple-touch-icon.png
+    manifest: site.webmanifest
+    # The page background per scheme, so the browser UI tint follows the
+    # reader's scheme even though the navbar is dark-pinned in both.
+    theme-color:
+      light: "#f2f4f6"
+      dark: "#10161c"
   gitlink:
     # Widget only: the platform and repository come from `website.repo-url`,
     # and in-text reference rewriting stays off.

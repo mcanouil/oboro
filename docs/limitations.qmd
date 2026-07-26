@@ -1,5 +1,6 @@
 ---
 title: "Limitations"
+description: "The honest account of what oboro misses, and why reading the sanitised output is part of the workflow rather than an optional extra."
 ---
 
 This page is the honest account.

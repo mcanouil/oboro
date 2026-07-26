@@ -1,14 +1,12 @@
 /*-- scss:defaults --*/
 
-// The palette comes from _brand.yml, so the light and dark stylesheets compile
-// with different $body-bg and $body-color. Everything below reads those
-// per-mode values rather than hard-coding a colour, which is what lets one
-// stylesheet be correct in both schemes.
+// Everything structural comes from the atelier extension stylesheet, which is
+// compiled first: the navbar and footer surfaces, the code and tabset surfaces,
+// the focus ring, the scrollbars, the tooltips, the 404 hero, and `body-mix()`.
+// This file carries only what is Oboro's own: its typefaces, its serif
+// headings, the moon accent, and the placeholder mark.
 
 $headings-font-weight: 600;
-$border-radius: 0.5rem;
-$border-radius-sm: 0.375rem;
-$border-radius-lg: 0.75rem;
 
 // Fonts are self-hosted; the site fetches no typeface from a third party.
 $font-family-sans-serif: "Public Sans", system-ui, -apple-system, sans-serif;
@@ -17,19 +15,12 @@ $headings-font-family: "Spectral", Georgia, "Times New Roman", serif;
 $headings-line-height: 1.25;
 $line-height-base: 1.65;
 
-/*-- scss:functions --*/
-
-// Mix the theme's own background and foreground. Because brand injects
-// different $body-bg/$body-color into the light and dark compiles,
-// body-mix(95%) resolves to the correct per-mode surface from one source of
-// truth: a hair off the page background, never Quarto's hard-coded grey.
-@function body-mix($weight) {
-  @return mix($body-bg, $body-color, $weight);
-}
-
 /*-- scss:rules --*/
 
-// Self-hosted typefaces.
+// ===========================================================================
+// SELF-HOSTED TYPEFACES
+// ===========================================================================
+
 @font-face {
   font-family: "Spectral";
   font-style: normal;
@@ -79,48 +70,37 @@ $line-height-base: 1.65;
 }
 
 // ===========================================================================
-// NAVBAR TOKENS (identical in both compiles)
+// TOKENS
 // ===========================================================================
-// The navbar is pinned to the night palette in both schemes (background: dark
-// in _quarto.yml), so anything anchored to it, the tool pills, the widget
-// menu, the toggle, keeps the dark surface. These are deliberately not
-// overridden under .quarto-dark: they do not follow the page scheme.
 
 :root {
-  --oboro-navbar-bg: #1b242e;
-  --oboro-navbar-fg: #e8edf2;
-  --oboro-navbar-muted: #9db0c0;
-  --oboro-navbar-accent: #7fa8c4;
-  --oboro-navbar-accent-soft: rgba(127, 168, 196, 0.16);
-  --oboro-navbar-border: rgba(232, 237, 242, 0.14);
+  // Atelier's default tracking is a slight positive, tuned for a sans heading;
+  // Spectral is a tight serif, so it wants the opposite.
+  --atelier-heading-letter-spacing: -0.01em;
+
   // The moon: oboro's signature accent, kept for the placeholder mark and the
   // warning callouts rather than spent on chrome.
+  //
+  // Not `$brand-moon`: the mark gold falls near 2:1 as text on the light
+  // background, so the text role gets a deliberately darker gold. The mark role
+  // carries no text and keeps the palette value.
   --oboro-moon: #6f5709;
-  --oboro-moon-mark: #c9a227;
-  --oboro-moon-soft: rgba(201, 162, 39, 0.14);
+  --oboro-moon-mark: #{$brand-moon};
+  --oboro-moon-soft: #{rgba($brand-moon, 0.14)};
 }
 
 .quarto-dark {
-  --oboro-moon: #e6c558;
-  --oboro-moon-mark: #e6c558;
-  --oboro-moon-soft: rgba(230, 197, 88, 0.16);
+  --oboro-moon: #{$brand-moonbright};
+  --oboro-moon-mark: #{$brand-moonbright};
+  --oboro-moon-soft: #{rgba($brand-moonbright, 0.16)};
 }
 
 // ===========================================================================
-// BASE
+// TYPOGRAPHY
 // ===========================================================================
 
 body {
   font-synthesis-weight: none;
-}
-
-h1,
-h2,
-h3,
-h4,
-h5,
-h6 {
-  letter-spacing: -0.01em;
 }
 
 h2 {
@@ -128,26 +108,28 @@ h2 {
   padding-bottom: 0.3rem;
 }
 
-// ===========================================================================
-// NAVBAR + FOOTER (always the night palette via brand background: dark)
-// ===========================================================================
-
-.navbar {
-  border-bottom: 1px solid var(--oboro-navbar-border);
-  backdrop-filter: blur(8px);
-}
-
+// The serif carries the site's identity, so it is used for the brand and the
+// sidebar section labels rather than left to the body sans.
 .navbar .navbar-brand {
   font-family: "Spectral", Georgia, serif;
   font-weight: 600;
 }
 
+.sidebar nav .sidebar-section .sidebar-item-text {
+  font-family: "Spectral", Georgia, serif;
+  font-weight: 600;
+}
+
+// ===========================================================================
+// NAVBAR ACTIVE-PAGE INDICATOR
+// ===========================================================================
+// A slate underline that grows in. Atelier colours the active link but draws no
+// underline, so this is additive.
+
 .navbar .nav-link {
   position: relative;
 }
 
-// The active-page indicator: a slate underline that grows in. Replaces the
-// box-shadow underline that never showed.
 .navbar .nav-link::after {
   content: "";
   position: absolute;
@@ -155,7 +137,7 @@ h2 {
   right: 0.5rem;
   bottom: 0.2rem;
   height: 2px;
-  background: linear-gradient(90deg, transparent, var(--oboro-navbar-accent), transparent);
+  background: linear-gradient(90deg, transparent, var(--atelier-navbar-accent), transparent);
   transform: scaleX(0);
   transition: transform 0.25s ease;
 }
@@ -165,199 +147,14 @@ h2 {
   transform: scaleX(1);
 }
 
-.nav-footer {
-  border-top: 1px solid body-mix(85%);
-}
-
-// --- Navbar-right controls ------------------------------------------------
-
-.navbar .navbar-nav.ms-auto {
-  align-items: center;
-  gap: 0.4rem;
-}
-
-// Search and the tools group each carry the same left margin, so the whole
-// navbar-right set is evenly spaced. Without it on search, the button sat
-// tight against the nav items while the tools kept their gap.
-.navbar #quarto-search {
-  display: inline-flex;
-  align-items: center;
-  margin-left: 0.4rem;
-}
-
-.navbar .quarto-navbar-tools {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  margin-left: 0.4rem;
-}
-
-// The pill shell for the navbar-right control group (search, colour-scheme
-// toggle, gitlink widget trigger) ships with the gitlink extension
-// (widget.css and widget-navbar-tools.css via `widget.style-navbar-tools`);
-// these tokens repaint it from the navbar palette, dark in both schemes.
-.navbar {
-  --gitlink-widget-border: var(--oboro-navbar-border);
-  --gitlink-widget-accent: var(--oboro-navbar-accent);
-  --gitlink-widget-accent-soft: var(--oboro-navbar-accent-soft);
-  --gitlink-widget-menu-bg: var(--oboro-navbar-bg);
-  --gitlink-widget-menu-fg: var(--oboro-navbar-fg);
-}
-
-.navbar .navbar-nav.ms-auto > .nav-item > .nav-link {
-  padding: 0.3rem 0.6rem;
-  font-size: 0.85rem;
-}
-
-// --- Colour-scheme toggle icon --------------------------------------------
-// Sun and moon (Bootstrap Icons bi-sun-fill, bi-moon-stars-fill), drawn as a
-// mask so they follow currentColor and match the pill.
-$oboro-icon-sun: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="black" viewBox="0 0 16 16"><path d="M8 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8M8 0a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-1 0v-2A.5.5 0 0 1 8 0m0 13a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-1 0v-2A.5.5 0 0 1 8 13m8-5a.5.5 0 0 1-.5.5h-2a.5.5 0 0 1 0-1h2a.5.5 0 0 1 .5.5M3 8a.5.5 0 0 1-.5.5h-2a.5.5 0 0 1 0-1h2A.5.5 0 0 1 3 8m10.657-5.657a.5.5 0 0 1 0 .707l-1.414 1.415a.5.5 0 1 1-.707-.708l1.414-1.414a.5.5 0 0 1 .707 0m-9.193 9.193a.5.5 0 0 1 0 .707L3.05 13.657a.5.5 0 0 1-.707-.707l1.414-1.414a.5.5 0 0 1 .707 0m9.193 2.121a.5.5 0 0 1-.707 0l-1.414-1.414a.5.5 0 0 1 .707-.707l1.414 1.414a.5.5 0 0 1 0 .707M4.464 4.465a.5.5 0 0 1-.707 0L2.343 3.05a.5.5 0 1 1 .707-.707l1.414 1.414a.5.5 0 0 1 0 .708"/></svg>');
-$oboro-icon-moon: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="black" viewBox="0 0 16 16"><path d="M6 .278a.77.77 0 0 1 .08.858 7.2 7.2 0 0 0-.878 3.46c0 4.021 3.278 7.277 7.318 7.277q.792-.001 1.533-.16a.79.79 0 0 1 .81.316.73.73 0 0 1-.031.893A8.35 8.35 0 0 1 8.344 16C3.734 16 0 12.286 0 7.71 0 4.266 2.114 1.312 5.124.06A.75.75 0 0 1 6 .278"/><path d="M10.794 3.148a.217.217 0 0 1 .412 0l.387 1.162c.173.518.579.924 1.097 1.097l1.162.387a.217.217 0 0 1 0 .412l-1.162.387a1.73 1.73 0 0 0-1.097 1.097l-.387 1.162a.217.217 0 0 1-.412 0l-.387-1.162A1.73 1.73 0 0 0 9.31 6.593l-1.162-.387a.217.217 0 0 1 0-.412l1.162-.387a1.73 1.73 0 0 0 1.097-1.097zM13.863.099a.145.145 0 0 1 .274 0l.258.774c.115.346.386.617.732.732l.774.258a.145.145 0 0 1 0 .274l-.774.258a1.16 1.16 0 0 0-.732.732l-.258.774a.145.145 0 0 1-.274 0l-.258-.774a1.16 1.16 0 0 0-.732-.732l-.774-.258a.145.145 0 0 1 0-.274l.774-.258c.346-.115.617-.386.732-.732z"/></svg>');
-
-.quarto-color-scheme-toggle .bi::before {
-  content: "";
-  display: inline-block;
-  width: 1rem;
-  height: 1rem;
-  vertical-align: -0.125em;
-  background-image: none;
-  background-color: currentcolor;
-  mask-size: contain;
-  mask-repeat: no-repeat;
-  mask-position: center;
-  -webkit-mask-size: contain;
-  -webkit-mask-repeat: no-repeat;
-  -webkit-mask-position: center;
-}
-
-// Scope to every place the toggle can render so these win over Quarto's default
-// toggle-switch glyph on order; clear its background-image so the sun/moon mask
-// fills instead of clipping a switch shape.
-.navbar .quarto-color-scheme-toggle,
-.sidebar-navigation .quarto-color-scheme-toggle,
-.top-right.quarto-color-scheme-toggle {
-  &:not(.alternate) .bi::before {
-    background-image: none;
-    mask-image: $oboro-icon-sun;
-    -webkit-mask-image: $oboro-icon-sun;
-  }
-
-  &.alternate .bi::before {
-    background-image: none;
-    mask-image: $oboro-icon-moon;
-    -webkit-mask-image: $oboro-icon-moon;
+@media (prefers-reduced-motion: reduce) {
+  .navbar .nav-link::after {
+    transition: none;
   }
 }
 
 // ===========================================================================
-// SIDEBAR + CONTENTS
-// ===========================================================================
-
-.sidebar nav .sidebar-section .sidebar-item-text {
-  font-family: "Spectral", Georgia, serif;
-  font-weight: 600;
-}
-
-#quarto-sidebar .sidebar-item-container .active,
-.sidebar-navigation .sidebar-item .active {
-  color: var(--bs-primary) !important;
-  font-weight: 600;
-}
-
-// ===========================================================================
-// TABSETS
-// ===========================================================================
-
-.panel-tabset .nav-tabs {
-  border-bottom: 1px solid body-mix(85%);
-  // Theme-aware overrides for Bootstrap's baked tab colours (active was #000).
-  --bs-nav-tabs-link-active-color: var(--bs-body-color);
-  --bs-nav-tabs-link-active-bg: transparent;
-  --bs-nav-tabs-link-active-border-color: transparent;
-}
-
-// Quarto hard-codes #dee2e6 on the panel's left/right/bottom edges, which does
-// not adapt to dark; re-derive them from body-mix() so all four edges match.
-html .panel-tabset > .tab-content {
-  border-color: body-mix(85%);
-}
-
-.panel-tabset .nav-tabs .nav-link {
-  color: var(--bs-secondary-color);
-  transition: color 0.15s ease-in-out;
-}
-
-.panel-tabset .nav-tabs .nav-link:hover,
-.panel-tabset .nav-tabs .nav-link:focus {
-  color: var(--bs-primary);
-  border-color: transparent;
-}
-
-.panel-tabset .nav-tabs .nav-link.active {
-  color: var(--bs-body-color);
-  border-color: transparent;
-  border-bottom: 2px solid var(--bs-primary);
-  background: transparent;
-  font-weight: 600;
-}
-
-// ===========================================================================
-// CODE
-// ===========================================================================
-// Quarto bakes a fixed grey into div.sourceCode. Quarto marks the scheme with
-// body.quarto-dark / .quarto-light and swaps the whole stylesheet bundle, so an
-// html prefix (not the never-set data-bs-theme) raises specificity over Quarto's
-// rule; body-mix() derives the surface from the per-bundle theme colours,
-// correct in both light and dark.
-
-html div.sourceCode,
-html pre:not(.sourceCode) {
-  background-color: body-mix(95%);
-  border: 1px solid body-mix(85%);
-  border-radius: $border-radius-sm;
-}
-
-html pre.sourceCode {
-  background-color: transparent;
-  border: none;
-}
-
-// Code Window extension: its style.css uses the CSS system colour `Canvas`,
-// which follows the OS scheme rather than the active colour-scheme bundle. Re-skin
-// the container and title bar with body-mix() so the block follows the page
-// scheme. A leading `div` keeps these authoritative over the extension's
-// class-only rules regardless of load order.
-div.code-with-filename {
-  background-color: body-mix(95%);
-  border-color: body-mix(85%);
-}
-
-div.code-with-filename .code-with-filename-file {
-  background-color: body-mix(90%);
-  border-bottom-color: body-mix(85%);
-}
-
-div.code-with-filename .code-with-filename-file pre {
-  color: rgba($body-color, 0.6);
-}
-
-div.code-with-filename div.sourceCode,
-div.code-with-filename pre.sourceCode {
-  border: none;
-  border-radius: 0;
-  background-color: transparent;
-}
-
-code:not(.sourceCode):not(pre code) {
-  color: var(--oboro-moon);
-  background-color: var(--oboro-moon-soft);
-  padding: 0.1em 0.35em;
-  border-radius: 0.3em;
-}
-
-// ===========================================================================
-// TABLES + CALLOUTS
+// TABLES
 // ===========================================================================
 
 .table {
@@ -372,6 +169,10 @@ code:not(.sourceCode):not(pre code) {
     font-weight: 600;
   }
 }
+
+// ===========================================================================
+// CALLOUTS
+// ===========================================================================
 
 div.callout {
   border-left-width: 3px;
@@ -390,10 +191,23 @@ div.callout-important {
 }
 
 // ===========================================================================
+// INLINE CODE
+// ===========================================================================
+// Atelier paints inline code with $primary on a body-mix() patch; Oboro spends
+// the moon accent here instead. Same selector, so this wins on load order.
+
+code:not(.sourceCode):not(pre code) {
+  color: var(--oboro-moon);
+  background-color: var(--oboro-moon-soft);
+  padding: 0.1em 0.35em;
+  border-radius: 0.3em;
+}
+
+// ===========================================================================
 // THE PLACEHOLDER MARK
 // ===========================================================================
 // A redaction is what this tool produces, so the examples draw it as a
-// deliberate object: the moon accent, outlined. oboro's signature, applied by
+// deliberate object: the moon accent, outlined. Applied by
 // assets/scripts/placeholders.html; without the script the text is unchanged.
 
 .oboro-placeholder {
@@ -404,213 +218,4 @@ div.callout-important {
   padding: 0 0.15em;
   font-weight: 600;
   white-space: nowrap;
-}
-
-// ===========================================================================
-// GITLINK WIDGET
-// ===========================================================================
-// Structure ships with the extension's widget.css; the site keeps its own
-// menu radius, painted from the navbar tokens set above.
-
-body .navbar .gitlink-widget-dropdown {
-  border-radius: $border-radius;
-}
-
-// ===========================================================================
-// COLLAPSED NAVBAR (mobile)
-// ===========================================================================
-// A left-aligned wrapping row rather than a full-width vertical stack, so each
-// link hugs its content and the underline anchors to the link, not the bar.
-
-@media (max-width: 991.98px) {
-  .navbar .navbar-collapse .navbar-nav {
-    flex-direction: row;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.25rem;
-    width: auto;
-
-    // Bootstrap's .navbar-nav-scroll caps the collapsed menu with a max-height
-    // and overflow-y: auto, which shows a scrollbar and clips the widget's
-    // absolutely-positioned dropdown. This selector (0,3,0) outranks
-    // .navbar-nav-scroll (0,1,0); desktop keeps Bootstrap's expand reset.
-    max-height: none;
-    overflow: visible;
-
-    .nav-link {
-      width: auto;
-      padding-inline: 0.6rem;
-    }
-  }
-
-  // Below the expand breakpoint Bootstrap forces navbar `.dropdown-menu` to
-  // `position: static`, so an open native dropdown flows in-document and grows
-  // the navbar instead of overlaying. Re-anchor it to absolute against a
-  // relative `.nav-item`, matching how the GitHub widget menu already behaves.
-  .navbar .navbar-collapse .navbar-nav .nav-item.dropdown {
-    position: relative;
-  }
-
-  .navbar .dropdown-menu {
-    position: absolute;
-    top: 100%;
-    left: 0;
-  }
-}
-
-// ===========================================================================
-// 404 PAGE
-// ===========================================================================
-// Quarto renders 404.qmd as an ordinary page with no distinguishing class;
-// the page opts in by wrapping its content in a .atelier-404 div.
-.atelier-404 {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  gap: 1rem;
-  min-height: 55vh;
-}
-
-.atelier-404 .atelier-404-code {
-  font-size: clamp(6rem, 20vw, 11rem);
-  font-weight: 700;
-  line-height: 1;
-  color: body-mix(88%);
-  user-select: none;
-}
-
-.atelier-404 .atelier-404-home {
-  display: inline-block;
-  padding: 0.45rem 1.1rem;
-  border: 1px solid $primary;
-  border-radius: $border-radius;
-  color: $primary;
-  text-decoration: none;
-}
-
-.atelier-404 .atelier-404-home:hover,
-.atelier-404 .atelier-404-home:focus-visible {
-  background: body-mix(92%);
-  text-decoration: underline;
-}
-
-// ===========================================================================
-// TOOLTIPS (navbar controls — dark surface in both schemes)
-// ===========================================================================
-
-// Quarto leaves Bootstrap's default translucent grey tooltip regardless of
-// scheme; pin it to the navbar tokens so it matches the dark-pinned navbar.
-.tooltip {
-  --bs-tooltip-bg: var(--oboro-navbar-bg);
-  --bs-tooltip-color: var(--oboro-navbar-fg);
-  --bs-tooltip-opacity: 1;
-  --bs-tooltip-border-radius: #{$border-radius-sm};
-}
-
-.tooltip .tooltip-inner {
-  border: 1px solid var(--oboro-navbar-accent);
-  box-shadow: 0 6px 20px rgb(0 0 0 / 0.35);
-  font-size: 0.85rem;
-  font-weight: 500;
-}
-
-// Tippy theme used by navbar-tooltips.html for the navbar controls. Quarto
-// ships no styling for these tooltips, so the navbar tokens drive a dark chip
-// that matches the dark-pinned navbar in both schemes.
-.tippy-box[data-theme~="ob"] {
-  background-color: var(--oboro-navbar-bg);
-  color: var(--oboro-navbar-fg);
-  border: 1px solid var(--oboro-navbar-accent);
-  border-radius: $border-radius-sm;
-  box-shadow: 0 6px 20px rgb(0 0 0 / 0.35);
-  font-size: 0.85rem;
-  font-weight: 500;
-}
-
-.tippy-box[data-theme~="ob"] .tippy-content {
-  padding: 0.2rem 0.55rem;
-}
-
-// ===========================================================================
-// ACCESSIBILITY HELPERS
-// ===========================================================================
-
-// Quarto leaves interactive controls with only the browser default focus ring,
-// which is invisible on some surfaces; give every control a visible outline.
-a:focus-visible,
-button:focus-visible,
-.btn:focus-visible,
-.nav-link:focus-visible {
-  outline: 2px solid $primary;
-  outline-offset: 2px;
-  border-radius: 2px;
-}
-
-// Quarto/Bootstrap ships the skip link visually-hidden-focusable but unstyled,
-// so it is near-invisible when focused; give it a visible chip on focus.
-.skip-link:focus {
-  position: fixed;
-  top: 0.5rem;
-  left: 0.5rem;
-  z-index: 2000;
-  padding: 0.5rem 0.9rem;
-  border-radius: $border-radius-sm;
-  background-color: var(--oboro-navbar-accent);
-  color: var(--oboro-navbar-bg);
-  font-weight: 600;
-  box-shadow: 0 6px 20px rgb(0 0 0 / 0.35);
-}
-
-// Quarto renders dates as plain text, so the ordinal-dates script wraps the
-// suffix in <sup class="ordinal-suffix">; style it as a small superscript.
-.ordinal-suffix {
-  font-size: 0.55em;
-  font-style: italic;
-  vertical-align: super;
-}
-
-// ===========================================================================
-// SCROLLBARS
-// ===========================================================================
-// Quarto leaves the browser default scrollbar, a light-grey bar that clashes
-// with the dark navbar and the tinted code surfaces; derive it from the page so
-// it tracks the active scheme, with $primary on hover. The global rules cover
-// the code blocks, tables, and TOC that scroll, so no default bar reappears.
-$scrollbar-track: body-mix(94%);
-$scrollbar-thumb: body-mix(72%);
-
-:root {
-  scrollbar-width: thin;
-  scrollbar-color: #{$scrollbar-thumb} #{$scrollbar-track};
-}
-
-::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-
-::-webkit-scrollbar-track {
-  background: $scrollbar-track;
-}
-
-::-webkit-scrollbar-thumb {
-  background: $scrollbar-thumb;
-  border-radius: $border-radius-sm;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: $primary;
-}
-
-// ===========================================================================
-// REDUCED MOTION
-// ===========================================================================
-// The gitlink widget ships its own reduced-motion guard.
-
-@media (prefers-reduced-motion: reduce) {
-  .navbar .nav-link::after {
-    transition: none;
-  }
 }

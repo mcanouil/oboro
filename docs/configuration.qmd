@@ -1,5 +1,6 @@
 ---
 title: "Configuration"
+description: "Every key oboro reads from oboro.toml, from regions and OCR languages to the recognition threshold, allowlists, and your own patterns."
 ---
 
 `oboro` reads the nearest `oboro.toml`, searching upwards from the working directory.

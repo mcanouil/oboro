@@ -9,3 +9,5 @@
 
 # Quarto
 /docs/_site/
+
+/.luarc.json

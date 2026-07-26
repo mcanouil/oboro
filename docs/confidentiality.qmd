@@ -1,5 +1,6 @@
 ---
 title: "Confidentiality"
+description: "What oboro sends over the network, what it writes to disk, and where your vault lives. The honest boundaries of the guarantee."
 ---
 
 The point of this tool is that your documents stay yours.
