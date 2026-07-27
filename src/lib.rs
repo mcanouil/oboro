@@ -15,9 +15,13 @@
 /// reported, so a failure to write to it has nowhere left to go: the line is
 /// dropped, and what the run did, its exit code and the files it wrote, is
 /// unchanged.
+/// The line and its newline are written in one call: standard error is
+/// unbuffered, and `writeln!` would write the two separately, leaving a line
+/// with no newline behind when the reader goes away in between.
 pub fn note_args(args: std::fmt::Arguments<'_>) {
     use std::io::Write as _;
-    let _ = writeln!(std::io::stderr().lock(), "{args}");
+    let line = format!("{args}\n");
+    let _ = std::io::stderr().lock().write_all(line.as_bytes());
 }
 
 /// Writes one diagnostic line to standard error, taking the same arguments as
