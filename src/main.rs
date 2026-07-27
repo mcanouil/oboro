@@ -6,11 +6,13 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{Args, Parser, Subcommand};
 
+use oboro::claude::{SCOPES, Scope};
 use oboro::config::{self, Config, RegionSource};
 use oboro::convert;
 use oboro::detect::Detector;
+use oboro::hooks::Change;
 use oboro::pipeline;
-use oboro::skill::{Plan, Scope, Status};
+use oboro::skill::{Plan, Status};
 use oboro::vault::{self, Vault};
 
 #[derive(Parser)]
@@ -99,6 +101,22 @@ enum Command {
 
 #[derive(Subcommand)]
 enum HookAction {
+    /// Name both hooks in your agent's settings
+    ///
+    /// Without `--project` or `--user` you are asked which one to write to.
+    /// Nothing already in the file is moved, reordered or removed, and a hook
+    /// Oboro finds already named is left exactly as you wrote it.
+    Install {
+        /// Write `.claude/settings.local.json` here, covering this project
+        #[arg(long, conflicts_with = "user")]
+        project: bool,
+        /// Write `~/.claude/settings.json`, covering every project
+        #[arg(long)]
+        user: bool,
+        /// Print the settings that would be written and stop
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Clean a tool's result before the model reads it
     ///
     /// Reads a Claude Code `PostToolUse` payload on standard input and writes
@@ -243,6 +261,11 @@ fn run() -> Result<()> {
             config.as_deref(),
         ),
         Command::Hook { action } => match action {
+            HookAction::Install {
+                project,
+                user,
+                dry_run,
+            } => hook_install(chosen_scope(project, user), dry_run),
             HookAction::PostToolUse => hook_post_tool_use(store),
             HookAction::PreToolUse => hook_pre_tool_use(store),
         },
@@ -252,14 +275,7 @@ fn run() -> Result<()> {
                 user,
                 dry_run,
                 force,
-            } => {
-                let scope = match (project, user) {
-                    (true, _) => Some(Scope::Project),
-                    (_, true) => Some(Scope::User),
-                    _ => None,
-                };
-                skill_install(scope, dry_run, force)
-            }
+            } => skill_install(chosen_scope(project, user), dry_run, force),
             SkillAction::Show => print_stdout(oboro::skill::SKILL),
         },
         Command::Doctor => doctor(store),
@@ -786,7 +802,7 @@ fn restore(file: Option<&Path>, to_stdout: bool, store: &StoreArgs) -> Result<()
 
     match source {
         Some(path) if !to_stdout => {
-            write_atomic(path, report.text.as_bytes())
+            oboro::claude::write_atomic(path, report.text.as_bytes())
                 .with_context(|| format!("writing {}", path.display()))?;
             oboro::note!("{}: {} restored", path.display(), report.restored);
         }
@@ -835,36 +851,6 @@ fn map_list(reveal: bool, store: &StoreArgs) -> Result<()> {
     Ok(())
 }
 
-/// Writes a file by writing a sibling temporary and renaming it into place.
-///
-/// `restore` overwrites the user's only copy of the answer, so a crash partway
-/// through a direct write would lose it. Renaming is atomic on the same
-/// filesystem, so the destination is either the old file or the whole new one.
-fn write_atomic(path: &Path, contents: &[u8]) -> Result<()> {
-    use std::io::Write as _;
-
-    let directory = path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."));
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| anyhow!("{} has no usable file name", path.display()))?;
-    let temporary = directory.join(format!(".{file_name}.oboro-{}.tmp", std::process::id()));
-
-    let mut file = std::fs::File::create(&temporary)
-        .with_context(|| format!("creating a temporary file in {}", directory.display()))?;
-    file.write_all(contents)
-        .and_then(|()| file.sync_all())
-        .with_context(|| format!("writing {}", temporary.display()))?;
-    drop(file);
-
-    std::fs::rename(&temporary, path)
-        .with_context(|| format!("replacing {} with the new contents", path.display()))?;
-    Ok(())
-}
-
 fn map_purge(confirmed: bool, store: &StoreArgs) -> Result<()> {
     if !confirmed {
         bail!(
@@ -883,7 +869,7 @@ fn skill_install(scope: Option<Scope>, dry_run: bool, force: bool) -> Result<()>
     let cwd = std::env::current_dir().context("reading the working directory")?;
     let scope = match scope {
         Some(scope) => scope,
-        None => ask_for_scope(&cwd)?,
+        None => ask_for_scope(&cwd, "skill", oboro::skill::path)?,
     };
     // The plan is made once and then carried out, so what is named here is by
     // construction what happens, whether or not `--dry-run` stops it.
@@ -914,12 +900,77 @@ fn skill_install(scope: Option<Scope>, dry_run: bool, force: bool) -> Result<()>
     Ok(())
 }
 
-/// Asks which scope to install into, when neither flag named one.
+/// Names both hooks in the user's settings, so the agent path is covered
+/// without anyone pasting JSON.
+fn hook_install(scope: Option<Scope>, dry_run: bool) -> Result<()> {
+    let cwd = std::env::current_dir().context("reading the working directory")?;
+    let scope = match scope {
+        Some(scope) => scope,
+        None => ask_for_scope(&cwd, "hooks", oboro::hooks::settings_path)?,
+    };
+
+    let plan = oboro::hooks::plan(scope, &cwd)?;
+    for (event, change) in &plan.changes {
+        match change {
+            Change::Add(matcher) => oboro::note!("{event:<11} adding, matched against {matcher}"),
+            Change::Keep(matcher) => oboro::note!(
+                "{event:<11} already named, matched against {}; left as you wrote it",
+                matcher.as_deref().unwrap_or("every tool")
+            ),
+        }
+    }
+    if plan.writes() {
+        oboro::note!("writing {}", plan.file.display());
+    } else {
+        oboro::note!("{} already names both halves", plan.file.display());
+    }
+    if dry_run {
+        oboro::note!("--dry-run: nothing was written. The settings would read:");
+        return print_stdout(&plan.rendered());
+    }
+
+    let written = plan.writes();
+    let file = plan.file.clone();
+    oboro::hooks::install(plan)?;
+    if written {
+        oboro::note!(
+            "installed for {}: {}",
+            describe_scope(scope),
+            file.display()
+        );
+    }
+    if written && !oboro::hooks::program_is_reachable("oboro") {
+        // A hook naming a binary the agent cannot find is configured and
+        // useless, and it fails closed on every matching tool call.
+        oboro::note!(
+            "warning: `oboro` is not on PATH, so the hooks just named cannot run; \
+             put the binary on PATH, or edit the commands to give its full path"
+        );
+    }
+    Ok(())
+}
+
+/// The scope the flags named, or `None` when neither did and it has to be
+/// asked for.
+fn chosen_scope(project: bool, user: bool) -> Option<Scope> {
+    match (project, user) {
+        (true, _) => Some(Scope::Project),
+        (_, true) => Some(Scope::User),
+        _ => None,
+    }
+}
+
+/// Asks which scope to install `what` into, when neither flag named one.
 ///
 /// Both paths are shown rather than named, because the difference that matters
 /// is which agent sessions will read the file, and a path answers that where
-/// "project" and "user" do not.
-fn ask_for_scope(cwd: &Path) -> Result<Scope> {
+/// "project" and "user" do not. The two installers write different files, so
+/// each passes its own way of resolving one.
+fn ask_for_scope(
+    cwd: &Path,
+    what: &str,
+    path_for: fn(Scope, &Path) -> Result<PathBuf>,
+) -> Result<Scope> {
     if !std::io::stdin().is_terminal() {
         bail!(
             "there is no terminal to ask which scope to install into; \
@@ -927,14 +978,14 @@ fn ask_for_scope(cwd: &Path) -> Result<Scope> {
         );
     }
 
-    for (choice, scope) in oboro::skill::SCOPES.iter().enumerate() {
+    for (choice, scope) in SCOPES.iter().enumerate() {
         let covers = describe_scope(*scope);
-        match scope.path(cwd) {
+        match path_for(*scope, cwd) {
             Ok(path) => oboro::note!("{}  {covers:<14} {}", choice + 1, path.display()),
             Err(error) => oboro::note!("{}  {covers:<14} unavailable: {error:#}", choice + 1),
         }
     }
-    oboro::note!("Install the Oboro skill where? [1/2]");
+    oboro::note!("Install the Oboro {what} where? [1/2]");
 
     let mut answer = String::new();
     std::io::stdin()
@@ -1093,13 +1144,11 @@ fn describe_hooks(cwd: &Path) -> Result<String> {
     let installed = oboro::hooks::installed_from(cwd);
     let mut report = String::new();
 
-    for (event, _) in oboro::hooks::EVENTS {
-        let found: Vec<_> = installed
-            .iter()
-            .filter(|hook| hook.event == event)
-            .collect();
+    for event in oboro::hooks::EVENTS {
+        let name = event.name;
+        let found: Vec<_> = installed.iter().filter(|hook| hook.event == name).collect();
         if found.is_empty() {
-            writeln!(report, "{event:<11} not installed")?;
+            writeln!(report, "{name:<11} not installed; run `oboro hook install`")?;
             continue;
         }
         for hook in found {
@@ -1111,7 +1160,7 @@ fn describe_hooks(cwd: &Path) -> Result<String> {
             };
             writeln!(
                 report,
-                "{event:<11} {} ({matcher}, {reachable})",
+                "{name:<11} {} ({matcher}, {reachable})",
                 hook.file.display()
             )?;
         }
@@ -1131,8 +1180,8 @@ fn describe_skill(cwd: &Path) -> Result<String> {
 
     let mut report = String::new();
 
-    for scope in oboro::skill::SCOPES {
-        let Ok(path) = scope.path(cwd) else {
+    for scope in SCOPES {
+        let Ok(path) = oboro::skill::path(scope, cwd) else {
             writeln!(
                 report,
                 "skill       {}: no home directory",
