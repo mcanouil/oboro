@@ -118,10 +118,11 @@ Answers an agent's hook, so what the model reads has been cleaned before it read
 
 ```bash
 oboro hook post-tool-use
+oboro hook pre-tool-use
 ```
 
-`post-tool-use` reads a Claude Code `PostToolUse` payload on standard input and writes the reply that replaces the tool's result.
-It is not run by hand; it is named in your settings, and the agent calls it after every matching tool:
+Neither is run by hand.
+They are named in your settings, and the agent calls them around every matching tool:
 
 ```json
 {
@@ -131,14 +132,40 @@ It is not run by hand; it is named in your settings, and the agent calls it afte
         "matcher": "Read|Grep|Bash|WebFetch",
         "hooks": [{ "type": "command", "command": "oboro hook post-tool-use" }]
       }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [{ "type": "command", "command": "oboro hook pre-tool-use" }]
+      }
     ]
   }
 }
 ```
 
+The two are inverses, and both are needed.
+`post-tool-use` is what the model is shown; `pre-tool-use` is what reaches your files.
+Without the second one the model writes `[[EMAIL_1]]` into your source.
+
+### `post-tool-use`
+
+Reads a `PostToolUse` payload on standard input and writes the reply that replaces the tool's result.
+
 The result is cleaned the way any other text is, against the vault and the `oboro.toml` found from the working directory the agent runs in.
 A result that is a plain string comes back as a string.
 A result that is structured keeps its shape, with every string inside it cleaned.
+
+### `pre-tool-use`
+
+Reads a `PreToolUse` payload on standard input and writes the reply that replaces the tool's arguments, so a placeholder the model echoed back becomes the real value before the tool runs.
+
+Every string in the arguments is restored, rather than a list of fields per tool: `Write` carries its text in `content`, `Edit` in `old_string` and `new_string`, and restoring only rewrites the `[[TAG_n]]` shape, so a string holding no placeholder comes back untouched.
+Arguments that are not text are left exactly as they were.
+
+A tool call whose arguments hold no placeholder at all is left alone entirely.
+
+A placeholder this vault never issued is left in place and reported to you, as `restore` does with a document.
+It is more likely something the model invented than a mapping to recover, so the call is not refused over it.
 
 At 17 to 70 ms per call it is cheap enough to run on every matching tool, which is what the [timings](how-it-works.qmd#what-a-run-costs) were measured to decide.
 
@@ -155,12 +182,16 @@ Filename redaction applies to files Oboro writes, not to paths inside a tool's a
 
 ## Failing closed
 
-If Oboro cannot clean a result, the result is withheld rather than shown.
+If Oboro cannot do its job, the tool does not quietly get its way.
 
+On the way out the result is withheld.
 A `PostToolUse` hook cannot stop the tool, which has already run, and a hook that exits non-zero has its reply ignored, which would hand the model the raw text.
 So a failure exits zero and answers with a notice in place of the result, a `block` decision so the model does not continue on it, and a message to you naming what broke.
 
-You are told the detail; the model is not.
+On the way in the call is refused, with `permissionDecision` set to `deny`.
+The tool has not run yet, and letting it run would write placeholders into your file.
+
+You are told the detail either way; the model is not.
 The failure usually names a path, and a path is one of the things a vault redacts.
 
 :::

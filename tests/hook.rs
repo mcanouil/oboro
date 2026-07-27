@@ -22,15 +22,32 @@ fn payload(result: &str) -> String {
     )
 }
 
+/// A `PreToolUse` payload carrying `input` as its `tool_input`.
+fn write_payload(input: &str) -> String {
+    format!(
+        r#"{{"session_id":"s","hook_event_name":"PreToolUse","tool_name":"Write",
+             "tool_input":{input},"tool_use_id":"t"}}"#
+    )
+}
+
 /// Runs the hook with `payload` on standard input, returning its output.
 fn run(workspace: &Workspace, args: &[&str], payload: &str) -> std::process::Output {
+    run_action(workspace, args, "post-tool-use", payload)
+}
+
+fn run_action(
+    workspace: &Workspace,
+    args: &[&str],
+    action: &str,
+    payload: &str,
+) -> std::process::Output {
     let mut command = workspace.command();
     for arg in args {
         command.arg(arg);
     }
     command
         .arg("hook")
-        .arg("post-tool-use")
+        .arg(action)
         .write_stdin(payload.to_owned())
         .output()
         .expect("running oboro hook")
@@ -201,5 +218,191 @@ fn what_the_hook_returns_restores_to_the_original() {
         workspace.restore_piped(cleaned),
         format!("Call {VALUE}."),
         "the placeholders the model saw must restore to the original text"
+    );
+}
+
+/// The other half of the round trip. The model writes back what it was shown,
+/// so a placeholder must become the value again before it reaches the file.
+#[test]
+fn a_write_has_its_placeholders_restored_before_the_file_is_touched() {
+    let workspace = Workspace::new();
+    // Allocate the mapping the way the hook would have, so the vault knows it.
+    workspace.clean_piped(&format!("Call {VALUE}.\n"));
+
+    let output = run_action(
+        &workspace,
+        &[],
+        "pre-tool-use",
+        &write_payload(r#"{"file_path":"/tmp/note.txt","content":"Call [[PHONE_1]]."}"#),
+    );
+
+    assert!(
+        output.status.success(),
+        "the hook failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = stdout_of(&output);
+    assert!(
+        stdout.contains(VALUE),
+        "the value never made it back into the write:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("[[PHONE_1]]"),
+        "a placeholder was left to reach the file:\n{stdout}"
+    );
+    assert!(
+        stdout.contains(r#""hookEventName":"PreToolUse""#) && stdout.contains(r#""updatedInput""#),
+        "the reply is not shaped as a PreToolUse hook output:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("/tmp/note.txt"),
+        "the rest of the tool's arguments must survive:\n{stdout}"
+    );
+}
+
+/// An `Edit` carries the text in two arguments rather than one, and both can
+/// hold a placeholder.
+#[test]
+fn an_edit_has_every_argument_restored() {
+    let workspace = Workspace::new();
+    workspace.clean_piped(&format!("Call {VALUE} or write to a@b.example.\n"));
+
+    let output = run_action(
+        &workspace,
+        &[],
+        "pre-tool-use",
+        r#"{"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":
+             {"file_path":"/tmp/note.txt","old_string":"Call [[PHONE_1]].",
+              "new_string":"Write to [[EMAIL_1]].","replace_all":false}}"#,
+    );
+
+    assert!(
+        output.status.success(),
+        "the hook failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = stdout_of(&output);
+    assert!(
+        stdout.contains(VALUE) && stdout.contains("a@b.example"),
+        "both arguments must be restored:\n{stdout}"
+    );
+    assert!(
+        stdout.contains(r#""replace_all":false"#),
+        "arguments that are not text must survive untouched:\n{stdout}"
+    );
+}
+
+/// Most writes hold no placeholder at all. Replacing the arguments with an
+/// identical copy would be noise, so the hook says nothing.
+#[test]
+fn a_write_with_no_placeholders_is_left_alone() {
+    let workspace = Workspace::new();
+    let output = run_action(
+        &workspace,
+        &[],
+        "pre-tool-use",
+        &write_payload(r#"{"file_path":"/tmp/note.txt","content":"Nothing to put back."}"#),
+    );
+
+    assert!(
+        output.status.success(),
+        "the hook failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        output.stdout.is_empty(),
+        "nothing should be written when nothing changed: {}",
+        stdout_of(&output)
+    );
+}
+
+/// A placeholder this vault never issued is more likely something the model
+/// invented than a mapping to recover, which is how `restore` already treats
+/// it. The write proceeds and the user is told.
+#[test]
+fn an_unknown_placeholder_is_reported_and_the_write_proceeds() {
+    let workspace = Workspace::new();
+    let output = run_action(
+        &workspace,
+        &[],
+        "pre-tool-use",
+        &write_payload(r#"{"file_path":"/tmp/note.txt","content":"Ask [[PERSON_7]]."}"#),
+    );
+
+    assert!(
+        output.status.success(),
+        "the hook failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = stdout_of(&output);
+    assert!(
+        !stdout.contains(r#""permissionDecision":"deny""#),
+        "an invented placeholder is not a reason to refuse the write:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("systemMessage") && stdout.contains("unknown"),
+        "the user must be told a placeholder could not be resolved:\n{stdout}"
+    );
+}
+
+/// Failing closed on the way in means refusing the write: letting it through
+/// would put `[[PHONE_1]]` into the user's file.
+#[test]
+fn a_broken_vault_refuses_the_write() {
+    let workspace = Workspace::new();
+    let [vault, _key] = workspace.store_paths();
+    std::fs::create_dir(&vault).expect("creating a directory where a vault is expected");
+
+    let output = run_action(
+        &workspace,
+        &[],
+        "pre-tool-use",
+        &write_payload(r#"{"file_path":"/tmp/note.txt","content":"Call [[PHONE_1]]."}"#),
+    );
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "the reply is only honoured on exit 0, so a failure must still exit 0"
+    );
+    let stdout = stdout_of(&output);
+    assert!(
+        stdout.contains(r#""permissionDecision":"deny""#),
+        "a failure must refuse the write rather than let a placeholder reach the file:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("updatedInput"),
+        "a refused write must not also carry replacement arguments:\n{stdout}"
+    );
+}
+
+/// Both halves together: what the model is shown, and what it writes back.
+#[test]
+fn the_two_hooks_are_inverses() {
+    let workspace = Workspace::new();
+    let shown = stdout_of(&run(
+        &workspace,
+        &[],
+        &payload(&format!(r#""Call {VALUE}.""#)),
+    ));
+    let placeholder = shown
+        .split(r#""updatedToolOutput":""#)
+        .nth(1)
+        .and_then(|rest| rest.split('"').next())
+        .expect("the reply must carry updatedToolOutput")
+        .to_owned();
+
+    let written = stdout_of(&run_action(
+        &workspace,
+        &[],
+        "pre-tool-use",
+        &write_payload(&format!(
+            r#"{{"file_path":"/tmp/note.txt","content":"{placeholder}"}}"#
+        )),
+    ));
+
+    assert!(
+        written.contains(VALUE),
+        "what the model was shown must come back as what it wrote:\n{written}"
     );
 }
