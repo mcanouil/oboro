@@ -203,6 +203,48 @@ The failure usually names a path, and a path is one of the things a vault redact
 
 :::
 
+## `skill`
+
+Writes the skill that tells an agent what the hooks have done to what it reads.
+
+```bash
+oboro skill install
+oboro skill show
+```
+
+The hooks put `[[PHONE_1]]` in front of an agent without explaining it.
+The skill says what a placeholder is, that writing one back verbatim is correct because `pre-tool-use` restores it, that inventing one is not, and what a withheld result or a refused call means.
+
+`install` writes `SKILL.md` into a `.claude/skills/oboro/` directory.
+Without `--project` or `--user` it asks which:
+
+```text
+1  this project    /home/you/project/.claude/skills/oboro/SKILL.md
+2  every project   /home/you/.claude/skills/oboro/SKILL.md
+Install the Oboro skill where? [1/2]
+```
+
+There is no default, because the wrong scope fails silently: the agent simply never reads the file.
+With no terminal to ask, the command fails and names both flags rather than choosing for you.
+
+`--dry-run` prints the path and stops.
+`show` prints the text to standard output and writes nothing.
+
+The text is compiled into the binary, so the skill and the hooks it describes are always the same version.
+
+::: {.callout-note}
+
+## What it will not overwrite
+
+An installed skill that differs from the one this build carries is left where it is.
+The new text goes to `SKILL.md.oboro-proposed` beside it, and the path is printed, so an edit is compared rather than lost.
+`--force` overwrites instead.
+
+Nothing is written through a symbolic link.
+If `.claude`, `skills`, `oboro` or `SKILL.md` is a link, the install stops and names it, rather than writing to wherever it points.
+
+:::
+
 ## `models`
 
 Fetches and inspects the recognition model.
@@ -242,10 +284,16 @@ model:      installed
 network:    only `models pull`, and only when you run it
 PostToolUse .claude/settings.json (Read|Grep|Bash|WebFetch, reachable)
 PreToolUse  not installed
+skill       /Users/you/work/.claude/skills/oboro/SKILL.md (current)
+skill       /Users/you/.claude/skills/oboro/SKILL.md (not installed)
 ```
 
 Start here when something is not being detected: it shows whether the model is installed, which configuration was found, and which formats this build reads.
 
-The last two lines answer a different question: whether the [hooks](#hook) are wired up.
-Both events are reported whether or not they are found, because having only the first is the worst of the three states: the model is shown placeholders and nothing puts the values back, so they reach your files.
+The last four lines answer a different question: whether the agent side is wired up.
+
+Both hook events are reported whether or not they are found, because having only the first is the worst of the three states: the model is shown placeholders and nothing puts the values back, so they reach your files.
 `reachable` means the program the hook names can actually be run; a hook naming a binary that is not on `PATH` is configured and useless.
+
+Both [skill](#skill) scopes are reported for the same reason.
+`current` is the text this build carries; `edited` is a copy that has drifted from it, which is the state where the agent is being told something the binary no longer does.

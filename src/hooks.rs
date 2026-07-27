@@ -4,6 +4,13 @@
 //! written there by Oboro, which means a user can believe they are protected
 //! while nothing is wired up. `oboro doctor` closes that gap by reporting what
 //! it can see, so protection is something to verify rather than assume.
+//!
+//! Writing them is wanted, and pending rather than refused: naming two hooks by
+//! hand is a poor first step for a tool whose whole point is that the agent
+//! path is covered. It waits on the merge, which is the part worth getting
+//! right, since the settings file belongs to the user and holds hooks Oboro
+//! knows nothing about. `crate::skill` already writes into `.claude`, on the
+//! easier terms of a file it creates and owns outright.
 
 use std::path::{Path, PathBuf};
 
