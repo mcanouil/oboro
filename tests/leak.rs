@@ -65,6 +65,37 @@ fn no_planted_value_survives_cleaning() {
     }
 }
 
+/// Piped text is held to the same standard as a file: an agent hook cleans
+/// standard input, so a value that survives that path leaks just as surely as
+/// one that survives a document.
+///
+/// Only the text fixture is used: standard input has no extension to sniff, so
+/// it is read as text or markdown and never goes through a converter.
+#[test]
+fn no_planted_value_survives_cleaning_from_standard_input() {
+    let workspace = Workspace::new();
+    let original =
+        std::fs::read_to_string(support::fixture("contract.txt")).expect("reading the fixture");
+    let cleaned = workspace.clean_piped(&original);
+
+    let leaked: Vec<&str> = PLANTED
+        .iter()
+        .copied()
+        .filter(|planted| cleaned.contains(planted))
+        .collect();
+    assert!(
+        leaked.is_empty(),
+        "piped input leaked {} value(s): {leaked:#?}\n\n--- output ---\n{cleaned}",
+        leaked.len()
+    );
+
+    assert_eq!(
+        workspace.restore_piped(&cleaned),
+        original,
+        "restoring piped output must reproduce the original document exactly"
+    );
+}
+
 /// Accented prose must survive conversion untouched. A reader that dropped
 /// entity references would turn "Société" into "Socit", which is both wrong
 /// in the output and no longer matches a denylisted name.
