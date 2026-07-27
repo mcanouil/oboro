@@ -449,6 +449,25 @@ mod tests {
             .expect("valid JSON")
     }
 
+    /// Every Oboro command named in the settings just written, read back from
+    /// the file.
+    ///
+    /// Deliberately not `installed_from`, which also reads `~/.claude` and
+    /// would count the hooks a developer has installed on their own machine.
+    fn commands_written(cwd: &Path) -> Vec<String> {
+        let settings = settings_in(cwd);
+        EVENTS
+            .iter()
+            .flat_map(|event| {
+                commands_for(&settings, event.name)
+                    .into_iter()
+                    .map(|(command, _)| command)
+                    .filter(|command| names_oboro_hook(command, event.subcommand))
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    }
+
     fn write_settings(cwd: &Path, text: &str) {
         let file = settings_path(Scope::Project, cwd).expect("a path");
         std::fs::create_dir_all(file.parent().expect("a parent")).expect("creating .claude");
@@ -468,12 +487,12 @@ mod tests {
                 ("PreToolUse", Change::Add("Write|Edit")),
             ]
         );
-        let installed = installed_from(project.path());
-        assert_eq!(installed.len(), 2, "both halves must be found afterwards");
-        assert!(
-            installed
-                .iter()
-                .all(|hook| hook.command.starts_with("oboro hook ")),
+        assert_eq!(
+            commands_written(project.path()),
+            vec![
+                "oboro hook post-tool-use".to_owned(),
+                "oboro hook pre-tool-use".to_owned(),
+            ],
             "the commands written must be the ones doctor looks for"
         );
     }
@@ -619,7 +638,7 @@ mod tests {
 
         install_into(project.path()).expect("installing");
 
-        assert_eq!(installed_from(project.path()).len(), 2);
+        assert_eq!(commands_written(project.path()).len(), 2);
     }
 
     #[test]
