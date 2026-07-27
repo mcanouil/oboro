@@ -433,43 +433,37 @@ fn clean_refuses_stdout_for_several_files() {
 
 #[test]
 fn clean_reads_standard_input_when_it_is_piped() {
-    let workspace = Workspace::new();
+    // Both spellings: an explicit `-`, and a bare invocation in a pipeline.
+    for dash in [false, true] {
+        let workspace = Workspace::new();
+        let mut command = workspace.command();
+        command.arg("clean");
+        if dash {
+            command.arg("-");
+        }
+        command
+            .write_stdin("Call 06 12 34 56 78.\n")
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("06 12 34 56 78").not())
+            .stdout(predicate::str::contains("[[PHONE_1]]"));
 
-    workspace
-        .command()
-        .arg("clean")
-        .write_stdin("Call 06 12 34 56 78.\n")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("06 12 34 56 78").not())
-        .stdout(predicate::str::contains("[[PHONE_1]]"));
-
-    // Nothing may be written beside the invocation: a piped document has no
-    // path, and a temporary file would be the leak this tool exists to stop.
-    let written: Vec<_> = std::fs::read_dir(workspace.path())
-        .expect("reading the workspace")
-        .filter_map(|entry| entry.ok().map(|entry| entry.file_name()))
-        .filter(|name| {
-            let name = name.to_string_lossy();
-            !name.starts_with("vault.db") && name != "key"
-        })
-        .collect();
-    assert!(written.is_empty(), "unexpected files written: {written:?}");
-}
-
-#[test]
-fn clean_reads_standard_input_when_asked_with_a_dash() {
-    let workspace = Workspace::new();
-
-    workspace
-        .command()
-        .arg("clean")
-        .arg("-")
-        .write_stdin("Call 06 12 34 56 78.\n")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("06 12 34 56 78").not())
-        .stdout(predicate::str::contains("[[PHONE_1]]"));
+        // Nothing may be written beside the invocation: a piped document has
+        // no path, and a temporary file would be the leak this tool exists to
+        // stop. The store itself is the only thing that may appear, and its
+        // database carries sidecar files.
+        let store = workspace.store_paths();
+        let written: Vec<_> = std::fs::read_dir(workspace.path())
+            .expect("reading the workspace")
+            .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+            .filter(|path| {
+                !store
+                    .iter()
+                    .any(|kept| path.to_string_lossy().starts_with(&*kept.to_string_lossy()))
+            })
+            .collect();
+        assert!(written.is_empty(), "unexpected files written: {written:?}");
+    }
 }
 
 #[test]
@@ -482,14 +476,8 @@ fn clean_stops_quietly_when_the_reader_closes_the_pipe() {
     // buffer and succeed after the reader is already gone.
     let text = "Call 06 12 34 56 78.\n".repeat(10_000);
 
-    let mut child = std::process::Command::new(assert_cmd::cargo::cargo_bin("oboro"))
-        .current_dir(workspace.path())
-        .env("LC_ALL", "fr_FR.UTF-8")
-        .env("LANG", "fr_FR.UTF-8")
-        .arg("--vault")
-        .arg(workspace.path().join("vault.db"))
-        .arg("--key")
-        .arg(workspace.path().join("key"))
+    let mut child = workspace
+        .std_command("fr_FR.UTF-8")
         .arg("clean")
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())

@@ -255,80 +255,63 @@ fn ensure_distinct_outputs(inputs: &[oboro::walk::Input], output: Option<&Path>)
     Ok(())
 }
 
-/// Writes cleaned or restored text to standard output.
+/// A reader such as `head` closing the pipe early is a normal way to stop, not
+/// an error to report, so that one case is swallowed.
 ///
-/// A reader such as `head` closing the pipe early is a normal way to stop, so
-/// it ends the write instead of failing, matching [`map_list`]. Without this,
-/// the default `print!` panics on a closed pipe and the tool reports a crash
-/// for something the user asked for.
-fn print_stdout(text: &str) -> Result<()> {
-    let stdout = std::io::stdout();
-    let mut out = stdout.lock();
-    match out.write_all(text.as_bytes()).and_then(|()| out.flush()) {
+/// The default `print!` and `println!` panic on a closed pipe, reporting a
+/// crash for something the user asked for.
+fn ignore_broken_pipe(result: std::io::Result<()>) -> Result<()> {
+    match result {
         Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
         result => result.context("writing to standard output"),
     }
 }
 
-/// Where `clean` takes its input from.
-enum Source<'a> {
-    Paths(&'a [PathBuf]),
-    Stdin,
+/// Writes cleaned or restored text to standard output.
+fn print_stdout(text: &str) -> Result<()> {
+    let stdout = std::io::stdout();
+    let mut out = stdout.lock();
+    ignore_broken_pipe(out.write_all(text.as_bytes()).and_then(|()| out.flush()))
 }
 
-/// Decides between the named paths and standard input.
+/// Whether `clean` reads standard input rather than the named paths.
 ///
 /// `-` is the conventional spelling. A bare `oboro clean` in a pipeline reads
 /// standard input too, since a caller holding text in memory, such as an agent
 /// hook, has no path to name. With a terminal on the other end there is
 /// nothing to read, so the missing argument is reported instead of the command
 /// hanging on an empty prompt.
-fn source_of(files: &[PathBuf]) -> Result<Source<'_>> {
+fn reads_stdin(files: &[PathBuf]) -> Result<bool> {
     if files.iter().any(|file| file.as_os_str() == "-") {
         if files.len() > 1 {
             bail!("`-` reads standard input and cannot be combined with file paths");
         }
-        return Ok(Source::Stdin);
+        return Ok(true);
     }
     if !files.is_empty() {
-        return Ok(Source::Paths(files));
+        return Ok(false);
     }
     if std::io::stdin().is_terminal() {
         bail!("no input given; pass a file or directory, or pipe text in on standard input");
     }
-    Ok(Source::Stdin)
+    Ok(true)
 }
 
-/// Reads all of standard input as text.
-///
-/// The bytes are collected before conversion so input this tool cannot read is
-/// refused, rather than lossily mangled into output that looks sanitised.
+/// Reads all of standard input as text, refusing anything that is not UTF-8
+/// rather than mangling it into output that looks sanitised.
 fn read_stdin() -> Result<String> {
-    use std::io::Read as _;
-
-    let mut bytes = Vec::new();
-    std::io::stdin()
-        .read_to_end(&mut bytes)
-        .context("reading standard input")?;
-    String::from_utf8(bytes).map_err(|_| anyhow!("standard input must be valid UTF-8 text"))
+    std::io::read_to_string(std::io::stdin()).context("reading standard input")
 }
 
 /// Cleans standard input to standard output.
 ///
 /// Standard input has no path to walk and no extension to sniff, so it goes
 /// straight to [`pipeline::clean`], bypassing `walk::resolve` and
-/// `convert::read`. It is normalised through [`convert::tidy`], the same step
-/// text and markdown files go through, so a piped document and the same
-/// document on disk clean identically.
+/// `convert::read`. It is normalised through [`convert::tidy`] all the same, so
+/// a piped document and the same document on disk clean identically.
 ///
-/// Filename redaction does not apply here: there is no name to redact.
-fn clean_stdin(output: Option<&Path>, store: &StoreArgs, config_path: Option<&Path>) -> Result<()> {
-    if output.is_some() {
-        bail!(
-            "--output names a directory for files written alongside their inputs; \
-             standard input has no name, and its cleaned text goes to standard output"
-        );
-    }
+/// Filename redaction does not apply: there is no name to redact.
+fn clean_stdin(store: &StoreArgs, config_path: Option<&Path>) -> Result<()> {
     let text = read_stdin()?;
     let (config, mut vault) = prepare(store, config_path, None)?;
     let detector = Detector::new(&config)?;
@@ -344,10 +327,15 @@ fn clean(
     store: &StoreArgs,
     config_path: Option<&Path>,
 ) -> Result<()> {
-    let files = match source_of(files)? {
-        Source::Stdin => return clean_stdin(output, store, config_path),
-        Source::Paths(paths) => paths,
-    };
+    if reads_stdin(files)? {
+        if output.is_some() {
+            bail!(
+                "--output names a directory for files written alongside their inputs; \
+                 standard input has no name, and its cleaned text goes to standard output"
+            );
+        }
+        return clean_stdin(store, config_path);
+    }
     let resolved = oboro::walk::resolve(files, recursive)?;
     if to_stdout && resolved.inputs.len() > 1 {
         bail!("--stdout takes a single file; pass one file or use --output");
@@ -492,8 +480,7 @@ fn map_list(reveal: bool, store: &StoreArgs) -> Result<()> {
         return Ok(());
     }
 
-    let stdout = std::io::stdout();
-    let mut out = stdout.lock();
+    let mut listing = String::new();
     for entry in entries {
         let line = if reveal {
             // A listed placeholder with no stored value means the row was lost
@@ -508,15 +495,10 @@ fn map_list(reveal: bool, store: &StoreArgs) -> Result<()> {
         } else {
             format!("{}\t{}", entry.placeholder(), entry.created_at)
         };
-        // A reader such as `head` closing the pipe early is a normal way to
-        // stop, not an error to report.
-        if let Err(error) = writeln!(out, "{line}") {
-            if error.kind() == std::io::ErrorKind::BrokenPipe {
-                return Ok(());
-            }
-            return Err(error).context("writing the mapping listing");
-        }
+        listing.push_str(&line);
+        listing.push('\n');
     }
+    print_stdout(&listing)?;
     if !reveal {
         eprintln!("values hidden; pass --reveal to print them");
     }

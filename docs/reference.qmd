@@ -35,7 +35,7 @@ printf 'Call 06 12 34 56 78.\n' | oboro clean
 ```
 
 Passing `-` as the path does the same thing, and cannot be combined with file paths.
-Piped text is read as markdown, cleaned to standard output, and never written to a file, so `--output` is refused.
+Piped text is tidied the same way a text or markdown file is, cleaned to standard output, and never written to a file, so `--output` is refused.
 Nothing is named, so filename redaction does not apply.
 
 ## `review`

@@ -8,6 +8,10 @@ All notable changes to this project will be documented in this file.
 
 - feat: Clean text piped in on standard input, with `printf '...' | oboro clean` or an explicit `-`, so a caller holding text in memory no longer has to write it to a temporary file first; the cleaned text goes to standard output, `--output` is refused since there is no name to write alongside, `-` cannot be combined with file paths, and input that is not valid UTF-8 is refused rather than mangled.
 
+### Bug Fixes
+
+- fix: Stop quietly when a reader closes the output pipe, so `oboro clean note.txt --stdout | head -n 1` ends instead of reporting a crash; `map list` already did this, and now `clean` and `restore` do too.
+
 ## 0.4.0 (2026-07-23)
 
 ### Features
