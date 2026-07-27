@@ -186,7 +186,12 @@ fn read_utf8(path: &Path) -> Result<String> {
 /// nested list items and indented code blocks. Nothing here parses markdown,
 /// so a hard line break written as two trailing spaces does not survive, and
 /// blank lines inside a fenced code block collapse like any other.
-fn tidy(text: &str) -> String {
+///
+/// Public so the standard-input path, which has no file to dispatch on and so
+/// never reaches [`read`], normalises the same way. A document cleaned from a
+/// pipe and the same document cleaned from disk must give the same output.
+#[must_use]
+pub fn tidy(text: &str) -> String {
     let mut tidied = String::with_capacity(text.len());
     let mut blank_pending = false;
     for line in text.lines().map(str::trim_end) {

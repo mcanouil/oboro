@@ -1,6 +1,6 @@
 //! Command line entry point.
 
-use std::io::Write;
+use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -31,8 +31,8 @@ struct Cli {
 enum Command {
     /// Anonymise files into sanitised copies
     Clean {
-        /// Files or directories to anonymise
-        #[arg(required = true, value_name = "PATH")]
+        /// Files or directories to anonymise, or `-` for standard input
+        #[arg(value_name = "PATH")]
         files: Vec<PathBuf>,
         /// Descend into subdirectories of any directory argument
         #[arg(short, long)]
@@ -255,6 +255,73 @@ fn ensure_distinct_outputs(inputs: &[oboro::walk::Input], output: Option<&Path>)
     Ok(())
 }
 
+/// Where `clean` takes its input from.
+enum Source<'a> {
+    Paths(&'a [PathBuf]),
+    Stdin,
+}
+
+/// Decides between the named paths and standard input.
+///
+/// `-` is the conventional spelling. A bare `oboro clean` in a pipeline reads
+/// standard input too, since a caller holding text in memory, such as an agent
+/// hook, has no path to name. With a terminal on the other end there is
+/// nothing to read, so the missing argument is reported instead of the command
+/// hanging on an empty prompt.
+fn source_of(files: &[PathBuf]) -> Result<Source<'_>> {
+    if files.iter().any(|file| file.as_os_str() == "-") {
+        if files.len() > 1 {
+            bail!("`-` reads standard input and cannot be combined with file paths");
+        }
+        return Ok(Source::Stdin);
+    }
+    if !files.is_empty() {
+        return Ok(Source::Paths(files));
+    }
+    if std::io::stdin().is_terminal() {
+        bail!("no input given; pass a file or directory, or pipe text in on standard input");
+    }
+    Ok(Source::Stdin)
+}
+
+/// Reads all of standard input as text.
+///
+/// The bytes are collected before conversion so input this tool cannot read is
+/// refused, rather than lossily mangled into output that looks sanitised.
+fn read_stdin() -> Result<String> {
+    use std::io::Read as _;
+
+    let mut bytes = Vec::new();
+    std::io::stdin()
+        .read_to_end(&mut bytes)
+        .context("reading standard input")?;
+    String::from_utf8(bytes).map_err(|_| anyhow!("standard input must be valid UTF-8 text"))
+}
+
+/// Cleans standard input to standard output.
+///
+/// Standard input has no path to walk and no extension to sniff, so it goes
+/// straight to [`pipeline::clean`], bypassing `walk::resolve` and
+/// `convert::read`. It is normalised through [`convert::tidy`], the same step
+/// text and markdown files go through, so a piped document and the same
+/// document on disk clean identically.
+///
+/// Filename redaction does not apply here: there is no name to redact.
+fn clean_stdin(output: Option<&Path>, store: &StoreArgs, config_path: Option<&Path>) -> Result<()> {
+    if output.is_some() {
+        bail!(
+            "--output names a directory for files written alongside their inputs; \
+             standard input has no name, and its cleaned text goes to standard output"
+        );
+    }
+    let text = read_stdin()?;
+    let (config, mut vault) = prepare(store, config_path, None)?;
+    let detector = Detector::new(&config)?;
+    let report = pipeline::clean(&convert::tidy(&text), &detector, &mut vault)?;
+    print!("{}", report.text);
+    Ok(())
+}
+
 fn clean(
     files: &[PathBuf],
     recursive: bool,
@@ -263,6 +330,10 @@ fn clean(
     store: &StoreArgs,
     config_path: Option<&Path>,
 ) -> Result<()> {
+    let files = match source_of(files)? {
+        Source::Stdin => return clean_stdin(output, store, config_path),
+        Source::Paths(paths) => paths,
+    };
     let resolved = oboro::walk::resolve(files, recursive)?;
     if to_stdout && resolved.inputs.len() > 1 {
         bail!("--stdout takes a single file; pass one file or use --output");

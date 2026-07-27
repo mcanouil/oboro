@@ -432,6 +432,93 @@ fn clean_refuses_stdout_for_several_files() {
 }
 
 #[test]
+fn clean_reads_standard_input_when_it_is_piped() {
+    let workspace = Workspace::new();
+
+    workspace
+        .command()
+        .arg("clean")
+        .write_stdin("Call 06 12 34 56 78.\n")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("06 12 34 56 78").not())
+        .stdout(predicate::str::contains("[[PHONE_1]]"));
+
+    // Nothing may be written beside the invocation: a piped document has no
+    // path, and a temporary file would be the leak this tool exists to stop.
+    let written: Vec<_> = std::fs::read_dir(workspace.path())
+        .expect("reading the workspace")
+        .filter_map(|entry| entry.ok().map(|entry| entry.file_name()))
+        .filter(|name| {
+            let name = name.to_string_lossy();
+            !name.starts_with("vault.db") && name != "key"
+        })
+        .collect();
+    assert!(written.is_empty(), "unexpected files written: {written:?}");
+}
+
+#[test]
+fn clean_reads_standard_input_when_asked_with_a_dash() {
+    let workspace = Workspace::new();
+
+    workspace
+        .command()
+        .arg("clean")
+        .arg("-")
+        .write_stdin("Call 06 12 34 56 78.\n")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("06 12 34 56 78").not())
+        .stdout(predicate::str::contains("[[PHONE_1]]"));
+}
+
+#[test]
+fn clean_refuses_a_dash_alongside_a_file() {
+    let workspace = Workspace::new();
+    let input = workspace.path().join("note.txt");
+    std::fs::write(&input, "Nothing here.\n").expect("writing the input");
+
+    workspace
+        .command()
+        .arg("clean")
+        .arg("-")
+        .arg(&input)
+        .write_stdin("Call 06 12 34 56 78.\n")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("standard input"));
+}
+
+#[test]
+fn clean_refuses_an_output_directory_for_standard_input() {
+    let workspace = Workspace::new();
+
+    workspace
+        .command()
+        .arg("clean")
+        .arg("-")
+        .arg("--output")
+        .arg(workspace.path().join("out"))
+        .write_stdin("Call 06 12 34 56 78.\n")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--output"));
+}
+
+#[test]
+fn clean_refuses_binary_standard_input() {
+    let workspace = Workspace::new();
+
+    workspace
+        .command()
+        .arg("clean")
+        .write_stdin(vec![0x00, 0xff, 0xfe, b'a'])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("UTF-8"));
+}
+
+#[test]
 fn clean_reports_an_unsupported_format() {
     let workspace = Workspace::new();
     let input = workspace.path().join("report.docx");
