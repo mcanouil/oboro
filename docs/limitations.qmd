@@ -67,6 +67,20 @@ Neither is anything embedded inside a document: a spreadsheet pasted into a Word
 The OCR path compiles and its failure paths are covered, but no automated test feeds Tesseract a photograph and checks the result.
 Treat text recovered from images as less reliable than text read directly.
 
+## The hook does not cover what you type
+
+The hooks clean what a tool hands the model and put values back into what the model writes.
+What you type yourself is never touched.
+
+This is not an omission to be fixed later.
+The event that fires on a prompt, `UserPromptSubmit`, can add context to a prompt; it cannot rewrite the prompt.
+There is nowhere for Oboro to stand between your keyboard and the model, so a value pasted into the chat reaches the model as you typed it.
+
+File content and command output are covered.
+Your own words are not, in any tool, by any configuration.
+
+Paste a document rather than retyping its contents, and the hook covers it.
+
 ## What redaction does not hide
 
 Replacing a name with `[[PERSON_1]]` removes the name.

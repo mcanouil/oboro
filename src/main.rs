@@ -949,5 +949,45 @@ fn doctor(store: &StoreArgs) -> Result<()> {
     // socket, and saying otherwise would overstate what it does.
     #[cfg(not(feature = "ner"))]
     writeln!(report, "network:    never contacted")?;
+    write!(report, "{}", describe_hooks()?)?;
     print_stdout(&report)
+}
+
+/// Reports which agent hooks are installed, so a user can check rather than
+/// assume.
+///
+/// Both halves are reported even when neither is installed: a user who has only
+/// the cleaning half is in the worse position of the two, with the model writing
+/// placeholders into their files, and silence would not tell them.
+fn describe_hooks() -> Result<String> {
+    use std::fmt::Write as _;
+
+    let cwd = std::env::current_dir().context("reading the working directory")?;
+    let installed = oboro::hooks::installed_from(&cwd);
+    let mut report = String::new();
+
+    for (event, _) in oboro::hooks::EVENTS {
+        let found: Vec<_> = installed
+            .iter()
+            .filter(|hook| hook.event == event)
+            .collect();
+        if found.is_empty() {
+            writeln!(report, "{event:<11} not installed")?;
+            continue;
+        }
+        for hook in found {
+            let matcher = hook.matcher.as_deref().unwrap_or("every tool");
+            let reachable = if oboro::hooks::program_is_reachable(&hook.command) {
+                "reachable"
+            } else {
+                "NOT REACHABLE"
+            };
+            writeln!(
+                report,
+                "{event:<11} {} ({matcher}, {reachable})",
+                hook.file.display()
+            )?;
+        }
+    }
+    Ok(report)
 }

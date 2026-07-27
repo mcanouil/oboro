@@ -169,11 +169,18 @@ It is more likely something the model invented than a mapping to recover, so the
 
 At 17 to 70 ms per call it is cheap enough to run on every matching tool, which is what the [timings](how-it-works.qmd#what-a-run-costs) were measured to decide.
 
+Run `oboro doctor` to see which halves are installed, since naming them is your job and believing they are installed is not the same as having done it.
+
 ::: {.callout-warning}
 
-## What the hook does not cover
+## What the hooks do not cover
 
-Object keys are cleaned nowhere: a tool that keys its result by file path still shows that path.
+What you type is never cleaned.
+The event that fires on a prompt, `UserPromptSubmit`, can add context to a prompt but cannot rewrite it, so there is nowhere for Oboro to stand between your keyboard and the model.
+Tool output and tool arguments are covered; your own words are not.
+See [Limitations](limitations.qmd#the-hook-does-not-cover-what-you-type).
+
+Object keys are cleaned nowhere either: a tool that keys its result by file path still shows that path.
 Filename redaction applies to files Oboro writes, not to paths inside a tool's answer.
 
 :::
@@ -233,6 +240,12 @@ formats:    txt, text, md, markdown, csv, tsv, docx, xlsx, xlsm, pdf
 ocr:        not compiled in; images cannot be read
 model:      installed
 network:    only `models pull`, and only when you run it
+PostToolUse .claude/settings.json (Read|Grep|Bash|WebFetch, reachable)
+PreToolUse  not installed
 ```
 
 Start here when something is not being detected: it shows whether the model is installed, which configuration was found, and which formats this build reads.
+
+The last two lines answer a different question: whether the [hooks](#hook) are wired up.
+Both events are reported whether or not they are found, because having only the first is the worst of the three states: the model is shown placeholders and nothing puts the values back, so they reach your files.
+`reachable` means the program the hook names can actually be run; a hook naming a binary that is not on `PATH` is configured and useless.

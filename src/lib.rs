@@ -42,6 +42,7 @@ macro_rules! note {
 pub mod config;
 pub mod convert;
 pub mod detect;
+pub mod hooks;
 #[cfg(feature = "ner")]
 pub mod models;
 pub mod pipeline;
