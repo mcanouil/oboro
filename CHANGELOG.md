@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 ### Features
 
 - feat: Clean text piped in on standard input, with `printf '...' | oboro clean` or an explicit `-`, so a caller holding text in memory no longer has to write it to a temporary file first; the cleaned text goes to standard output, `--output` is refused since there is no name to write alongside, `-` cannot be combined with file paths, and input that is not valid UTF-8 is refused rather than mangled.
+- feat: Restore an answer piped in on standard input, with `pbpaste | oboro restore` or an explicit `-`, so `restore` composes in a pipeline without a temporary file and without the `/dev/stdin` trick; piped text has no file to rewrite, so the restored text always goes to standard output.
 
 ### Bug Fixes
 

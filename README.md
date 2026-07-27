@@ -89,10 +89,13 @@ oboro review contract.txt
 oboro doctor
 ```
 
-Both `clean` and `restore` accept `--stdout`, so they compose in a pipeline:
+Both `clean` and `restore` accept `--stdout`, and both read standard input when
+text is piped in, so they compose in a pipeline and nothing has to be written to
+disk first:
 
 ```bash
 oboro clean report.txt --stdout | pbcopy
+pbpaste | oboro restore
 ```
 
 `clean` and `review` also take a directory, cleaning every supported file it
