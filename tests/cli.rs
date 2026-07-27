@@ -798,6 +798,53 @@ fn restore_rewrites_the_file_in_place_by_default() {
     assert!(restored.contains("Jean Dupont"));
 }
 
+#[test]
+fn restore_reads_standard_input_when_it_is_piped() {
+    // Both spellings: an explicit `-`, and a bare invocation in a pipeline.
+    for dash in [false, true] {
+        let workspace = Workspace::new();
+        let cleaned = workspace.clean_fixture("contract.txt");
+        let mut command = workspace.command();
+        command.arg("restore");
+        if dash {
+            command.arg("-");
+        }
+        command
+            .write_stdin(cleaned)
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("Jean Dupont"));
+
+        // Piped text has no path to rewrite in place, so nothing may be
+        // written beside the invocation. Only the store may appear, and its
+        // database carries sidecar files.
+        let store = workspace.store_paths();
+        let written: Vec<_> = std::fs::read_dir(workspace.path())
+            .expect("reading the workspace")
+            .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+            .filter(|path| {
+                !store
+                    .iter()
+                    .any(|kept| path.to_string_lossy().starts_with(&*kept.to_string_lossy()))
+            })
+            .collect();
+        assert!(written.is_empty(), "unexpected files written: {written:?}");
+    }
+}
+
+#[test]
+fn restore_refuses_binary_standard_input() {
+    let workspace = Workspace::new();
+
+    workspace
+        .command()
+        .arg("restore")
+        .write_stdin(vec![0x00, 0xff, 0xfe, b'a'])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("UTF-8"));
+}
+
 /// A document with nothing in it must not drag the user into a terminal
 /// only to show an empty list.
 #[test]

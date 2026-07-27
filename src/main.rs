@@ -49,9 +49,9 @@ enum Command {
     },
     /// Put real values back into a model's answer
     Restore {
-        /// File containing placeholders
+        /// File containing placeholders, or `-` for standard input
         #[arg(value_name = "FILE")]
-        file: PathBuf,
+        file: Option<PathBuf>,
         /// Write to standard output instead of a file
         #[arg(long)]
         stdout: bool,
@@ -169,7 +169,7 @@ fn run() -> Result<()> {
             store,
             config.as_deref(),
         ),
-        Command::Restore { file, stdout } => restore(&file, stdout, store),
+        Command::Restore { file, stdout } => restore(file.as_deref(), stdout, store),
         Command::Map { action } => match action {
             MapAction::List { reveal } => map_list(reveal, store),
             MapAction::Purge { yes } => map_purge(yes, store),
@@ -292,6 +292,21 @@ fn reads_stdin(files: &[PathBuf]) -> Result<bool> {
         bail!("no input given; pass a file or directory, or pipe text in on standard input");
     }
     Ok(true)
+}
+
+/// Whether `restore` reads standard input rather than a named file.
+///
+/// The spellings mirror `clean`: an explicit `-`, or no argument at all in a
+/// pipeline. See [`reads_stdin`], which cannot be shared here: it arbitrates
+/// between several paths, and `restore` takes one.
+fn restore_reads_stdin(file: Option<&Path>) -> Result<bool> {
+    match file {
+        Some(path) => Ok(path.as_os_str() == "-"),
+        None if std::io::stdin().is_terminal() => {
+            bail!("no input given; pass a file, or pipe text in on standard input")
+        }
+        None => Ok(true),
+    }
 }
 
 /// Reads all of standard input as text, refusing anything that is not UTF-8
@@ -446,18 +461,32 @@ fn summarise(by_tag: &std::collections::BTreeMap<String, usize>) -> String {
     format!(": {}", parts.join(", "))
 }
 
-fn restore(file: &Path, to_stdout: bool, store: &StoreArgs) -> Result<()> {
-    let text =
-        std::fs::read_to_string(file).with_context(|| format!("reading {}", file.display()))?;
+/// Puts real values back into a document, in place or on standard output.
+///
+/// Standard input has no path to rewrite, so piped text always leaves on
+/// standard output, whatever `--stdout` says.
+fn restore(file: Option<&Path>, to_stdout: bool, store: &StoreArgs) -> Result<()> {
+    let source = if restore_reads_stdin(file)? {
+        None
+    } else {
+        file
+    };
+    let text = match source {
+        Some(path) => {
+            std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?
+        }
+        None => read_stdin()?,
+    };
     let vault = store.open()?;
     let report = pipeline::restore(&text, &vault)?;
 
-    if to_stdout {
-        print_stdout(&report.text)?;
-    } else {
-        write_atomic(file, report.text.as_bytes())
-            .with_context(|| format!("writing {}", file.display()))?;
-        oboro::note!("{}: {} restored", file.display(), report.restored);
+    match source {
+        Some(path) if !to_stdout => {
+            write_atomic(path, report.text.as_bytes())
+                .with_context(|| format!("writing {}", path.display()))?;
+            oboro::note!("{}: {} restored", path.display(), report.restored);
+        }
+        _ => print_stdout(&report.text)?,
     }
 
     if report.unknown > 0 {

@@ -186,13 +186,12 @@ oboro restore answer.md
 Or keep it in a pipeline:
 
 ```bash
-pbpaste | oboro restore /dev/stdin --stdout
+pbpaste | oboro restore
 ```
 
 ## A whole round trip
 
 ```bash
 oboro clean contract.docx --stdout | pbcopy   # paste into the model
-pbpaste > answer.md                            # save what it said
-oboro restore answer.md --stdout               # read it with real values
+pbpaste | oboro restore                       # read what it said, with real values
 ```

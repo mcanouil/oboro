@@ -73,10 +73,19 @@ A document with nothing detected is skipped rather than opening an empty screen.
 Puts real values back into a model's answer.
 
 ```bash
-oboro restore <FILE> [--stdout]
+oboro restore [FILE] [--stdout]
 ```
 
 Without `--stdout` the file is rewritten in place.
+
+An answer can also be piped in, so nothing has to be written to disk first:
+
+```bash
+pbpaste | oboro restore
+```
+
+Passing `-` as the file does the same thing.
+Piped text has no file to rewrite, so it always goes to standard output, whether or not `--stdout` is given.
 
 Placeholders the vault does not know are left untouched and reported.
 They are more likely to be something the model invented than a mapping to recover, and deleting them would corrupt the answer.
