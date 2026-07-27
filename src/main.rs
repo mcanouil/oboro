@@ -10,6 +10,7 @@ use oboro::config::{self, Config, RegionSource};
 use oboro::convert;
 use oboro::detect::Detector;
 use oboro::pipeline;
+use oboro::skill::{Installed, Scope, Status};
 use oboro::vault::{self, Vault};
 
 #[derive(Parser)]
@@ -87,6 +88,11 @@ enum Command {
         #[command(subcommand)]
         action: HookAction,
     },
+    /// Tell an agent what the hooks have done to what it reads
+    Skill {
+        #[command(subcommand)]
+        action: SkillAction,
+    },
     /// Report the tool's configuration and environment
     Doctor,
 }
@@ -104,6 +110,31 @@ enum HookAction {
     /// the reply that replaces the tool's arguments, so a placeholder the model
     /// echoed back never reaches a file.
     PreToolUse,
+}
+
+#[derive(Subcommand)]
+enum SkillAction {
+    /// Write the skill into a `.claude/skills` directory
+    ///
+    /// Without `--project` or `--user` you are asked which one to write to,
+    /// since installing into the wrong scope is a silent no-op rather than an
+    /// error: the agent simply never reads it.
+    Install {
+        /// Install into `.claude/skills` here, covering this project
+        #[arg(long, conflicts_with = "user")]
+        project: bool,
+        /// Install into `~/.claude/skills`, covering every project
+        #[arg(long)]
+        user: bool,
+        /// Print the path that would be written and stop
+        #[arg(long)]
+        dry_run: bool,
+        /// Overwrite an edited skill instead of proposing the new text beside it
+        #[arg(long)]
+        force: bool,
+    },
+    /// Print the skill this build carries
+    Show,
 }
 
 #[cfg(feature = "ner")]
@@ -214,6 +245,22 @@ fn run() -> Result<()> {
         Command::Hook { action } => match action {
             HookAction::PostToolUse => hook_post_tool_use(store),
             HookAction::PreToolUse => hook_pre_tool_use(store),
+        },
+        Command::Skill { action } => match action {
+            SkillAction::Install {
+                project,
+                user,
+                dry_run,
+                force,
+            } => {
+                let scope = match (project, user) {
+                    (true, _) => Some(Scope::Project),
+                    (_, true) => Some(Scope::User),
+                    _ => None,
+                };
+                skill_install(scope, dry_run, force)
+            }
+            SkillAction::Show => print_stdout(oboro::skill::SKILL),
         },
         Command::Doctor => doctor(store),
     }
@@ -831,6 +878,85 @@ fn map_purge(confirmed: bool, store: &StoreArgs) -> Result<()> {
     Ok(())
 }
 
+/// Writes the skill an agent reads to understand the hooks' placeholders.
+fn skill_install(scope: Option<Scope>, dry_run: bool, force: bool) -> Result<()> {
+    let cwd = std::env::current_dir().context("reading the working directory")?;
+    let scope = match scope {
+        Some(scope) => scope,
+        None => ask_for_scope(&cwd)?,
+    };
+    let path = oboro::skill::path_for(scope, &cwd)?;
+
+    // What will be touched is named before it is touched, and named exactly:
+    // an edited skill is left alone and the new text goes beside it, so
+    // announcing the skill's own path there would promise the wrong file.
+    let target = match (oboro::skill::status(scope, &cwd), force) {
+        (Status::Current, false) => None,
+        (Status::Edited | Status::Unreadable, false) => Some(oboro::skill::proposed_path(&path)),
+        _ => Some(path.clone()),
+    };
+    match &target {
+        Some(target) => oboro::note!("writing {}", target.display()),
+        None => oboro::note!("{} already holds this skill", path.display()),
+    }
+    if dry_run {
+        oboro::note!("--dry-run: nothing was written");
+        return Ok(());
+    }
+
+    match oboro::skill::install(scope, &cwd, force)? {
+        Installed::Written => oboro::note!("installed the skill for {}", describe_scope(scope)),
+        Installed::AlreadyCurrent => {}
+        Installed::Proposed(proposed) => oboro::note!(
+            "{} differs from the skill this build carries, so it was left alone.\n\
+             Compare it with {}, and move that into place or re-run with --force.",
+            path.display(),
+            proposed.display()
+        ),
+    }
+    Ok(())
+}
+
+/// Asks which scope to install into, when neither flag named one.
+///
+/// Both paths are shown rather than named, because the difference that matters
+/// is which agent sessions will read the file, and a path answers that where
+/// "project" and "user" do not.
+fn ask_for_scope(cwd: &Path) -> Result<Scope> {
+    if !std::io::stdin().is_terminal() {
+        bail!(
+            "there is no terminal to ask which scope to install into; \
+             pass --project for this project or --user for every project"
+        );
+    }
+
+    let project = oboro::skill::path_for(Scope::Project, cwd)?;
+    oboro::note!("1  this project    {}", project.display());
+    match oboro::skill::path_for(Scope::User, cwd) {
+        Ok(user) => oboro::note!("2  every project   {}", user.display()),
+        Err(error) => oboro::note!("2  every project   unavailable: {error:#}"),
+    }
+    oboro::note!("Install the Oboro skill where? [1/2]");
+
+    let mut answer = String::new();
+    std::io::stdin()
+        .read_line(&mut answer)
+        .context("reading your answer")?;
+    match answer.trim() {
+        "1" => Ok(Scope::Project),
+        "2" => Ok(Scope::User),
+        other => bail!("{other:?} is neither 1 nor 2; nothing was written"),
+    }
+}
+
+/// How a scope is described in a message, in terms of what it covers.
+fn describe_scope(scope: Scope) -> &'static str {
+    match scope {
+        Scope::Project => "this project",
+        Scope::User => "every project",
+    }
+}
+
 /// Describes the phone regions in force and where they came from, since an
 /// unset `regions` follows the locale and that is worth seeing.
 fn describe_regions(config: &Config) -> String {
@@ -950,6 +1076,7 @@ fn doctor(store: &StoreArgs) -> Result<()> {
     #[cfg(not(feature = "ner"))]
     writeln!(report, "network:    never contacted")?;
     write!(report, "{}", describe_hooks()?)?;
+    write!(report, "{}", describe_skill()?)?;
     print_stdout(&report)
 }
 
@@ -988,6 +1115,35 @@ fn describe_hooks() -> Result<String> {
                 hook.file.display()
             )?;
         }
+    }
+    Ok(report)
+}
+
+/// Reports where the skill is installed, for the same reason the hooks are
+/// reported: a user cannot otherwise tell whether the agent reading their
+/// placeholders has ever been told what they are.
+///
+/// Both scopes are listed whatever their state. An `edited` copy is the one
+/// worth noticing, since that is the agent being taught something this build no
+/// longer does.
+fn describe_skill() -> Result<String> {
+    use std::fmt::Write as _;
+
+    let cwd = std::env::current_dir().context("reading the working directory")?;
+    let mut report = String::new();
+
+    for scope in [Scope::Project, Scope::User] {
+        let Some(path) = scope.path(&cwd) else {
+            writeln!(report, "skill       {} no home directory", scope.flag())?;
+            continue;
+        };
+        let state = match oboro::skill::status(scope, &cwd) {
+            Status::Missing => "not installed",
+            Status::Current => "current",
+            Status::Edited => "edited; `oboro skill install` will propose the new text",
+            Status::Unreadable => "UNREADABLE",
+        };
+        writeln!(report, "skill       {} ({state})", path.display())?;
     }
     Ok(report)
 }

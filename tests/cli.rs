@@ -1093,3 +1093,128 @@ fn separate_vaults_do_not_share_placeholders() {
         "a second vault must not resolve another vault's placeholders"
     );
 }
+
+/// The skill an agent reads is the skill the binary carries, so `show` and the
+/// installed file have to be the same text: an install that quietly wrote
+/// something else would teach the agent the wrong thing with no way to tell.
+#[test]
+fn skill_install_writes_the_text_skill_show_prints() {
+    let workspace = Workspace::new();
+    let shown = workspace
+        .command()
+        .arg("skill")
+        .arg("show")
+        .output()
+        .expect("running oboro skill show");
+    assert!(shown.status.success());
+
+    workspace
+        .command()
+        .arg("skill")
+        .arg("install")
+        .arg("--project")
+        .assert()
+        .success();
+
+    let installed = std::fs::read_to_string(workspace.path().join(".claude/skills/oboro/SKILL.md"))
+        .expect("the skill must have been written");
+    assert_eq!(installed.as_bytes(), shown.stdout.as_slice());
+}
+
+#[test]
+fn skill_install_dry_run_names_the_path_and_writes_nothing() {
+    let workspace = Workspace::new();
+
+    workspace
+        .command()
+        .arg("skill")
+        .arg("install")
+        .arg("--project")
+        .arg("--dry-run")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains(".claude/skills/oboro/SKILL.md"))
+        .stderr(predicate::str::contains("nothing was written"));
+
+    assert!(
+        !workspace.path().join(".claude").exists(),
+        "a dry run must not create the directory either"
+    );
+}
+
+/// Choosing the scope is interactive, and a script has no one to ask. Guessing
+/// would be worse than failing: the wrong scope installs a skill the agent
+/// never reads, and says nothing.
+#[test]
+fn skill_install_without_a_scope_and_without_a_terminal_names_both_flags() {
+    let workspace = Workspace::new();
+
+    workspace
+        .command()
+        .arg("skill")
+        .arg("install")
+        .write_stdin(String::new())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--project"))
+        .stderr(predicate::str::contains("--user"));
+}
+
+#[test]
+fn skill_install_for_every_project_writes_under_the_home_directory() {
+    let workspace = Workspace::new();
+    let home = workspace.path().join("home");
+    std::fs::create_dir_all(&home).expect("creating the home directory");
+
+    workspace
+        .command()
+        .env("HOME", &home)
+        .arg("skill")
+        .arg("install")
+        .arg("--user")
+        .assert()
+        .success();
+
+    assert!(
+        home.join(".claude/skills/oboro/SKILL.md").exists(),
+        "the skill must be written under the home directory"
+    );
+    assert!(
+        !workspace.path().join(".claude").exists(),
+        "and not into the project as well"
+    );
+}
+
+/// `doctor` is how a user checks rather than assumes, and the skill is one more
+/// thing they cannot see from the outside.
+#[test]
+fn doctor_reports_the_skill_once_it_is_installed() {
+    let workspace = Workspace::new();
+    let home = workspace.path().join("home");
+    std::fs::create_dir_all(&home).expect("creating the home directory");
+
+    workspace
+        .command()
+        .env("HOME", &home)
+        .arg("doctor")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("skill").and(predicate::str::contains("not installed")));
+
+    workspace
+        .command()
+        .env("HOME", &home)
+        .arg("skill")
+        .arg("install")
+        .arg("--project")
+        .assert()
+        .success();
+
+    workspace
+        .command()
+        .env("HOME", &home)
+        .arg("doctor")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("(current)"));
+}
