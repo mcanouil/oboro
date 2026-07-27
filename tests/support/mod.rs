@@ -4,8 +4,9 @@
 //! read or write the developer's real `~/.oboro`.
 //!
 //! Each test binary compiles this module separately, so helpers used by only
-//! one of them would otherwise be reported as dead code.
-#![allow(dead_code)]
+//! one of them would otherwise be reported as dead code, and re-exports it
+//! does not reach for as unused imports.
+#![allow(dead_code, unused_imports)]
 
 mod xlsx_builder;
 
