@@ -501,26 +501,32 @@ fn clean_stops_quietly_when_the_reader_closes_the_pipe() {
     );
 }
 
-/// The report is small enough to fit in a pipe buffer, so dropping the reader
-/// after the child starts would race it. The read end is closed before `oboro`
-/// runs instead, by handing it the write end of a pipe whose reader has already
-/// exited, so the very first write fails and the outcome is the same every run.
-#[test]
+/// The write end of a pipe whose reader has already exited.
+///
+/// These reports are small enough to fit in a pipe buffer, so dropping the
+/// reader after the child starts would race it. The read end is closed before
+/// `oboro` runs instead, so its very first write fails and the outcome is the
+/// same every run.
 #[cfg(unix)]
-fn doctor_stops_quietly_when_the_reader_closes_the_pipe() {
-    let workspace = Workspace::new();
-
+fn closed_pipe() -> std::process::Stdio {
     let mut reader = std::process::Command::new("true")
         .stdin(std::process::Stdio::piped())
         .spawn()
         .expect("spawning the reader");
     let pipe = reader.stdin.take().expect("the reader's standard input");
     reader.wait().expect("waiting for the reader");
+    std::process::Stdio::from(pipe)
+}
+
+#[test]
+#[cfg(unix)]
+fn doctor_stops_quietly_when_the_reader_closes_the_pipe() {
+    let workspace = Workspace::new();
 
     let output = workspace
         .std_command("fr_FR.UTF-8")
         .arg("doctor")
-        .stdout(std::process::Stdio::from(pipe))
+        .stdout(closed_pipe())
         .stderr(std::process::Stdio::piped())
         .spawn()
         .expect("spawning oboro")
@@ -531,6 +537,56 @@ fn doctor_stops_quietly_when_the_reader_closes_the_pipe() {
         output.status.success(),
         "a reader closing the pipe is a normal way to stop, not a crash: {}",
         String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// `oboro map list 2>&1 | head -n 1`: the progress and summary lines go to
+/// standard error, and a reader leaving is as normal there as on standard
+/// output.
+#[test]
+#[cfg(unix)]
+fn map_list_stops_quietly_when_the_reader_closes_the_error_pipe() {
+    let workspace = Workspace::new();
+
+    let output = workspace
+        .std_command("fr_FR.UTF-8")
+        .arg("map")
+        .arg("list")
+        .stdout(std::process::Stdio::piped())
+        .stderr(closed_pipe())
+        .spawn()
+        .expect("spawning oboro")
+        .wait_with_output()
+        .expect("waiting for oboro");
+
+    assert!(
+        output.status.success(),
+        "a reader closing the error pipe is a normal way to stop, not a crash"
+    );
+}
+
+/// A command that fails reports it on standard error, so a closed error pipe
+/// must not turn the exit code the caller reads into a panic's 101.
+#[test]
+#[cfg(unix)]
+fn an_error_keeps_its_exit_code_when_the_reader_closes_the_error_pipe() {
+    let workspace = Workspace::new();
+
+    let output = workspace
+        .std_command("fr_FR.UTF-8")
+        .arg("restore")
+        .arg("missing.txt")
+        .stdout(std::process::Stdio::piped())
+        .stderr(closed_pipe())
+        .spawn()
+        .expect("spawning oboro")
+        .wait_with_output()
+        .expect("waiting for oboro");
+
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "a failure must still exit 1, whatever standard error does"
     );
 }
 

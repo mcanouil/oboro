@@ -146,10 +146,10 @@ pub fn pull() -> Result<()> {
 
         if path.is_file() {
             if verify(&path, artefact.sha256).is_ok() {
-                eprintln!("{} already present and verified", artefact.local);
+                crate::note!("{} already present and verified", artefact.local);
                 continue;
             }
-            eprintln!(
+            crate::note!(
                 "{} is corrupt or incomplete, fetching again",
                 artefact.local
             );
@@ -160,7 +160,7 @@ pub fn pull() -> Result<()> {
             "https://huggingface.co/{REPOSITORY}/resolve/{REVISION}/{}",
             artefact.remote
         );
-        eprintln!(
+        crate::note!(
             "fetching {} ({} MB)",
             artefact.local,
             artefact.bytes / 1_048_576
@@ -176,7 +176,7 @@ pub fn pull() -> Result<()> {
         })?;
     }
 
-    eprintln!("model ready in {}", dir.display());
+    crate::note!("model ready in {}", dir.display());
     Ok(())
 }
 

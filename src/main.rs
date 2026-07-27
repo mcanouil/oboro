@@ -146,7 +146,7 @@ impl StoreArgs {
 
 fn main() {
     if let Err(error) = run() {
-        eprintln!("error: {error:#}");
+        oboro::note!("error: {error:#}");
         std::process::exit(1);
     }
 }
@@ -341,7 +341,7 @@ fn clean(
         ensure_distinct_outputs(&resolved.inputs, output)?;
     }
     if resolved.skipped > 0 {
-        eprintln!("{} unsupported file(s) skipped", resolved.skipped);
+        oboro::note!("{} unsupported file(s) skipped", resolved.skipped);
     }
 
     let (config, mut vault) = prepare(store, config_path, output)?;
@@ -403,7 +403,7 @@ fn clean(
             let report = pipeline::clean(&text, &detector, &mut vault)?;
             oboro::review::write_output(&destination, &report.text)?;
             written.record(&destination)?;
-            eprintln!(
+            oboro::note!(
                 "{} -> {} ({} replaced{})",
                 file.display(),
                 destination.display(),
@@ -457,11 +457,11 @@ fn restore(file: &Path, to_stdout: bool, store: &StoreArgs) -> Result<()> {
     } else {
         write_atomic(file, report.text.as_bytes())
             .with_context(|| format!("writing {}", file.display()))?;
-        eprintln!("{}: {} restored", file.display(), report.restored);
+        oboro::note!("{}: {} restored", file.display(), report.restored);
     }
 
     if report.unknown > 0 {
-        eprintln!(
+        oboro::note!(
             "warning: {} placeholder(s) are unknown to this vault and were left in place",
             report.unknown
         );
@@ -473,7 +473,7 @@ fn map_list(reveal: bool, store: &StoreArgs) -> Result<()> {
     let vault = store.open()?;
     let entries = vault.entries()?;
     if entries.is_empty() {
-        eprintln!("the vault is empty");
+        oboro::note!("the vault is empty");
         return Ok(());
     }
 
@@ -497,7 +497,7 @@ fn map_list(reveal: bool, store: &StoreArgs) -> Result<()> {
     }
     print_stdout(&listing)?;
     if !reveal {
-        eprintln!("values hidden; pass --reveal to print them");
+        oboro::note!("values hidden; pass --reveal to print them");
     }
     Ok(())
 }
@@ -541,7 +541,7 @@ fn map_purge(confirmed: bool, store: &StoreArgs) -> Result<()> {
     }
     let vault = store.open()?;
     let removed = vault.purge()?;
-    eprintln!("removed {removed} mapping(s)");
+    oboro::note!("removed {removed} mapping(s)");
     Ok(())
 }
 

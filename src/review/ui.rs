@@ -61,7 +61,7 @@ pub fn run(
     let detector = Detector::new(config).context("preparing the detector")?;
 
     if skipped > 0 {
-        eprintln!("{skipped} unsupported file(s) skipped");
+        crate::note!("{skipped} unsupported file(s) skipped");
     }
 
     // Detection happens before the screen opens, so a file with nothing to
@@ -71,7 +71,7 @@ pub fn run(
     for input in inputs {
         for document in Document::open_all(&input.path, input.root.as_deref(), &detector)? {
             if document.decisions.is_empty() {
-                eprintln!("{}: nothing detected, skipped", document.describe());
+                crate::note!("{}: nothing detected, skipped", document.describe());
             } else {
                 documents.push(document);
             }
@@ -140,13 +140,13 @@ pub fn run(
     })();
 
     for document in &skipped {
-        eprintln!("{document}: skipped, nothing written");
+        crate::note!("{document}: skipped, nothing written");
     }
     for path in &written {
-        eprintln!("wrote {}", path.display());
+        crate::note!("wrote {}", path.display());
     }
     if quit {
-        eprintln!("stopped; {} file(s) written", written.len());
+        crate::note!("stopped; {} file(s) written", written.len());
     }
     outcome
 }
