@@ -25,7 +25,7 @@ website:
   # The leading slash marks a project-relative path, which Quarto resolves
   # against `site-url` and measures to fill the image width and height tags.
   image: /assets/social/og-image.png
-  image-alt: "The Oboro social card: a pale moon disc struck through by a single gold bar, beside the name Oboro and the line 'An anonymisation layer between your files and a language model.', on a dark slate background."
+  image-alt: "The Oboro social card: on a dark slate field faintly printed with a page of document text, the name Oboro above a gold rule, then two substitutions, 'Marie Lefevre' and '06 12 34 56 78', each joined by a double-headed gold arrow to a gold-outlined placeholder, '[[PERSON_1]]' and '[[PHONE_1]]', above the line 'An anonymisation layer between your files and a language model.'"
   navbar:
     title: "Oboro"
     left:

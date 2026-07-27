@@ -1,16 +1,28 @@
 # Icons
 
-Everything here derives from `icon.svg`, the hand-authored master: a moon disc struck through by a redaction bar, which is both what the name means (朧, the hazy moon) and what the tool does.
+Everything here derives from `icon.svg`, the hand-authored master: a bracketed placeholder, which is what the tool makes.
 Nothing is traced, upscaled, or model-generated, so the whole set is reproducible from source.
 
-The mark is two shapes on a 32-unit grid, a circle and a rectangle, and the bar is 6 units tall, so it stays legible at 16x16.
+The mark is the same object `../theme.scss` draws around every `[[PERSON_1]]` on the site, in its `.oboro-placeholder` rule.
+The brackets are oboro's marking; the slug is the value they stand in for.
+It is deliberately not a redaction bar: the tool substitutes reversibly, `oboro restore` puts the real values back, and the document still reads as a document.
+
+Three flat shapes on a 32-unit grid, and flat on purpose.
+Each bracket is a stem with two arms, and the arms are what keep it from reading as a battery or a pause glyph, so they run the full width of the counter.
+The slug spans arm tip to arm tip with two units of air above and below: narrower and it reads as a cursor, taller and it collides with the arms at 16x16.
+
+The colours come from `../../_brand.yml`: `moon` and `slate` in the light scheme, `moonbright` and `haze` in the dark one.
 `icon.svg` carries an inline `@media (prefers-color-scheme: dark)` rule, so browsers that load it directly flip it with the theme.
-The colours come from `../../_brand.yml`: `slate` and `moon` in the light scheme, `haze` and `moonbright` in the dark one.
+The light values are presentation attributes on the shapes, so a renderer that ignores CSS still gets a valid icon.
+
+The card in `../social/` is a separate drawing rather than this file scaled up, for reasons given in its own README.
 
 ## Rasters
 
 The rasters sit on the `#1b242e` navbar plate, which is dark in both colour schemes.
-librsvg does not evaluate `prefers-color-scheme`, so `raster-dark.css` forces the dark variant; without it the slate disc would all but vanish against that plate.
+librsvg does not evaluate `prefers-color-scheme`, so `raster-dark.css` forces the dark variant; without it the slug and the darker gold would lose most of their contrast against that plate.
+Its values must stay in step with the `@media` block in `icon.svg`: they are the same pair, applied by a different route.
+If that file ever stops matching a selector, the light and dark renders come out identical, which is the failure to check for.
 
 Tools: `rsvg-convert` (librsvg) for the vector to raster step, `magick` (ImageMagick 7) for padding, flattening, and `.ico` assembly.
 Neither is a build dependency; the commands are run by hand when the master changes.
@@ -31,8 +43,8 @@ magick /tmp/icon-410.png -background '#1b242e' -gravity center -extent 512x512 -
 
 The intermediate sizes give the padded icons roughly 10% margin.
 
-The favicon is flattened to an opaque PNG before the `.ico` is written.
-Writing the `.ico` straight from the transparent render makes ImageMagick store an uncompressed 32-bit bitmap, 4,286 bytes for the same 32x32 pixels; going through the flat PNG lets it pick a palette instead, at 2,238 bytes.
+Three flat colours and no antialiasing to speak of means every output palettes on its own: the favicon is 766 bytes at 4 bits, and none of the PNG files reaches a kilobyte.
+The favicon is still flattened to an opaque PNG first, since writing the `.ico` from a transparent render makes ImageMagick store an uncompressed 32-bit bitmap whatever the colour count.
 
 | File                   | Size    | Purpose                                                    |
 | ---------------------- | ------- | ---------------------------------------------------------- |

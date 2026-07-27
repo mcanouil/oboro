@@ -1,18 +1,32 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-labelledby="oboro-icon-title">
   <title id="oboro-icon-title">Oboro</title>
   <style>
-    /* Colours come from ../../_brand.yml: slate and moon in the light scheme,
-       haze and moonbright in the dark one. The mark is what the tool does: the
-       hazy moon of its name, struck through by a redaction bar.
+    /* Colours come from ../../_brand.yml: moon and slate in the light scheme,
+       moonbright and haze in the dark one. The mark is what the tool makes: a
+       bracketed placeholder, the same object ../theme.scss draws around every
+       [[PERSON_1]] on the site. The brackets are oboro's marking; the slug is
+       the value they stand in for.
+
+       Not a redaction bar. The tool substitutes reversibly and the document
+       still reads as a document, which a struck-through mark denies.
 
        The light values are presentation attributes on the shapes below, so a
        renderer that ignores `prefers-color-scheme` still gets a valid icon;
        raster-dark.css forces the dark pair when rasterising. */
     @media (prefers-color-scheme: dark) {
-      .disc { fill: #7fa8c4; }
-      .bar { fill: #e6c558; }
+      .bracket { fill: #e6c558; }
+      .slug { fill: #7fa8c4; }
     }
   </style>
-  <circle class="disc" cx="16" cy="16" r="13" fill="#3e6076"/>
-  <rect class="bar" x="0" y="13" width="32" height="6" fill="#c9a227"/>
+  <!-- Each bracket is a stem with two arms. The arms are what make it a bracket
+       rather than a battery or a pause glyph, so they are drawn as wide as the
+       counter allows and are the first thing to check at 16x16. -->
+  <g class="bracket" fill="#c9a227">
+    <path d="M4 5h8v4H8v14h4v4H4z"/>
+    <path d="M28 5h-8v4h4v14h-4v4h8z"/>
+  </g>
+  <!-- The slug spans the counter from arm tip to arm tip, leaving two units of
+       air above and below. Narrower and it reads as a cursor; taller and it
+       collides with the arms at 16x16. -->
+  <rect class="slug" x="12" y="11" width="8" height="10" fill="#3e6076"/>
 </svg>

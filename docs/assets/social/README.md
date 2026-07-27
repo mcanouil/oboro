@@ -5,13 +5,27 @@
 It is authored here, in `og-image.typ`, so the card can be regenerated from source.
 The template is deliberately local rather than drawn from [quarto-social-cards](https://github.com/mcanouil/quarto-social-cards): that catalogue renders one card per Quarto extension, each carrying the Quarto logo, and `oboro` is a command-line tool.
 
-The mark is redrawn in the template rather than imported from `../icons/icon.svg`.
-Typst renders SVG through usvg, which does not evaluate `prefers-color-scheme`, so importing the master would place the light slate disc on this dark background.
-Both copies follow the same 32-unit grid: a disc of diameter 26 and a full-width bar of height 6, each centred.
+## The composition
+
+The card is the substitution itself, not a picture with a caption: the real value on the left, the token on the right, and an arrow between them that points both ways, because `oboro restore` puts the value back.
+Two rows on one grid, the second smaller and dimmer, which says the substitution is systematic without turning the card into a table.
+
+The chips are `../theme.scss`'s `.oboro-placeholder` at poster scale, down to the soft fill inside the outline, so the card and the site draw one object rather than two drawings of one idea.
+
+Behind it all is a page of monospace text at a few per cent opacity: the "your files" half of the tagline, and the thing the chips are cut from.
+It is kept faint enough to be texture; any louder and the eye reads it instead of the substitution, and the card starts to look like it is showing a real document rather than standing for one.
+
+Two things in the template exist because of what Typst does not have.
+The wash is faded at the edges by scrims of the background colour running to transparent, since there is no mask.
+The double-headed arrow is drawn from two shafts and two triangles rather than set as U+21C6, since none of the three committed typefaces is guaranteed to carry that glyph, and a missing one would rasterise silently.
+
+The mark from `../icons/icon.svg` is not embedded.
+Typst renders SVG through usvg, which does not evaluate `prefers-color-scheme`, so importing the master would place the light-scheme colours on this dark card.
+It would be redundant in any case: the chips are the mark, at the size where the brackets can hold the real token rather than a slug.
 
 ## Fonts
 
-Typst 0.15 cannot read woff2, and the repository ships its typefaces in that format only, so the render decompresses them to TTF first.
+Typst 0.15 cannot read woff2, and the repository ships its typefaces in that format only, so the render decompresses the three the card uses to TTF first.
 This keeps the card reproducible from committed sources rather than from whatever happens to be installed on the machine.
 
 `uvx` runs `fonttools` without installing it as a project dependency.
@@ -23,10 +37,10 @@ Run from the repository root.
 ```bash
 scratch="$(mktemp -d)"
 
-uvx --with brotli --from fonttools fonttools ttLib.woff2 decompress \
-  -o "${scratch}/spectral-600.ttf" docs/assets/fonts/spectral-600.woff2
-uvx --with brotli --from fonttools fonttools ttLib.woff2 decompress \
-  -o "${scratch}/public-sans.ttf" docs/assets/fonts/public-sans-normal.woff2
+for font in spectral-600 public-sans-normal jetbrains-mono-normal; do
+  uvx --with brotli --from fonttools fonttools ttLib.woff2 decompress \
+    -o "${scratch}/${font}.ttf" "docs/assets/fonts/${font}.woff2"
+done
 
 typst compile --font-path "${scratch}" docs/assets/social/og-image.typ \
   "${scratch}/card.png" --format png --ppi 144
