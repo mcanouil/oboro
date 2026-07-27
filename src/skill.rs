@@ -19,13 +19,6 @@ use anyhow::{Context, Result, bail};
 /// The skill text, compiled in so the binary and the file cannot disagree.
 pub const SKILL: &str = include_str!("../skills/oboro/SKILL.md");
 
-/// The suffix given to the copy written beside a skill someone has edited.
-///
-/// Overwriting an edit is not Oboro's call to make, and refusing outright would
-/// leave no way forward but `--force`. The new text goes next to the old one so
-/// the two can be compared and the edit kept if it is worth keeping.
-pub const PROPOSED_SUFFIX: &str = ".oboro-proposed";
-
 /// Where a skill is installed.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Scope {
@@ -35,31 +28,34 @@ pub enum Scope {
     User,
 }
 
+/// Every scope, in the order a report lists them: nearest first.
+pub const SCOPES: [Scope; 2] = [Scope::Project, Scope::User];
+
 impl Scope {
-    /// How the scope is spelled as a flag, for messages that suggest one.
-    #[must_use]
-    pub fn flag(self) -> &'static str {
-        match self {
-            Self::Project => "--project",
-            Self::User => "--user",
-        }
-    }
-
     /// The directory the scope is measured from: the project, or the home
-    /// directory. `None` when the user scope is asked for and there is no home.
-    #[must_use]
-    pub fn root(self, cwd: &Path) -> Option<PathBuf> {
+    /// directory.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the user scope is asked for on a machine with no
+    /// home directory.
+    pub fn root(self, cwd: &Path) -> Result<PathBuf> {
         match self {
-            Self::Project => Some(cwd.to_path_buf()),
-            Self::User => dirs::home_dir(),
+            Self::Project => Ok(cwd.to_path_buf()),
+            Self::User => dirs::home_dir().context(
+                "finding your home directory to install the skill for every project; \
+                 install it for this project alone with --project",
+            ),
         }
     }
 
-    /// The skill file itself, or `None` when the user has no home.
-    #[must_use]
-    pub fn path(self, cwd: &Path) -> Option<PathBuf> {
-        self.root(cwd)
-            .map(|root| root.join(SKILL_PATH.iter().collect::<PathBuf>()))
+    /// The skill file itself.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for the same reason [`Scope::root`] does.
+    pub fn path(self, cwd: &Path) -> Result<PathBuf> {
+        Ok(self.root(cwd)?.join(SKILL_PATH.iter().collect::<PathBuf>()))
     }
 }
 
@@ -79,79 +75,93 @@ pub enum Status {
     Unreadable,
 }
 
-/// What `install` did, so the caller can report it without guessing.
+/// What installing would do, decided once so that what is announced and what
+/// is written cannot disagree.
 #[derive(Clone, PartialEq, Eq, Debug)]
-pub enum Installed {
-    /// The file was written.
-    Written,
-    /// The file already held this text, so nothing was written.
-    AlreadyCurrent,
-    /// An edited file was left alone and this proposal written beside it.
-    Proposed(PathBuf),
+pub enum Plan {
+    /// Write the skill at this path.
+    Write(PathBuf),
+    /// Leave this file alone, since it already holds the skill.
+    Keep(PathBuf),
+    /// Leave the first path alone, since it was edited, and write the second
+    /// beside it so the two can be compared.
+    ///
+    /// Overwriting an edit is not Oboro's call to make, and refusing outright
+    /// would leave no way forward but `--force`.
+    Propose {
+        installed: PathBuf,
+        proposed: PathBuf,
+    },
 }
 
-/// What is installed at `scope`.
-#[must_use]
-pub fn status(scope: Scope, cwd: &Path) -> Status {
-    let Some(path) = scope.path(cwd) else {
-        return Status::Missing;
-    };
-    if !path.exists() {
-        return Status::Missing;
+impl Plan {
+    /// The file this plan writes, if it writes one.
+    #[must_use]
+    pub fn target(&self) -> Option<&Path> {
+        match self {
+            Self::Write(path) => Some(path),
+            Self::Keep(_) => None,
+            Self::Propose { proposed, .. } => Some(proposed),
+        }
     }
-    match std::fs::read_to_string(&path) {
+}
+
+/// What is installed at `path`.
+///
+/// `read_to_string` answers both questions at once: a missing file is reported
+/// as missing rather than stat'd for separately, which also keeps this from
+/// disagreeing with itself when the path changes underneath.
+#[must_use]
+pub fn status(path: &Path) -> Status {
+    match std::fs::read_to_string(path) {
         Ok(text) if text == SKILL => Status::Current,
         Ok(_) => Status::Edited,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Status::Missing,
         Err(_) => Status::Unreadable,
     }
 }
 
-/// Writes the skill to `scope`, leaving an edited file alone unless `force`.
+/// What installing into `scope` would do, without doing any of it.
 ///
 /// # Errors
 ///
-/// Returns an error when the scope has no path, when any part of the target is
-/// a symbolic link, or when the directory or file cannot be written.
-pub fn install(scope: Scope, cwd: &Path, force: bool) -> Result<Installed> {
-    let root = scope.root(cwd).context(NO_HOME)?;
+/// Returns an error when the scope has no path, or when any part of the target
+/// is a symbolic link.
+pub fn plan(scope: Scope, cwd: &Path, force: bool) -> Result<Plan> {
+    let root = scope.root(cwd)?;
+    refuse_symlinks(&root, &SKILL_PATH)?;
     let path = root.join(SKILL_PATH.iter().collect::<PathBuf>());
-    refuse_symlinks(&root)?;
 
-    if !force {
-        match status(scope, cwd) {
-            Status::Current => return Ok(Installed::AlreadyCurrent),
-            Status::Edited | Status::Unreadable => {
-                let proposed = proposed_path(&path);
-                write(&proposed)?;
-                return Ok(Installed::Proposed(proposed));
-            }
-            Status::Missing => {}
-        }
+    if force {
+        return Ok(Plan::Write(path));
     }
-
-    write(&path)?;
-    Ok(Installed::Written)
+    Ok(match status(&path) {
+        Status::Missing => Plan::Write(path),
+        Status::Current => Plan::Keep(path),
+        Status::Edited | Status::Unreadable => Plan::Propose {
+            proposed: proposed_path(&path),
+            installed: path,
+        },
+    })
 }
 
-/// The path a scope resolves to, or an error naming why it does not.
+/// Carries out a [`Plan`], returning it so the caller can report what happened.
 ///
 /// # Errors
 ///
-/// Returns an error when the user scope is asked for and no home directory can
-/// be found.
-pub fn path_for(scope: Scope, cwd: &Path) -> Result<PathBuf> {
-    scope.path(cwd).context(NO_HOME)
+/// Returns an error when the directory or the file cannot be written.
+pub fn install(plan: Plan) -> Result<Plan> {
+    if let Some(target) = plan.target() {
+        write(target)?;
+    }
+    Ok(plan)
 }
-
-/// Said when the user scope is asked for on a machine with no home directory.
-const NO_HOME: &str = "finding your home directory to install the skill for every project; \
-                       install it for this project alone with --project";
 
 /// Where the proposal goes when an edited file is left in place.
 #[must_use]
 pub fn proposed_path(path: &Path) -> PathBuf {
     let mut name = path.as_os_str().to_owned();
-    name.push(PROPOSED_SUFFIX);
+    name.push(".oboro-proposed");
     PathBuf::from(name)
 }
 
@@ -175,10 +185,13 @@ fn write(path: &Path) -> Result<()> {
 /// Only what is below the root is checked. Above it are the user's home and the
 /// directories leading to their project, which they arranged themselves and
 /// which Oboro is passing through rather than creating.
-fn refuse_symlinks(root: &Path) -> Result<()> {
+///
+/// The components are a parameter rather than the skill's own path, since the
+/// rule belongs to writing inside `.claude` rather than to this one file.
+fn refuse_symlinks(root: &Path, components: &[&str]) -> Result<()> {
     let mut current = root.to_path_buf();
 
-    for component in SKILL_PATH {
+    for component in components {
         current.push(component);
         let Ok(metadata) = std::fs::symlink_metadata(&current) else {
             // Nothing there yet, so nothing below it exists to be a link.
@@ -225,40 +238,49 @@ mod tests {
         }
     }
 
+    /// Installs into a temporary project, the way the command does.
+    fn install_into(cwd: &Path, force: bool) -> Result<Plan> {
+        install(plan(Scope::Project, cwd, force)?)
+    }
+
     #[test]
-    fn a_missing_skill_is_missing_and_installing_writes_it() {
+    fn a_missing_skill_is_written() {
         let home = tempfile::tempdir().expect("temporary directory");
-        assert_eq!(status(Scope::Project, home.path()), Status::Missing);
+        let path = Scope::Project.path(home.path()).expect("a path");
+        assert_eq!(status(&path), Status::Missing);
 
-        let outcome = install(Scope::Project, home.path(), false).expect("installing");
+        let done = install_into(home.path(), false).expect("installing");
 
-        assert_eq!(outcome, Installed::Written);
-        assert_eq!(status(Scope::Project, home.path()), Status::Current);
-        let written = std::fs::read_to_string(Scope::Project.path(home.path()).expect("a path"))
-            .expect("reading it back");
-        assert_eq!(written, SKILL);
+        assert_eq!(done, Plan::Write(path.clone()));
+        assert_eq!(status(&path), Status::Current);
     }
 
     #[test]
     fn installing_twice_writes_nothing_the_second_time() {
         let home = tempfile::tempdir().expect("temporary directory");
-        install(Scope::Project, home.path(), false).expect("installing");
+        install_into(home.path(), false).expect("installing");
 
-        let outcome = install(Scope::Project, home.path(), false).expect("installing again");
+        let done = install_into(home.path(), false).expect("installing again");
 
-        assert_eq!(outcome, Installed::AlreadyCurrent);
+        let path = Scope::Project.path(home.path()).expect("a path");
+        assert_eq!(done, Plan::Keep(path));
+        assert_eq!(done.target(), None, "keeping writes nothing");
     }
 
     #[test]
     fn an_edited_skill_is_left_alone_and_a_proposal_written_beside_it() {
         let home = tempfile::tempdir().expect("temporary directory");
-        let path = Scope::Project.path(home.path()).expect("a path");
-        std::fs::create_dir_all(path.parent().expect("a parent")).expect("creating the directory");
-        std::fs::write(&path, "mine, edited").expect("writing an edited skill");
+        let path = plant_an_edited_skill(home.path());
 
-        let outcome = install(Scope::Project, home.path(), false).expect("installing");
+        let done = install_into(home.path(), false).expect("installing");
 
-        assert_eq!(outcome, Installed::Proposed(proposed_path(&path)));
+        assert_eq!(
+            done,
+            Plan::Propose {
+                installed: path.clone(),
+                proposed: proposed_path(&path),
+            }
+        );
         assert_eq!(
             std::fs::read_to_string(&path).expect("reading the edited skill"),
             "mine, edited",
@@ -273,56 +295,53 @@ mod tests {
     #[test]
     fn forcing_overwrites_an_edited_skill_and_proposes_nothing() {
         let home = tempfile::tempdir().expect("temporary directory");
-        let path = Scope::Project.path(home.path()).expect("a path");
-        std::fs::create_dir_all(path.parent().expect("a parent")).expect("creating the directory");
-        std::fs::write(&path, "mine, edited").expect("writing an edited skill");
+        let path = plant_an_edited_skill(home.path());
 
-        let outcome = install(Scope::Project, home.path(), true).expect("installing");
+        let done = install_into(home.path(), true).expect("installing");
 
-        assert_eq!(outcome, Installed::Written);
-        assert_eq!(status(Scope::Project, home.path()), Status::Current);
+        assert_eq!(done, Plan::Write(path.clone()));
+        assert_eq!(status(&path), Status::Current);
         assert!(
             !proposed_path(&path).exists(),
             "forcing writes the skill itself, not a proposal"
         );
     }
 
-    #[cfg(unix)]
-    #[test]
-    fn a_symlinked_skill_is_refused_rather_than_written_through() {
-        let home = tempfile::tempdir().expect("temporary directory");
-        let elsewhere = home.path().join("elsewhere.md");
-        std::fs::write(&elsewhere, "not the skill").expect("writing the link target");
-        let path = Scope::Project.path(home.path()).expect("a path");
+    fn plant_an_edited_skill(cwd: &Path) -> PathBuf {
+        let path = Scope::Project.path(cwd).expect("a path");
         std::fs::create_dir_all(path.parent().expect("a parent")).expect("creating the directory");
-        std::os::unix::fs::symlink(&elsewhere, &path).expect("linking");
-
-        let error = install(Scope::Project, home.path(), true).expect_err("must refuse");
-
-        assert!(format!("{error:#}").contains("symbolic link"));
-        assert_eq!(
-            std::fs::read_to_string(&elsewhere).expect("reading the link target"),
-            "not the skill",
-            "the link target is untouched"
-        );
+        std::fs::write(&path, "mine, edited").expect("writing an edited skill");
+        path
     }
 
+    /// Every component below the root is checked the same way, so the file and
+    /// a directory above it are one case rather than two.
     #[cfg(unix)]
     #[test]
-    fn a_symlinked_directory_above_the_skill_is_refused_too() {
-        let home = tempfile::tempdir().expect("temporary directory");
-        let elsewhere = home.path().join("elsewhere");
-        std::fs::create_dir_all(&elsewhere).expect("creating the link target");
-        std::fs::create_dir_all(home.path().join(".claude")).expect("creating .claude");
-        std::os::unix::fs::symlink(&elsewhere, home.path().join(".claude/skills"))
-            .expect("linking");
+    fn nothing_is_written_through_a_symbolic_link() {
+        for link_at in [".claude/skills", ".claude/skills/oboro/SKILL.md"] {
+            let home = tempfile::tempdir().expect("temporary directory");
+            let elsewhere = home.path().join("elsewhere");
+            std::fs::create_dir_all(&elsewhere).expect("creating the link target");
+            let link = home.path().join(link_at);
+            std::fs::create_dir_all(link.parent().expect("a parent"))
+                .expect("creating the directory");
+            std::os::unix::fs::symlink(&elsewhere, &link).expect("linking");
 
-        let error = install(Scope::Project, home.path(), true).expect_err("must refuse");
+            let error = install_into(home.path(), true).expect_err("must refuse");
 
-        assert!(format!("{error:#}").contains("symbolic link"));
-        assert!(
-            !elsewhere.join("oboro/SKILL.md").exists(),
-            "nothing is written through the link"
-        );
+            let reported = format!("{error:#}");
+            assert!(
+                reported.contains("symbolic link") && reported.contains(link_at),
+                "a link at {link_at} must be named: {reported}"
+            );
+            assert_eq!(
+                std::fs::read_dir(&elsewhere)
+                    .expect("reading the link target")
+                    .count(),
+                0,
+                "nothing is written through the link at {link_at}"
+            );
+        }
     }
 }

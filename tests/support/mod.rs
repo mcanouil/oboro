@@ -26,12 +26,17 @@ pub fn fixture(name: &str) -> PathBuf {
 
 pub struct Workspace {
     dir: TempDir,
+    /// A directory of its own rather than one inside `dir`: the tests that
+    /// assert nothing was written beside an invocation read `dir` and would
+    /// count a home directory as a leaked file.
+    home: TempDir,
 }
 
 impl Workspace {
     pub fn new() -> Self {
         Self {
             dir: tempfile::tempdir().expect("temporary directory"),
+            home: tempfile::tempdir().expect("temporary home"),
         }
     }
 
@@ -46,6 +51,13 @@ impl Workspace {
             self.dir.path().join("vault.db"),
             self.dir.path().join("key"),
         ]
+    }
+
+    /// The home directory this workspace's invocations see, so a command that
+    /// writes for every user writes here rather than into the developer's own
+    /// `~`.
+    pub fn home(&self) -> &Path {
+        self.home.path()
     }
 
     /// A `oboro` invocation bound to this workspace's vault.
@@ -73,6 +85,7 @@ impl Workspace {
         let mut command = std::process::Command::new(assert_cmd::cargo::cargo_bin("oboro"));
         command
             .current_dir(self.dir.path())
+            .env("HOME", self.home())
             .env("LC_ALL", locale)
             .env("LANG", locale)
             .arg("--vault")

@@ -1163,12 +1163,9 @@ fn skill_install_without_a_scope_and_without_a_terminal_names_both_flags() {
 #[test]
 fn skill_install_for_every_project_writes_under_the_home_directory() {
     let workspace = Workspace::new();
-    let home = workspace.path().join("home");
-    std::fs::create_dir_all(&home).expect("creating the home directory");
 
     workspace
         .command()
-        .env("HOME", &home)
         .arg("skill")
         .arg("install")
         .arg("--user")
@@ -1176,7 +1173,10 @@ fn skill_install_for_every_project_writes_under_the_home_directory() {
         .success();
 
     assert!(
-        home.join(".claude/skills/oboro/SKILL.md").exists(),
+        workspace
+            .home()
+            .join(".claude/skills/oboro/SKILL.md")
+            .exists(),
         "the skill must be written under the home directory"
     );
     assert!(
@@ -1190,12 +1190,9 @@ fn skill_install_for_every_project_writes_under_the_home_directory() {
 #[test]
 fn doctor_reports_the_skill_once_it_is_installed() {
     let workspace = Workspace::new();
-    let home = workspace.path().join("home");
-    std::fs::create_dir_all(&home).expect("creating the home directory");
 
     workspace
         .command()
-        .env("HOME", &home)
         .arg("doctor")
         .assert()
         .success()
@@ -1203,7 +1200,6 @@ fn doctor_reports_the_skill_once_it_is_installed() {
 
     workspace
         .command()
-        .env("HOME", &home)
         .arg("skill")
         .arg("install")
         .arg("--project")
@@ -1212,7 +1208,6 @@ fn doctor_reports_the_skill_once_it_is_installed() {
 
     workspace
         .command()
-        .env("HOME", &home)
         .arg("doctor")
         .assert()
         .success()

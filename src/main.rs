@@ -10,7 +10,7 @@ use oboro::config::{self, Config, RegionSource};
 use oboro::convert;
 use oboro::detect::Detector;
 use oboro::pipeline;
-use oboro::skill::{Installed, Scope, Status};
+use oboro::skill::{Plan, Scope, Status};
 use oboro::vault::{self, Vault};
 
 #[derive(Parser)]
@@ -885,34 +885,31 @@ fn skill_install(scope: Option<Scope>, dry_run: bool, force: bool) -> Result<()>
         Some(scope) => scope,
         None => ask_for_scope(&cwd)?,
     };
-    let path = oboro::skill::path_for(scope, &cwd)?;
-
-    // What will be touched is named before it is touched, and named exactly:
-    // an edited skill is left alone and the new text goes beside it, so
-    // announcing the skill's own path there would promise the wrong file.
-    let target = match (oboro::skill::status(scope, &cwd), force) {
-        (Status::Current, false) => None,
-        (Status::Edited | Status::Unreadable, false) => Some(oboro::skill::proposed_path(&path)),
-        _ => Some(path.clone()),
-    };
-    match &target {
-        Some(target) => oboro::note!("writing {}", target.display()),
-        None => oboro::note!("{} already holds this skill", path.display()),
+    // The plan is made once and then carried out, so what is named here is by
+    // construction what happens, whether or not `--dry-run` stops it.
+    let plan = oboro::skill::plan(scope, &cwd, force)?;
+    match &plan {
+        Plan::Write(path) => oboro::note!("writing {}", path.display()),
+        Plan::Keep(path) => oboro::note!("{} already holds this skill", path.display()),
+        Plan::Propose {
+            installed,
+            proposed,
+        } => oboro::note!(
+            "{} differs from the skill this build carries, so it is left alone.\n\
+             Writing {} instead: compare the two, or re-run with --force.",
+            installed.display(),
+            proposed.display()
+        ),
     }
     if dry_run {
         oboro::note!("--dry-run: nothing was written");
         return Ok(());
     }
 
-    match oboro::skill::install(scope, &cwd, force)? {
-        Installed::Written => oboro::note!("installed the skill for {}", describe_scope(scope)),
-        Installed::AlreadyCurrent => {}
-        Installed::Proposed(proposed) => oboro::note!(
-            "{} differs from the skill this build carries, so it was left alone.\n\
-             Compare it with {}, and move that into place or re-run with --force.",
-            path.display(),
-            proposed.display()
-        ),
+    let installing = matches!(plan, Plan::Write(_));
+    oboro::skill::install(plan)?;
+    if installing {
+        oboro::note!("installed the skill for {}", describe_scope(scope));
     }
     Ok(())
 }
@@ -930,11 +927,12 @@ fn ask_for_scope(cwd: &Path) -> Result<Scope> {
         );
     }
 
-    let project = oboro::skill::path_for(Scope::Project, cwd)?;
-    oboro::note!("1  this project    {}", project.display());
-    match oboro::skill::path_for(Scope::User, cwd) {
-        Ok(user) => oboro::note!("2  every project   {}", user.display()),
-        Err(error) => oboro::note!("2  every project   unavailable: {error:#}"),
+    for (choice, scope) in oboro::skill::SCOPES.iter().enumerate() {
+        let covers = describe_scope(*scope);
+        match scope.path(cwd) {
+            Ok(path) => oboro::note!("{}  {covers:<14} {}", choice + 1, path.display()),
+            Err(error) => oboro::note!("{}  {covers:<14} unavailable: {error:#}", choice + 1),
+        }
     }
     oboro::note!("Install the Oboro skill where? [1/2]");
 
@@ -1075,8 +1073,11 @@ fn doctor(store: &StoreArgs) -> Result<()> {
     // socket, and saying otherwise would overstate what it does.
     #[cfg(not(feature = "ner"))]
     writeln!(report, "network:    never contacted")?;
-    write!(report, "{}", describe_hooks()?)?;
-    write!(report, "{}", describe_skill()?)?;
+    // One working directory for both, so the two halves of the agent report
+    // cannot describe different places.
+    let cwd = std::env::current_dir().context("reading the working directory")?;
+    write!(report, "{}", describe_hooks(&cwd)?)?;
+    write!(report, "{}", describe_skill(&cwd)?)?;
     print_stdout(&report)
 }
 
@@ -1086,11 +1087,10 @@ fn doctor(store: &StoreArgs) -> Result<()> {
 /// Both halves are reported even when neither is installed: a user who has only
 /// the cleaning half is in the worse position of the two, with the model writing
 /// placeholders into their files, and silence would not tell them.
-fn describe_hooks() -> Result<String> {
+fn describe_hooks(cwd: &Path) -> Result<String> {
     use std::fmt::Write as _;
 
-    let cwd = std::env::current_dir().context("reading the working directory")?;
-    let installed = oboro::hooks::installed_from(&cwd);
+    let installed = oboro::hooks::installed_from(cwd);
     let mut report = String::new();
 
     for (event, _) in oboro::hooks::EVENTS {
@@ -1126,18 +1126,21 @@ fn describe_hooks() -> Result<String> {
 /// Both scopes are listed whatever their state. An `edited` copy is the one
 /// worth noticing, since that is the agent being taught something this build no
 /// longer does.
-fn describe_skill() -> Result<String> {
+fn describe_skill(cwd: &Path) -> Result<String> {
     use std::fmt::Write as _;
 
-    let cwd = std::env::current_dir().context("reading the working directory")?;
     let mut report = String::new();
 
-    for scope in [Scope::Project, Scope::User] {
-        let Some(path) = scope.path(&cwd) else {
-            writeln!(report, "skill       {} no home directory", scope.flag())?;
+    for scope in oboro::skill::SCOPES {
+        let Ok(path) = scope.path(cwd) else {
+            writeln!(
+                report,
+                "skill       {}: no home directory",
+                describe_scope(scope)
+            )?;
             continue;
         };
-        let state = match oboro::skill::status(scope, &cwd) {
+        let state = match oboro::skill::status(&path) {
             Status::Missing => "not installed",
             Status::Current => "current",
             Status::Edited => "edited; `oboro skill install` will propose the new text",
