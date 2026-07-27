@@ -177,10 +177,7 @@ fn run() -> Result<()> {
         #[cfg(feature = "ner")]
         Command::Models { action } => match action {
             ModelAction::Pull => oboro::models::pull(),
-            ModelAction::Status => {
-                print!("{}", oboro::models::status()?);
-                Ok(())
-            }
+            ModelAction::Status => print_stdout(&oboro::models::status()?),
         },
         Command::Review {
             files,
@@ -565,9 +562,12 @@ fn describe_regions(config: &Config) -> String {
 }
 
 fn doctor(store: &StoreArgs) -> Result<()> {
+    use std::fmt::Write as _;
+
     let (db, key) = store.paths()?;
-    println!("vault:      {}", db.display());
-    println!("key:        {}", key.display());
+    let mut report = String::new();
+    writeln!(report, "vault:      {}", db.display())?;
+    writeln!(report, "key:        {}", key.display())?;
 
     #[cfg(unix)]
     for path in [&db, &key] {
@@ -579,52 +579,56 @@ fn doctor(store: &StoreArgs) -> Result<()> {
             } else {
                 "too permissive"
             };
-            println!("  {} mode {mode:04o} ({state})", path.display());
+            writeln!(report, "  {} mode {mode:04o} ({state})", path.display())?;
         }
     }
 
     let config_path = Config::discover_from_cwd();
     match &config_path {
-        Some(path) => println!("config:     {}", path.display()),
-        None => println!("config:     none found (using defaults)"),
+        Some(path) => writeln!(report, "config:     {}", path.display())?,
+        None => writeln!(report, "config:     none found (using defaults)")?,
     }
 
     let config = Config::load(config_path.as_deref())?;
-    println!("regions:    {}", describe_regions(&config));
-    println!("allowlist:  {} entr(y/ies)", config.allowlist.len());
-    println!("denylist:   {} term(s)", config.denylist.len());
-    println!("patterns:   {} custom", config.patterns.len());
-    println!(
+    writeln!(report, "regions:    {}", describe_regions(&config))?;
+    writeln!(report, "allowlist:  {} entr(y/ies)", config.allowlist.len())?;
+    writeln!(report, "denylist:   {} term(s)", config.denylist.len())?;
+    writeln!(report, "patterns:   {} custom", config.patterns.len())?;
+    writeln!(
+        report,
         "filenames:  {}",
         if config.redact_filenames {
             "redacted"
         } else {
             "kept"
         }
-    );
-    println!("formats:    {}", convert::supported().join(", "));
-    println!(
+    )?;
+    writeln!(report, "formats:    {}", convert::supported().join(", "))?;
+    writeln!(
+        report,
         "ocr:        {}",
         if convert::ocr_available() {
             "available"
         } else {
             "not compiled in; images cannot be read"
         }
-    );
+    )?;
     if convert::ocr_available() {
-        println!(
+        writeln!(
+            report,
             "ocr langs:  {}",
             if config.ocr_languages.is_empty() {
                 "not set; whatever Tesseract has installed".to_owned()
             } else {
                 config.ocr_languages.join(", ")
             }
-        );
+        )?;
     }
     #[cfg(feature = "ner")]
     {
         let installed = oboro::models::is_installed().unwrap_or(false);
-        println!(
+        writeln!(
+            report,
             "model:      {}",
             if installed {
                 "installed".to_owned()
@@ -634,15 +638,21 @@ fn doctor(store: &StoreArgs) -> Result<()> {
                     oboro::models::download_bytes() / 1_048_576
                 )
             }
-        );
+        )?;
     }
     #[cfg(not(feature = "ner"))]
-    println!("model:      not compiled in; names are matched from the denylist only");
+    writeln!(
+        report,
+        "model:      not compiled in; names are matched from the denylist only"
+    )?;
     #[cfg(feature = "ner")]
-    println!("network:    only `models pull`, and only when you run it");
+    writeln!(
+        report,
+        "network:    only `models pull`, and only when you run it"
+    )?;
     // Without that command there is nothing in this build that can open a
     // socket, and saying otherwise would overstate what it does.
     #[cfg(not(feature = "ner"))]
-    println!("network:    never contacted");
-    Ok(())
+    writeln!(report, "network:    never contacted")?;
+    print_stdout(&report)
 }

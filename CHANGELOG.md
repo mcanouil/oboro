@@ -11,6 +11,7 @@ All notable changes to this project will be documented in this file.
 ### Bug Fixes
 
 - fix: Stop quietly when a reader closes the output pipe, so `oboro clean note.txt --stdout | head -n 1` ends instead of reporting a crash; `map list` already did this, and now `clean` and `restore` do too.
+- fix: Stop quietly in `oboro doctor | head -n 1` and `oboro models status | head -n 1` as well, the last two commands whose output was still written with macros that crash on a closed pipe.
 
 ## 0.4.0 (2026-07-23)
 
