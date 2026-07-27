@@ -4,8 +4,9 @@
 //! with more holes than it needs. This is where the user puts some of them
 //! back.
 //!
-//! The decision logic lives here and the terminal drawing lives in [`ui`], so
-//! what the tool does can be tested without a terminal.
+//! The decision logic lives here and the terminal drawing lives in the
+//! private `ui` module, so what the tool does can be tested without a
+//! terminal.
 
 mod ui;
 
