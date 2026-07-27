@@ -191,6 +191,42 @@ Paste a document rather than retyping what is in it, and the hook covers it.
 
 :::
 
+## Tell the agent what it is reading
+
+With the hooks on, the agent reads `[[PHONE_1]]` without being told what that is.
+Left to guess, it reads a placeholder as a bug in your file, as a template to fill in, or as a redaction to work around.
+
+Install the skill that explains them:
+
+```bash
+oboro skill install
+```
+
+It asks whether to install for this project or for every project, and names the file it will write before writing it:
+
+```text
+1  this project    /home/you/project/.claude/skills/oboro/SKILL.md
+2  every project   /home/you/.claude/skills/oboro/SKILL.md
+Install the Oboro skill where? [1/2]
+```
+
+Pass `--project` or `--user` to skip the question.
+`oboro skill show` prints the text without writing anything.
+
+Then check it took, as with the hooks:
+
+```bash
+oboro doctor
+```
+
+```text
+skill       /home/you/project/.claude/skills/oboro/SKILL.md (current)
+skill       /home/you/.claude/skills/oboro/SKILL.md (not installed)
+```
+
+The skill is carried in the binary, so it describes the version of the hooks you have rather than the ones documented when you installed.
+Edit the installed copy and a later install leaves your edit alone, writing what it would have installed to `SKILL.md.oboro-proposed` beside it.
+
 ## Clean a document
 
 Everything below is the manual loop.
