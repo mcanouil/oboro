@@ -915,6 +915,44 @@ fn doctor_reports_the_vault_and_confirms_no_network_use() {
         .stdout(predicate::str::contains("model:"));
 }
 
+/// The hooks are named in the user's own settings rather than written there by
+/// Oboro, so `doctor` is the only way to tell protection apart from the belief
+/// in it.
+#[test]
+fn doctor_reports_whether_the_hooks_are_installed() {
+    let workspace = Workspace::new();
+
+    // Nothing installed: both halves must be named, since a user with neither
+    // has to be told so.
+    workspace
+        .command()
+        .arg("doctor")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("PostToolUse not installed"))
+        .stdout(predicate::str::contains("PreToolUse  not installed"));
+
+    let settings = workspace.path().join(".claude");
+    std::fs::create_dir_all(&settings).expect("creating the settings directory");
+    std::fs::write(
+        settings.join("settings.json"),
+        r#"{"hooks":{"PostToolUse":[{"matcher":"Read|Grep",
+             "hooks":[{"type":"command","command":"oboro hook post-tool-use"}]}]}}"#,
+    )
+    .expect("writing the settings");
+
+    // Half installed, which is the state worth reporting: the model is shown
+    // placeholders and nothing puts them back.
+    workspace
+        .command()
+        .arg("doctor")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("settings.json"))
+        .stdout(predicate::str::contains("Read|Grep"))
+        .stdout(predicate::str::contains("PreToolUse  not installed"));
+}
+
 #[test]
 fn doctor_says_where_the_phone_regions_came_from() {
     let workspace = Workspace::new();
