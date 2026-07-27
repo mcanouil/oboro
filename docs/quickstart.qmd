@@ -139,7 +139,16 @@ Do this first if you use Claude Code.
 The agent reads files itself, so cleaning a copy by hand and pasting it in protects nothing: it already read the original.
 
 Two hooks put Oboro in that path.
-Name them in `.claude/settings.json`, in the project you want covered or in `~/.claude/settings.json` for all of them:
+Name them both:
+
+```bash
+oboro hook install
+```
+
+It asks whether to cover this project or every project, and shows what it will write before writing it.
+Pass `--project` or `--user` to skip the question, and `--dry-run` to see the settings without writing them.
+
+This is what it adds, next to whatever your settings already hold:
 
 ```json
 {
@@ -160,6 +169,9 @@ Name them in `.claude/settings.json`, in the project you want covered or in `~/.
 }
 ```
 
+Nothing already in the file is moved, reordered or removed, and a hook Oboro finds already named is left exactly as you wrote it.
+Write it by hand instead if you would rather: the command is a convenience, not the only way in.
+
 Then check it took:
 
 ```bash
@@ -167,15 +179,17 @@ oboro doctor
 ```
 
 ```text
-PostToolUse .claude/settings.json (Read|Grep|Bash|WebFetch, reachable)
-PreToolUse  .claude/settings.json (Write|Edit, reachable)
+PostToolUse .claude/settings.local.json (Read|Grep|Bash|WebFetch, reachable)
+PreToolUse  .claude/settings.local.json (Write|Edit, reachable)
 ```
 
 Ask the agent to read a file holding a phone number, and it will tell you about `[[PHONE_1]]`.
 Ask it to write that back, and the real number lands in the file.
 
-Install both halves.
+Install both halves, which is what `oboro hook install` does.
 The first without the second means the model is shown placeholders and nothing puts them back, so `[[PHONE_1]]` ends up in your source.
+
+`reachable` is worth reading: a hook naming a binary that is not on `PATH` is configured and useless, and it fails closed on every matching tool call.
 
 At 17 to 70 ms a call this runs on every matching tool without being felt; the [timings](how-it-works.qmd#what-a-run-costs) are recorded.
 The [reference](reference.qmd#hook) covers what each half does, and what neither covers.

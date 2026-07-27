@@ -117,11 +117,12 @@ The `--yes` flag is required precisely because there is no way back.
 Answers an agent's hook, so what the model reads has been cleaned before it reads it.
 
 ```bash
+oboro hook install
 oboro hook post-tool-use
 oboro hook pre-tool-use
 ```
 
-Neither is run by hand.
+Neither `post-tool-use` nor `pre-tool-use` is run by hand.
 They are named in your settings, and the agent calls them around every matching tool:
 
 ```json
@@ -147,6 +148,36 @@ The two are inverses, and both are needed.
 `post-tool-use` is what the model is shown; `pre-tool-use` is what reaches your files.
 Without the second one the model writes `[[EMAIL_1]]` into your source.
 
+### `install`
+
+Names both hooks in your settings, so you do not have to paste the block above.
+
+`--project` writes `.claude/settings.local.json` here; `--user` writes `~/.claude/settings.json`.
+Without either it asks which, and with no terminal to ask it fails and names both flags rather than choosing for you.
+`--dry-run` prints the settings as they would end up and writes nothing.
+
+The project scope is deliberately the local file rather than the shared `.claude/settings.json`.
+Turning on a hook that intercepts every `Read`, `Grep`, `Bash` and `WebFetch` is a decision for whoever is sitting at the machine, and a committed hook naming a binary a colleague has not installed fails closed on every tool call they make.
+`doctor` reads both files, so either is reported.
+
+::: {.callout-note}
+
+## What it will not do to your settings
+
+The merge only ever adds.
+Every other key keeps its place and its order, other tools' hooks on the same event are left where they are, and Oboro's group is appended rather than substituted.
+
+A hook already naming `oboro hook <subcommand>` is left exactly as written, matcher included.
+If you narrowed `PostToolUse` to `Read` alone, that is a decision rather than drift, so installing again reports it and changes nothing.
+Each event is decided on its own, so a hook you customised does not stop the other half being installed.
+
+Settings that are not JSON, a file whose root is not an object, and a `hooks` entry of the wrong shape are all refused, naming the file.
+`doctor` ignores a settings file it cannot parse because it is only reporting; an installer that did the same would overwrite it.
+
+Nothing is written through a symbolic link, and the file is replaced by renaming a complete one into place rather than written over where it stands.
+
+:::
+
 ### `post-tool-use`
 
 Reads a `PostToolUse` payload on standard input and writes the reply that replaces the tool's result.
@@ -169,7 +200,7 @@ It is more likely something the model invented than a mapping to recover, so the
 
 At 17 to 70 ms per call it is cheap enough to run on every matching tool, which is what the [timings](how-it-works.qmd#what-a-run-costs) were measured to decide.
 
-Run `oboro doctor` to see which halves are installed, since naming them is your job and believing they are installed is not the same as having done it.
+Run `oboro doctor` to see which halves are installed, since believing they are installed is not the same as having done it.
 
 ::: {.callout-warning}
 
@@ -282,8 +313,8 @@ formats:    txt, text, md, markdown, csv, tsv, docx, xlsx, xlsm, pdf
 ocr:        not compiled in; images cannot be read
 model:      installed
 network:    only `models pull`, and only when you run it
-PostToolUse .claude/settings.json (Read|Grep|Bash|WebFetch, reachable)
-PreToolUse  not installed
+PostToolUse .claude/settings.local.json (Read|Grep|Bash|WebFetch, reachable)
+PreToolUse  not installed; run `oboro hook install`
 skill       /Users/you/work/.claude/skills/oboro/SKILL.md (current)
 skill       /Users/you/.claude/skills/oboro/SKILL.md (not installed)
 ```
