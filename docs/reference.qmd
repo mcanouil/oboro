@@ -10,7 +10,7 @@ Every command accepts `--vault` and `--key` to point at a store other than the d
 Anonymises files into sanitised copies.
 
 ```bash
-oboro clean <PATH>... [OPTIONS]
+oboro clean [PATH]... [OPTIONS]
 ```
 
 | Option | Effect |
@@ -27,6 +27,16 @@ Output is named after the input, with a suffix following its format: `report.doc
 A workbook becomes one TSV per sheet, so `book.xlsx` with a sheet `Clients` becomes `book.Clients.clean.tsv`.
 With `--output`, a directory's subfolders are mirrored under it.
 `--stdout` works for a workbook only when it holds a single non-empty sheet, since one stream cannot carry several files.
+
+Text can also be piped in, so nothing has to be written to disk first:
+
+```bash
+printf 'Call 06 12 34 56 78.\n' | oboro clean
+```
+
+Passing `-` as the path does the same thing, and cannot be combined with file paths.
+Piped text is tidied the same way a text or markdown file is, cleaned to standard output, and never written to a file, so `--output` is refused.
+Nothing is named, so filename redaction does not apply.
 
 ## `review`
 

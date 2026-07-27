@@ -38,6 +38,15 @@ impl Workspace {
         self.dir.path()
     }
 
+    /// The store this workspace's invocations use, so a test asserting that
+    /// nothing was written can tell the store apart from a leaked file.
+    pub fn store_paths(&self) -> [PathBuf; 2] {
+        [
+            self.dir.path().join("vault.db"),
+            self.dir.path().join("key"),
+        ]
+    }
+
     /// A `oboro` invocation bound to this workspace's vault.
     ///
     /// Run from inside the workspace so configuration discovery cannot walk up
@@ -53,7 +62,14 @@ impl Workspace {
 
     /// A `oboro` invocation running in `locale`, for the tests that care.
     pub fn command_in_locale(&self, locale: &str) -> Command {
-        let mut command = Command::cargo_bin("oboro").expect("the oboro binary must build");
+        Command::from_std(self.std_command(locale))
+    }
+
+    /// The same invocation as [`Workspace::command_in_locale`], as a plain
+    /// [`std::process::Command`], for the tests that have to spawn the process
+    /// themselves and drive its pipes.
+    pub fn std_command(&self, locale: &str) -> std::process::Command {
+        let mut command = std::process::Command::new(assert_cmd::cargo::cargo_bin("oboro"));
         command
             .current_dir(self.dir.path())
             .env("LC_ALL", locale)

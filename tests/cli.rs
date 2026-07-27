@@ -432,6 +432,122 @@ fn clean_refuses_stdout_for_several_files() {
 }
 
 #[test]
+fn clean_reads_standard_input_when_it_is_piped() {
+    // Both spellings: an explicit `-`, and a bare invocation in a pipeline.
+    for dash in [false, true] {
+        let workspace = Workspace::new();
+        let mut command = workspace.command();
+        command.arg("clean");
+        if dash {
+            command.arg("-");
+        }
+        command
+            .write_stdin("Call 06 12 34 56 78.\n")
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("06 12 34 56 78").not())
+            .stdout(predicate::str::contains("[[PHONE_1]]"));
+
+        // Nothing may be written beside the invocation: a piped document has
+        // no path, and a temporary file would be the leak this tool exists to
+        // stop. The store itself is the only thing that may appear, and its
+        // database carries sidecar files.
+        let store = workspace.store_paths();
+        let written: Vec<_> = std::fs::read_dir(workspace.path())
+            .expect("reading the workspace")
+            .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+            .filter(|path| {
+                !store
+                    .iter()
+                    .any(|kept| path.to_string_lossy().starts_with(&*kept.to_string_lossy()))
+            })
+            .collect();
+        assert!(written.is_empty(), "unexpected files written: {written:?}");
+    }
+}
+
+#[test]
+#[cfg(unix)]
+fn clean_stops_quietly_when_the_reader_closes_the_pipe() {
+    use std::io::Write as _;
+
+    let workspace = Workspace::new();
+    // Larger than a pipe buffer, so the write cannot land in the kernel's
+    // buffer and succeed after the reader is already gone.
+    let text = "Call 06 12 34 56 78.\n".repeat(10_000);
+
+    let mut child = workspace
+        .std_command("fr_FR.UTF-8")
+        .arg("clean")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawning oboro");
+
+    let mut stdin = child.stdin.take().expect("the child's standard input");
+    let writer = std::thread::spawn(move || {
+        let _ = stdin.write_all(text.as_bytes());
+    });
+    // The reader leaves before reading anything, as `| head -n 1` does.
+    drop(child.stdout.take());
+
+    let output = child.wait_with_output().expect("waiting for oboro");
+    writer.join().expect("the writing thread");
+    assert!(
+        output.status.success(),
+        "a reader closing the pipe is a normal way to stop, not a crash: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn clean_refuses_a_dash_alongside_a_file() {
+    let workspace = Workspace::new();
+    let input = workspace.path().join("note.txt");
+    std::fs::write(&input, "Nothing here.\n").expect("writing the input");
+
+    workspace
+        .command()
+        .arg("clean")
+        .arg("-")
+        .arg(&input)
+        .write_stdin("Call 06 12 34 56 78.\n")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("standard input"));
+}
+
+#[test]
+fn clean_refuses_an_output_directory_for_standard_input() {
+    let workspace = Workspace::new();
+
+    workspace
+        .command()
+        .arg("clean")
+        .arg("-")
+        .arg("--output")
+        .arg(workspace.path().join("out"))
+        .write_stdin("Call 06 12 34 56 78.\n")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--output"));
+}
+
+#[test]
+fn clean_refuses_binary_standard_input() {
+    let workspace = Workspace::new();
+
+    workspace
+        .command()
+        .arg("clean")
+        .write_stdin(vec![0x00, 0xff, 0xfe, b'a'])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("UTF-8"));
+}
+
+#[test]
 fn clean_reports_an_unsupported_format() {
     let workspace = Workspace::new();
     let input = workspace.path().join("report.docx");
