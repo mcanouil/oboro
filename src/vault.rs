@@ -99,8 +99,26 @@ impl Vault {
         let tag = kind.tag();
         let index = self.index_hash(&tag, &kind.normalise(value));
 
-        if let Some(seq) = self
+        // IMMEDIATE, and the lookup inside it: the write lock is taken before
+        // the mapping is read, so a second process cannot look up the same
+        // value, miss, and allocate the sequence number this one is about to
+        // take. A DEFERRED transaction, which is what `transaction()` gives,
+        // takes its lock at the INSERT instead, and a lookup outside the
+        // transaction reads a snapshot that the winner of the race has already
+        // moved on from: concurrent runs then failed with SQLITE_BUSY_SNAPSHOT,
+        // or with a UNIQUE (index_hash) violation once both had missed.
+        //
+        // Waiting for the lock is already handled: `rusqlite` sets a five
+        // second busy timeout when it opens a connection, and SQLite retries
+        // BEGIN IMMEDIATE for that long. It never retries a snapshot conflict,
+        // which is why the lock has to be taken up front rather than waited
+        // for later.
+        let transaction = self
             .connection
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .context("starting a vault transaction")?;
+
+        if let Some(seq) = transaction
             .prepare_cached("SELECT seq FROM mappings WHERE index_hash = ?1")
             .context("preparing the mapping lookup")?
             .query_row(params![index.as_slice()], |row| row.get::<_, i64>(0))
@@ -110,10 +128,6 @@ impl Vault {
             return Ok(placeholder(&tag, seq));
         }
 
-        let transaction = self
-            .connection
-            .transaction()
-            .context("starting a vault transaction")?;
         let seq: i64 = transaction
             .query_row(
                 "SELECT COALESCE(MAX(seq), 0) + 1 FROM mappings WHERE tag = ?1",
