@@ -37,6 +37,7 @@ RUN mkdir -p src \
   && rm -rf src
 
 COPY src ./src
+COPY skills ./skills
 # The stale fingerprint from the stub above would otherwise be reused.
 RUN touch src/main.rs src/lib.rs \
   && cargo build --release --locked --features ner \
