@@ -832,6 +832,41 @@ fn restore_reads_standard_input_when_it_is_piped() {
     }
 }
 
+/// The shape an agent hook takes: text in memory cleaned on the way out and
+/// restored on the way back, with nothing written to disk at either end.
+#[test]
+fn text_round_trips_through_both_pipes() {
+    let workspace = Workspace::new();
+    let original = "Call Jean Dupont on 06 12 34 56 78.\n";
+
+    let cleaned = workspace.clean_piped(original);
+    assert!(
+        !cleaned.contains("06 12 34 56 78"),
+        "the value survived the piped clean:\n{cleaned}"
+    );
+    assert_eq!(
+        workspace.restore_piped(&cleaned),
+        original,
+        "a piped round trip must reproduce the original text"
+    );
+}
+
+/// Nothing to clean is not a failure: a hook wrapping a tool that produced no
+/// output must not turn that into an error the user has to read.
+#[test]
+fn empty_standard_input_produces_empty_output() {
+    for command in ["clean", "restore"] {
+        let workspace = Workspace::new();
+        workspace
+            .command()
+            .arg(command)
+            .write_stdin("")
+            .assert()
+            .success()
+            .stdout(predicate::str::is_empty());
+    }
+}
+
 #[test]
 fn restore_refuses_binary_standard_input() {
     let workspace = Workspace::new();

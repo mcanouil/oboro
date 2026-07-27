@@ -101,6 +101,46 @@ impl Workspace {
         String::from_utf8(output.stdout).expect("output must be UTF-8")
     }
 
+    /// Cleans `text` piped in on standard input, with the fixture
+    /// configuration, returning the output.
+    ///
+    /// The counterpart to [`Workspace::clean_fixture`] for the path an agent
+    /// hook takes, where the document is in memory and never touches disk.
+    pub fn clean_piped(&self, text: &str) -> String {
+        let output = self
+            .command()
+            .arg("clean")
+            .arg("-")
+            .arg("--config")
+            .arg(fixture("oboro.toml"))
+            .write_stdin(text.to_owned())
+            .output()
+            .expect("running oboro clean");
+        assert!(
+            output.status.success(),
+            "oboro clean failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).expect("output must be UTF-8")
+    }
+
+    /// Restores placeholders in `text` piped in on standard input.
+    pub fn restore_piped(&self, text: &str) -> String {
+        let output = self
+            .command()
+            .arg("restore")
+            .arg("-")
+            .write_stdin(text.to_owned())
+            .output()
+            .expect("running oboro restore");
+        assert!(
+            output.status.success(),
+            "oboro restore failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).expect("output must be UTF-8")
+    }
+
     /// Restores placeholders in `text` using this workspace's vault.
     pub fn restore(&self, text: &str) -> String {
         let path = self.dir.path().join("answer.md");
