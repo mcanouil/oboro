@@ -473,6 +473,47 @@ fn clean_reads_standard_input_when_asked_with_a_dash() {
 }
 
 #[test]
+#[cfg(unix)]
+fn clean_stops_quietly_when_the_reader_closes_the_pipe() {
+    use std::io::Write as _;
+
+    let workspace = Workspace::new();
+    // Larger than a pipe buffer, so the write cannot land in the kernel's
+    // buffer and succeed after the reader is already gone.
+    let text = "Call 06 12 34 56 78.\n".repeat(10_000);
+
+    let mut child = std::process::Command::new(assert_cmd::cargo::cargo_bin("oboro"))
+        .current_dir(workspace.path())
+        .env("LC_ALL", "fr_FR.UTF-8")
+        .env("LANG", "fr_FR.UTF-8")
+        .arg("--vault")
+        .arg(workspace.path().join("vault.db"))
+        .arg("--key")
+        .arg(workspace.path().join("key"))
+        .arg("clean")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawning oboro");
+
+    let mut stdin = child.stdin.take().expect("the child's standard input");
+    let writer = std::thread::spawn(move || {
+        let _ = stdin.write_all(text.as_bytes());
+    });
+    // The reader leaves before reading anything, as `| head -n 1` does.
+    drop(child.stdout.take());
+
+    let output = child.wait_with_output().expect("waiting for oboro");
+    writer.join().expect("the writing thread");
+    assert!(
+        output.status.success(),
+        "a reader closing the pipe is a normal way to stop, not a crash: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn clean_refuses_a_dash_alongside_a_file() {
     let workspace = Workspace::new();
     let input = workspace.path().join("note.txt");

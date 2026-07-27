@@ -255,6 +255,21 @@ fn ensure_distinct_outputs(inputs: &[oboro::walk::Input], output: Option<&Path>)
     Ok(())
 }
 
+/// Writes cleaned or restored text to standard output.
+///
+/// A reader such as `head` closing the pipe early is a normal way to stop, so
+/// it ends the write instead of failing, matching [`map_list`]. Without this,
+/// the default `print!` panics on a closed pipe and the tool reports a crash
+/// for something the user asked for.
+fn print_stdout(text: &str) -> Result<()> {
+    let stdout = std::io::stdout();
+    let mut out = stdout.lock();
+    match out.write_all(text.as_bytes()).and_then(|()| out.flush()) {
+        Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
+        result => result.context("writing to standard output"),
+    }
+}
+
 /// Where `clean` takes its input from.
 enum Source<'a> {
     Paths(&'a [PathBuf]),
@@ -318,8 +333,7 @@ fn clean_stdin(output: Option<&Path>, store: &StoreArgs, config_path: Option<&Pa
     let (config, mut vault) = prepare(store, config_path, None)?;
     let detector = Detector::new(&config)?;
     let report = pipeline::clean(&convert::tidy(&text), &detector, &mut vault)?;
-    print!("{}", report.text);
-    Ok(())
+    print_stdout(&report.text)
 }
 
 fn clean(
@@ -370,7 +384,7 @@ fn clean(
                 );
             }
             let report = pipeline::clean(&parts[0].1, &detector, &mut vault)?;
-            print!("{}", report.text);
+            print_stdout(&report.text)?;
             continue;
         }
 
@@ -454,7 +468,7 @@ fn restore(file: &Path, to_stdout: bool, store: &StoreArgs) -> Result<()> {
     let report = pipeline::restore(&text, &vault)?;
 
     if to_stdout {
-        print!("{}", report.text);
+        print_stdout(&report.text)?;
     } else {
         write_atomic(file, report.text.as_bytes())
             .with_context(|| format!("writing {}", file.display()))?;
