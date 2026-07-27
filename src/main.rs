@@ -926,7 +926,7 @@ fn hook_install(scope: Option<Scope>, dry_run: bool) -> Result<()> {
     }
     if dry_run {
         oboro::note!("--dry-run: nothing was written. The settings would read:");
-        return print_stdout(&plan.rendered());
+        return print_stdout(&plan.rendered()?);
     }
 
     let written = plan.writes();

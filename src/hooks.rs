@@ -157,14 +157,21 @@ fn names_oboro_hook(command: &str, subcommand: &str) -> bool {
 ///
 /// Returns an error for the same reason [`Scope::root`] does.
 pub fn settings_path(scope: Scope, cwd: &Path) -> Result<PathBuf> {
-    Ok(scope.root(cwd)?.join(settings_components(scope).concat()))
+    Ok(scope
+        .root(cwd)?
+        .join(settings_components(scope).iter().collect::<PathBuf>()))
 }
 
-/// The components of a scope's settings path, for the symlink check.
+/// The components of a scope's settings path, one directory each.
+///
+/// Split rather than spelled as one `.claude/settings.json`, because
+/// [`refuse_symlinks`] walks these and a component carrying a trailing slash
+/// makes the check follow the link it is meant to catch: `symlink_metadata`
+/// resolves `.claude/` where it reports on `.claude`.
 fn settings_components(scope: Scope) -> [&'static str; 2] {
     match scope {
-        Scope::Project => [".claude/", "settings.local.json"],
-        Scope::User => [".claude/", "settings.json"],
+        Scope::Project => [".claude", "settings.local.json"],
+        Scope::User => [".claude", "settings.json"],
     }
 }
 
@@ -200,13 +207,17 @@ impl Plan {
     }
 
     /// The settings as they would end up, formatted the way they would land.
-    #[must_use]
-    pub fn rendered(&self) -> String {
-        format!(
-            "{}\n",
-            serde_json::to_string_pretty(&self.settings)
-                .unwrap_or_else(|_| "<unrenderable>".to_owned())
-        )
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the merged settings cannot be rendered, which a
+    /// value parsed from JSON should never fail to be. Reporting it beats any
+    /// placeholder string, since this is what gets written: a stand-in for the
+    /// settings would be a settings file that is not JSON.
+    pub fn rendered(&self) -> Result<String> {
+        let text = serde_json::to_string_pretty(&self.settings)
+            .with_context(|| format!("rendering the settings for {}", self.file.display()))?;
+        Ok(format!("{text}\n"))
     }
 }
 
@@ -247,7 +258,7 @@ pub fn install(plan: Plan) -> Result<Plan> {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("creating {}", parent.display()))?;
     }
-    write_atomic(&plan.file, plan.rendered().as_bytes())?;
+    write_atomic(&plan.file, plan.rendered()?.as_bytes())?;
     Ok(plan)
 }
 
@@ -619,7 +630,31 @@ mod tests {
         let plan = plan(Scope::Project, project.path()).expect("planning");
 
         assert!(!plan.writes());
-        assert!(plan.rendered().contains("oboro hook pre-tool-use"));
+        assert!(
+            plan.rendered()
+                .expect("rendering")
+                .contains("oboro hook pre-tool-use")
+        );
+    }
+
+    /// The link can be the directory as easily as the file, and a component
+    /// carrying a trailing slash would make the check follow it instead of
+    /// seeing it.
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_claude_directory_is_refused() {
+        let project = tempfile::tempdir().expect("temporary directory");
+        let elsewhere = project.path().join("elsewhere");
+        std::fs::create_dir_all(&elsewhere).expect("creating the link target");
+        std::os::unix::fs::symlink(&elsewhere, project.path().join(".claude")).expect("linking");
+
+        let error = install_into(project.path()).expect_err("must refuse");
+
+        assert!(format!("{error:#}").contains("symbolic link"), "{error:#}");
+        assert!(
+            !elsewhere.join("settings.local.json").exists(),
+            "nothing is written through the link"
+        );
     }
 
     #[test]
