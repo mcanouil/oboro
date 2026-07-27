@@ -98,6 +98,12 @@ enum HookAction {
     /// Reads a Claude Code `PostToolUse` payload on standard input and writes
     /// the reply that replaces the tool's result.
     PostToolUse,
+    /// Put real values back into a tool's arguments before it runs
+    ///
+    /// Reads a Claude Code `PreToolUse` payload on standard input and writes
+    /// the reply that replaces the tool's arguments, so a placeholder the model
+    /// echoed back never reaches a file.
+    PreToolUse,
 }
 
 #[cfg(feature = "ner")]
@@ -207,6 +213,7 @@ fn run() -> Result<()> {
         ),
         Command::Hook { action } => match action {
             HookAction::PostToolUse => hook_post_tool_use(store),
+            HookAction::PreToolUse => hook_pre_tool_use(store),
         },
         Command::Doctor => doctor(store),
     }
@@ -455,6 +462,128 @@ fn withheld_reply(reason: &str) -> String {
                    The reason was reported to the user, who has to resolve it before \
                    this tool can be used again.",
         "systemMessage": format!("oboro withheld a tool result: {reason}"),
+    });
+    format!("{reply}\n")
+}
+
+/// Answers a `PreToolUse` hook, putting real values back into the tool's
+/// arguments so a placeholder the model echoed back never reaches a file.
+///
+/// Never returns an error, for the same reason as [`hook_post_tool_use`]: the
+/// reply is only honoured on exit 0. Failing closed means the opposite decision
+/// here, though. The tool has not run yet, and letting it run would write
+/// `[[PHONE_1]]` into the user's file, so the call is denied instead.
+fn hook_pre_tool_use(store: &StoreArgs) -> Result<()> {
+    match restore_tool_input(store) {
+        Ok(Some(restored)) => print_stdout(&restored),
+        // Nothing held a placeholder, so the arguments the tool already has are
+        // the right ones and an empty reply leaves them alone.
+        Ok(None) => Ok(()),
+        Err(error) => print_stdout(&refused_reply(&format!("{error:#}"))),
+    }
+}
+
+/// Restores every placeholder in the payload's `tool_input`, returning the
+/// reply to write, or `None` when nothing changed.
+fn restore_tool_input(store: &StoreArgs) -> Result<Option<String>> {
+    let payload: serde_json::Value =
+        serde_json::from_str(&read_stdin()?).context("parsing the hook payload as JSON")?;
+    let Some(input) = payload.get("tool_input") else {
+        return Ok(None);
+    };
+
+    let vault = store.open()?;
+    // Every string in the arguments, not a list of fields per tool: `Write`
+    // carries the text in `content`, `Edit` in `old_string` and `new_string`,
+    // and a tool added later will carry it somewhere else again. Restoring
+    // rewrites only the `[[TAG_n]]` shape, so a string holding no placeholder
+    // comes back unchanged whatever field it sits in.
+    let mut restored = input.clone();
+    let report = restore_json_strings(&mut restored, &vault)?;
+
+    if report.restored == 0 && report.unknown == 0 {
+        return Ok(None);
+    }
+    Ok(Some(restored_reply(&restored, report.unknown)))
+}
+
+/// What restoring a set of arguments came to.
+struct RestoreTally {
+    restored: usize,
+    unknown: usize,
+}
+
+/// Restores every string in `value`, in place, leaving object keys untouched.
+fn restore_json_strings(value: &mut serde_json::Value, vault: &Vault) -> Result<RestoreTally> {
+    let mut tally = RestoreTally {
+        restored: 0,
+        unknown: 0,
+    };
+    match value {
+        serde_json::Value::String(text) => {
+            let report = pipeline::restore(text, vault)?;
+            *text = report.text;
+            tally.restored += report.restored;
+            tally.unknown += report.unknown;
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                let nested = restore_json_strings(item, vault)?;
+                tally.restored += nested.restored;
+                tally.unknown += nested.unknown;
+            }
+        }
+        serde_json::Value::Object(fields) => {
+            for field in fields.values_mut() {
+                let nested = restore_json_strings(field, vault)?;
+                tally.restored += nested.restored;
+                tally.unknown += nested.unknown;
+            }
+        }
+        serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::Number(_) => {}
+    }
+    Ok(tally)
+}
+
+/// The reply that replaces a tool's arguments with restored ones.
+///
+/// A placeholder this vault never issued is left as it is and reported, which is
+/// what `restore` does with a document. It is more likely something the model
+/// invented than a mapping to recover, and refusing the write over it would
+/// block work on a guess.
+fn restored_reply(input: &serde_json::Value, unknown: usize) -> String {
+    let mut reply = serde_json::json!({
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "allow",
+            "updatedInput": input,
+        }
+    });
+    if unknown > 0 {
+        reply["systemMessage"] = serde_json::json!(format!(
+            "oboro left {unknown} unknown placeholder(s) in place: this vault never issued them"
+        ));
+    }
+    format!("{reply}\n")
+}
+
+/// The reply that refuses a tool call because its arguments could not be
+/// restored.
+///
+/// The model is told to stop rather than told why in detail, as with a withheld
+/// result: the reason carries the context Oboro attaches to its errors, which is
+/// often a path.
+fn refused_reply(reason: &str) -> String {
+    let reply = serde_json::json!({
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason":
+                "oboro could not put the real values back into these arguments, so the \
+                 call was refused rather than write placeholders into a file. The reason \
+                 was reported to the user, who has to resolve it first.",
+        },
+        "systemMessage": format!("oboro refused a tool call: {reason}"),
     });
     format!("{reply}\n")
 }
