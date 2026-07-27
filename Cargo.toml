@@ -58,3 +58,9 @@ unsafe_code = "forbid"
 all = { level = "deny", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 module_name_repetitions = "allow"
+# The printing macros panic when the reader is gone, which turned
+# `oboro doctor | head -n 1` into a crash report. Output goes through
+# `print_stdout` and `note!`, which stop quietly instead, and these two keep
+# the macros from coming back.
+print_stdout = "deny"
+print_stderr = "deny"
