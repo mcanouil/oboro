@@ -81,3 +81,46 @@ That is what lets a model see that two documents mention the same client without
 
 Formatting differences are folded away first, so `06 12 34 56 78` and `0612345678` are one value and one placeholder.
 What comes back on restore is the spelling that was stored first.
+
+Two runs can share one vault.
+Allocation takes the database's write lock before it reads, so invocations that meet the same new value at the same moment agree on its placeholder instead of one of them failing.
+
+## What a run costs
+
+Oboro is a one-shot command, so everything it needs is set up again on every invocation.
+Whether that is affordable decides whether it can sit behind something that calls it often, such as a tool wrapper, rather than only being run by hand.
+
+Measured on an Apple M1 Pro under macOS 26.5.2, release build, against a warm vault.
+Median wall clock over thirty runs for the default build, and over ten for the recognition model, which is slow enough that thirty runs measure nothing more:
+
+| Invocation | Default build | With `--features ner` |
+| --- | --- | --- |
+| `oboro --version`, process start alone | 8 ms | 9 ms |
+| `oboro map list`, process start and opening the vault | 10 ms | 11 ms |
+| `clean` a line with nothing phone-like in it | 17 ms | 1,138 ms |
+| `clean` a two-line file holding a phone number, an email, an IP and a reference | 70 ms | 1,236 ms |
+| `clean` a 770 byte contract holding seventeen distinct values | 71 ms | 1,473 ms |
+| `clean` ten copies of that two-line file in one run | 72 ms | 1,751 ms |
+
+On the default build the cost is fixed per process, not per document.
+Ten files cost what one costs, and the contract costs what two lines cost, so matching text is not where the time goes.
+
+Opening the vault is 2 ms of it, including generating the key and the schema on a first run: a cold vault and a warm one are within a millisecond of each other.
+
+The 53 ms between a line with no phone number and a line with one is `libphonenumber`'s metadata, built once when the first candidate is checked.
+Text with no run of digits that could be a phone number never pays it.
+
+The recognition model changes the shape of the cost as well as its size.
+Roughly 1.1 s goes on constructing a GLiNER from the 348 MB export, once per process, which is why a line with nothing in it still takes over a second.
+On top of that each document is passed through the model: ten small files cost about 500 ms more than one, so around 55 ms each.
+
+::: {.callout-note}
+
+## No daemon
+
+The default build is fast enough to be called per tool call, so nothing needs to stay resident and there is no background process to manage, secure, or shut down.
+
+The recognition model is not, at a second a call.
+Use it for runs over files, where a second amortises across the batch, and keep the rule-based default for anything called repeatedly.
+
+:::
