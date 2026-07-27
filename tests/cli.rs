@@ -501,6 +501,39 @@ fn clean_stops_quietly_when_the_reader_closes_the_pipe() {
     );
 }
 
+/// The report is small enough to fit in a pipe buffer, so dropping the reader
+/// after the child starts would race it. The read end is closed before `oboro`
+/// runs instead, by handing it the write end of a pipe whose reader has already
+/// exited, so the very first write fails and the outcome is the same every run.
+#[test]
+#[cfg(unix)]
+fn doctor_stops_quietly_when_the_reader_closes_the_pipe() {
+    let workspace = Workspace::new();
+
+    let mut reader = std::process::Command::new("true")
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawning the reader");
+    let pipe = reader.stdin.take().expect("the reader's standard input");
+    reader.wait().expect("waiting for the reader");
+
+    let output = workspace
+        .std_command("fr_FR.UTF-8")
+        .arg("doctor")
+        .stdout(std::process::Stdio::from(pipe))
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawning oboro")
+        .wait_with_output()
+        .expect("waiting for oboro");
+
+    assert!(
+        output.status.success(),
+        "a reader closing the pipe is a normal way to stop, not a crash: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 #[test]
 fn clean_refuses_a_dash_alongside_a_file() {
     let workspace = Workspace::new();
@@ -768,6 +801,25 @@ fn doctor_says_where_the_phone_regions_came_from() {
         .assert()
         .success()
         .stdout(predicate::str::contains("GB (from oboro.toml)"));
+}
+
+/// A configuration that will not load is exactly when `doctor` is run, so the
+/// lines naming the vault, the key and the offending file are still written
+/// before the error is reported.
+#[test]
+fn doctor_names_the_files_it_read_before_refusing_a_bad_configuration() {
+    let workspace = Workspace::new();
+    std::fs::write(workspace.path().join("oboro.toml"), "regions = [\"ZZ\"]\n")
+        .expect("writing the configuration");
+
+    workspace
+        .command()
+        .arg("doctor")
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("vault:"))
+        .stdout(predicate::str::contains("oboro.toml"))
+        .stderr(predicate::str::contains("not a two-letter region code"));
 }
 
 /// No locale, no configuration, and structured identifiers are still found:
