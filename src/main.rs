@@ -892,9 +892,7 @@ fn skill_install(scope: Option<Scope>, dry_run: bool, force: bool) -> Result<()>
         return Ok(());
     }
 
-    let installing = matches!(plan, Plan::Write(_));
-    oboro::skill::install(plan)?;
-    if installing {
+    if matches!(oboro::skill::install(plan)?, Plan::Write(_)) {
         oboro::note!("installed the skill for {}", describe_scope(scope));
     }
     Ok(())

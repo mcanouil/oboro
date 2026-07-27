@@ -1,13 +1,18 @@
-//! What the two installers writing into a `.claude` directory share.
+//! What the two installers writing into a `.claude` directory share, and the
+//! one write Oboro uses everywhere.
 //!
-//! Oboro puts two things there: the skill an agent reads, and the hooks that
-//! make the skill worth reading. They answer the same questions before writing
-//! anything, and this module answers them once: which directory a scope means,
-//! whether the path leading to it has been pointed somewhere else, and how to
-//! replace a file without leaving half of one behind.
+//! Oboro puts two things in a `.claude` directory: the skill an agent reads,
+//! and the hooks that make the skill worth reading. They answer the same two
+//! questions before writing anything, and this module answers them once: which
+//! directory a scope means, and whether the path leading to it has been pointed
+//! somewhere else.
 //!
-//! It owns no behaviour of its own. Writing still happens only because a flag
-//! asked for it, and each installer decides what its own file should hold.
+//! [`write_atomic`] is here for the third question they share, how to replace a
+//! file without leaving half of one behind, but it belongs to no directory in
+//! particular: `restore` writes a user's document with it too.
+//!
+//! Nothing here decides to write. That still happens only because a flag asked
+//! for it, and each installer decides what its own file should hold.
 
 use std::path::{Path, PathBuf};
 
@@ -79,7 +84,8 @@ pub fn refuse_symlinks(root: &Path, components: &[&str]) -> Result<()> {
     Ok(())
 }
 
-/// Writes a file by writing a sibling temporary and renaming it into place.
+/// Writes a file by writing a sibling temporary and renaming it into place,
+/// creating the directories above it.
 ///
 /// `restore` overwrites the user's only copy of the answer, and a hook install
 /// overwrites the settings their agent runs on, so a crash partway through a
@@ -89,8 +95,8 @@ pub fn refuse_symlinks(root: &Path, components: &[&str]) -> Result<()> {
 ///
 /// # Errors
 ///
-/// Returns an error if the path has no usable file name, or if the temporary
-/// cannot be written or renamed.
+/// Returns an error if the path has no usable file name, if a directory above
+/// it cannot be created, or if the temporary cannot be written or renamed.
 pub fn write_atomic(path: &Path, contents: &[u8]) -> Result<()> {
     use std::io::Write as _;
 
@@ -98,6 +104,8 @@ pub fn write_atomic(path: &Path, contents: &[u8]) -> Result<()> {
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
+    std::fs::create_dir_all(directory)
+        .with_context(|| format!("creating {}", directory.display()))?;
     let file_name = path
         .file_name()
         .and_then(|name| name.to_str())
