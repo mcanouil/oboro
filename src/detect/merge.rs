@@ -8,10 +8,10 @@ use super::Span;
 /// larger entity: the phone recogniser sees a digit run inside an IBAN, and
 /// keeping the IBAN redacts strictly more.
 ///
-/// Equal-length spans are ranked by [`EntityKind::specificity`], so the kind
-/// that verified more structure names the value, and only then by detector
-/// confidence. Sorting is total down to the start offset, so the result never
-/// depends on the order detectors ran in.
+/// Equal-length spans are ranked by [`super::EntityKind::specificity`], so
+/// the kind that verified more structure names the value, and only then by
+/// detector confidence. Sorting is total down to the start offset, so the
+/// result never depends on the order detectors ran in.
 #[must_use]
 pub fn resolve(mut spans: Vec<Span>) -> Vec<Span> {
     spans.sort_by(|a, b| {

@@ -29,6 +29,7 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
+  RUSTDOCFLAGS: -D warnings
 
 jobs:
   test:
@@ -56,6 +57,9 @@ jobs:
 
       - name: Lint
         run: cargo clippy --all-targets -- -D warnings
+
+      - name: Check the documentation
+        run: cargo doc --no-deps
 
       - name: Test
         run: cargo test --all-targets

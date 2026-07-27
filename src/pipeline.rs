@@ -54,9 +54,9 @@ pub fn clean(text: &str, detector: &Detector, vault: &mut Vault) -> Result<Clean
 /// Sharing `vault` with [`clean`] means a value appearing in both the name and
 /// the document body maps to the same placeholder. Unlike [`clean`], this is
 /// deliberately one-way: [`restore`] only rewrites content, and the bare
-/// `PERSON_1` form no longer matches [`struct@PLACEHOLDER`], so a filename is
-/// never reverse-substituted. The real value stays recoverable from the vault
-/// by its tag and sequence.
+/// `PERSON_1` form no longer matches the `[[TAG_n]]` shape it looks for, so a
+/// filename is never reverse-substituted. The real value stays recoverable
+/// from the vault by its tag and sequence.
 ///
 /// # Errors
 ///
