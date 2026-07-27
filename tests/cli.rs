@@ -540,6 +540,21 @@ fn doctor_stops_quietly_when_the_reader_closes_the_pipe() {
     );
 }
 
+/// Runs `oboro` with the given arguments and nothing left reading its standard
+/// error, as `2>&1 | head -n 1` leaves it.
+#[cfg(unix)]
+fn run_with_closed_error_pipe(workspace: &Workspace, args: &[&str]) -> std::process::Output {
+    workspace
+        .std_command("fr_FR.UTF-8")
+        .args(args)
+        .stdout(std::process::Stdio::piped())
+        .stderr(closed_pipe())
+        .spawn()
+        .expect("spawning oboro")
+        .wait_with_output()
+        .expect("waiting for oboro")
+}
+
 /// `oboro map list 2>&1 | head -n 1`: the progress and summary lines go to
 /// standard error, and a reader leaving is as normal there as on standard
 /// output.
@@ -547,17 +562,7 @@ fn doctor_stops_quietly_when_the_reader_closes_the_pipe() {
 #[cfg(unix)]
 fn map_list_stops_quietly_when_the_reader_closes_the_error_pipe() {
     let workspace = Workspace::new();
-
-    let output = workspace
-        .std_command("fr_FR.UTF-8")
-        .arg("map")
-        .arg("list")
-        .stdout(std::process::Stdio::piped())
-        .stderr(closed_pipe())
-        .spawn()
-        .expect("spawning oboro")
-        .wait_with_output()
-        .expect("waiting for oboro");
+    let output = run_with_closed_error_pipe(&workspace, &["map", "list"]);
 
     assert!(
         output.status.success(),
@@ -571,17 +576,7 @@ fn map_list_stops_quietly_when_the_reader_closes_the_error_pipe() {
 #[cfg(unix)]
 fn an_error_keeps_its_exit_code_when_the_reader_closes_the_error_pipe() {
     let workspace = Workspace::new();
-
-    let output = workspace
-        .std_command("fr_FR.UTF-8")
-        .arg("restore")
-        .arg("missing.txt")
-        .stdout(std::process::Stdio::piped())
-        .stderr(closed_pipe())
-        .spawn()
-        .expect("spawning oboro")
-        .wait_with_output()
-        .expect("waiting for oboro");
+    let output = run_with_closed_error_pipe(&workspace, &["restore", "missing.txt"]);
 
     assert_eq!(
         output.status.code(),
