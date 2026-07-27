@@ -206,9 +206,11 @@ code:not(.sourceCode):not(pre code) {
 // ===========================================================================
 // THE PLACEHOLDER MARK
 // ===========================================================================
-// A redaction is what this tool produces, so the examples draw it as a
-// deliberate object: the moon accent, outlined. Applied by
-// assets/scripts/placeholders.html; without the script the text is unchanged.
+// A placeholder is what this tool produces, so the examples draw it as a
+// deliberate object rather than as incidental punctuation: the moon accent,
+// outlined. It is also the mark, in assets/icons/icon.svg, and the hero of the
+// social card. Applied by assets/scripts/placeholders.html; without the script
+// the text is unchanged.
 
 .oboro-placeholder {
   color: var(--oboro-moon);
