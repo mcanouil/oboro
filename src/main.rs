@@ -589,7 +589,16 @@ fn doctor(store: &StoreArgs) -> Result<()> {
         None => writeln!(report, "config:     none found (using defaults)")?,
     }
 
-    let config = Config::load(config_path.as_deref())?;
+    // A configuration that will not load is one of the reasons to run this
+    // command, so what has been gathered so far, including the path of the
+    // offending file, is written before the error is reported.
+    let config = match Config::load(config_path.as_deref()) {
+        Ok(config) => config,
+        Err(error) => {
+            print_stdout(&report)?;
+            return Err(error);
+        }
+    };
     writeln!(report, "regions:    {}", describe_regions(&config))?;
     writeln!(report, "allowlist:  {} entr(y/ies)", config.allowlist.len())?;
     writeln!(report, "denylist:   {} term(s)", config.denylist.len())?;

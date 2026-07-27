@@ -803,6 +803,25 @@ fn doctor_says_where_the_phone_regions_came_from() {
         .stdout(predicate::str::contains("GB (from oboro.toml)"));
 }
 
+/// A configuration that will not load is exactly when `doctor` is run, so the
+/// lines naming the vault, the key and the offending file are still written
+/// before the error is reported.
+#[test]
+fn doctor_names_the_files_it_read_before_refusing_a_bad_configuration() {
+    let workspace = Workspace::new();
+    std::fs::write(workspace.path().join("oboro.toml"), "regions = [\"ZZ\"]\n")
+        .expect("writing the configuration");
+
+    workspace
+        .command()
+        .arg("doctor")
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("vault:"))
+        .stdout(predicate::str::contains("oboro.toml"))
+        .stderr(predicate::str::contains("not a two-letter region code"));
+}
+
 /// No locale, no configuration, and structured identifiers are still found:
 /// nothing about detection requires a language or a region to be declared.
 #[test]
