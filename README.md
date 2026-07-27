@@ -67,7 +67,51 @@ cargo build --release --features "ner,ocr"   # names and image OCR
 
 The default prebuilt binary and Docker image carry no optional feature. Name recognition (`ner`) links ONNX Runtime, which has no musl build, so its prebuilt forms are separate: glibc release archives via the install script, and the `:ner` image. Optical character recognition (`ocr`) needs the Tesseract shared libraries at run time, so it stays a source build.
 
+## In Claude Code
+
+Claude Code reads files itself, so pasting a cleaned copy into it protects
+nothing: the agent already read the original. Two hooks put Oboro in that path.
+Name them in `.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Read|Grep|Bash|WebFetch",
+        "hooks": [{ "type": "command", "command": "oboro hook post-tool-use" }]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [{ "type": "command", "command": "oboro hook pre-tool-use" }]
+      }
+    ]
+  }
+}
+```
+
+`post-tool-use` replaces a tool's result with a cleaned one, so the model reads
+`[[PHONE_1]]` where the file said a phone number. `pre-tool-use` puts the values
+back into what the model writes, so the placeholder never reaches your source.
+Both are needed: the first without the second means the model writes
+placeholders into your files.
+
+`oboro doctor` reports which halves are installed, since naming them is your job.
+
+If Oboro cannot do its job the tool does not quietly get its way: on the way out
+the result is withheld, on the way in the call is refused, and you are told why.
+
+What you type yourself is never covered. The event that fires on a prompt can
+add context to a prompt but cannot rewrite it, so a value you paste into the
+chat reaches the model as you typed it. Paste a document instead and the hook
+covers it. The [Limitations](https://m.canouil.dev/oboro/limitations.html) page
+is the honest account.
+
 ## Usage
+
+Without an agent that has hooks, or for a document you are handling yourself:
 
 ```bash
 # Anonymise a document.

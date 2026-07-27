@@ -1,6 +1,6 @@
 ---
 title: "Quickstart"
-description: "Install oboro, clean your first document, and restore a model's answer to the real names."
+description: "Install oboro, wire the Claude Code hooks in, and clean and restore a document by hand for everything else."
 ---
 
 ## Install
@@ -133,7 +133,68 @@ Check what your build can do:
 oboro doctor
 ```
 
+## Wire it into Claude Code
+
+Do this first if you use Claude Code.
+The agent reads files itself, so cleaning a copy by hand and pasting it in protects nothing: it already read the original.
+
+Two hooks put Oboro in that path.
+Name them in `.claude/settings.json`, in the project you want covered or in `~/.claude/settings.json` for all of them:
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Read|Grep|Bash|WebFetch",
+        "hooks": [{ "type": "command", "command": "oboro hook post-tool-use" }]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [{ "type": "command", "command": "oboro hook pre-tool-use" }]
+      }
+    ]
+  }
+}
+```
+
+Then check it took:
+
+```bash
+oboro doctor
+```
+
+```text
+PostToolUse .claude/settings.json (Read|Grep|Bash|WebFetch, reachable)
+PreToolUse  .claude/settings.json (Write|Edit, reachable)
+```
+
+Ask the agent to read a file holding a phone number, and it will tell you about `[[PHONE_1]]`.
+Ask it to write that back, and the real number lands in the file.
+
+Install both halves.
+The first without the second means the model is shown placeholders and nothing puts them back, so `[[PHONE_1]]` ends up in your source.
+
+At 17 to 70 ms a call this runs on every matching tool without being felt; the [timings](how-it-works.qmd#what-a-run-costs) are recorded.
+The [reference](reference.qmd#hook) covers what each half does, and what neither covers.
+
+::: {.callout-warning}
+
+## Your own words are not covered
+
+The hooks clean what tools read and write.
+What you type into the chat is never touched, because the event that fires on a prompt can add context to it but cannot rewrite it.
+
+Paste a document rather than retyping what is in it, and the hook covers it.
+
+:::
+
 ## Clean a document
+
+Everything below is the manual loop.
+It is the primary path in any tool without hooks, and the fallback in Claude Code for a document you would rather handle yourself.
 
 ```bash
 oboro clean contract.docx
