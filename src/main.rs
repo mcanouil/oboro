@@ -82,8 +82,22 @@ enum Command {
         #[arg(long, value_name = "FILE")]
         config: Option<PathBuf>,
     },
+    /// Answer an agent's hook, cleaning what it is about to be shown
+    Hook {
+        #[command(subcommand)]
+        action: HookAction,
+    },
     /// Report the tool's configuration and environment
     Doctor,
+}
+
+#[derive(Subcommand)]
+enum HookAction {
+    /// Clean a tool's result before the model reads it
+    ///
+    /// Reads a Claude Code `PostToolUse` payload on standard input and writes
+    /// the reply that replaces the tool's result.
+    PostToolUse,
 }
 
 #[cfg(feature = "ner")]
@@ -191,6 +205,9 @@ fn run() -> Result<()> {
             store,
             config.as_deref(),
         ),
+        Command::Hook { action } => match action {
+            HookAction::PostToolUse => hook_post_tool_use(store),
+        },
         Command::Doctor => doctor(store),
     }
 }
@@ -329,6 +346,117 @@ fn clean_stdin(store: &StoreArgs, config_path: Option<&Path>) -> Result<()> {
     let detector = Detector::new(&config)?;
     let report = pipeline::clean(&convert::tidy(&text), &detector, &mut vault)?;
     print_stdout(&report.text)
+}
+
+/// Answers a `PostToolUse` hook, replacing the tool's result with a cleaned
+/// one so the model reads placeholders rather than values.
+///
+/// Never returns an error. A `PostToolUse` reply is only honoured when the
+/// process exits 0, and the tool has already run by the time this is called, so
+/// exiting non-zero would leave the raw result in place: precisely the leak
+/// this exists to stop. Every failure therefore answers with a notice in place
+/// of the result and a `block` decision, which is what failing closed means for
+/// an event that cannot be blocked.
+fn hook_post_tool_use(store: &StoreArgs) -> Result<()> {
+    match clean_tool_result(store) {
+        Ok(Some(cleaned)) => print_stdout(&hook_reply(&cleaned)),
+        // Nothing to replace: an empty reply is how a hook says it changed
+        // nothing.
+        Ok(None) => Ok(()),
+        Err(error) => print_stdout(&withheld_reply(&format!("{error:#}"))),
+    }
+}
+
+/// Cleans the `tool_result` in the payload on standard input, or `None` when
+/// the payload carries no result to clean.
+fn clean_tool_result(store: &StoreArgs) -> Result<Option<String>> {
+    let payload: serde_json::Value =
+        serde_json::from_str(&read_stdin()?).context("parsing the hook payload as JSON")?;
+    let result = match payload.get("tool_result") {
+        None | Some(serde_json::Value::Null) => return Ok(None),
+        Some(result) => result,
+    };
+
+    let (config, mut vault) = prepare(store, None, None)?;
+    let detector = Detector::new(&config)?;
+
+    // A string result is the common case and stays a string. Anything else is
+    // walked, so a tool answering with an object has every string in it cleaned
+    // and keeps the shape the model has to read. Object keys are left alone:
+    // renaming them would change what the tool said, so a result keyed by a
+    // path still shows that path.
+    match result {
+        serde_json::Value::String(text) => {
+            Ok(Some(pipeline::clean(text, &detector, &mut vault)?.text))
+        }
+        other => {
+            let mut cleaned = other.clone();
+            clean_json_strings(&mut cleaned, &detector, &mut vault)?;
+            Ok(Some(
+                serde_json::to_string(&cleaned).context("re-encoding the cleaned tool result")?,
+            ))
+        }
+    }
+}
+
+/// Cleans every string in `value`, in place, leaving object keys untouched.
+fn clean_json_strings(
+    value: &mut serde_json::Value,
+    detector: &Detector,
+    vault: &mut Vault,
+) -> Result<()> {
+    match value {
+        serde_json::Value::String(text) => {
+            *text = pipeline::clean(text, detector, vault)?.text;
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                clean_json_strings(item, detector, vault)?;
+            }
+        }
+        serde_json::Value::Object(fields) => {
+            for field in fields.values_mut() {
+                clean_json_strings(field, detector, vault)?;
+            }
+        }
+        serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::Number(_) => {}
+    }
+    Ok(())
+}
+
+/// The reply that replaces a tool's result with `cleaned`.
+fn hook_reply(cleaned: &str) -> String {
+    let reply = serde_json::json!({
+        "hookSpecificOutput": {
+            "hookEventName": "PostToolUse",
+            "updatedToolOutput": cleaned,
+        }
+    });
+    format!("{reply}\n")
+}
+
+/// The reply that withholds a tool's result because cleaning it failed.
+///
+/// What the model is told is deliberately vague. The failure it reports carries
+/// the context Oboro attaches to its errors, which is often a path, and a path
+/// is one of the things a vault redacts; sending it to the model to explain a
+/// withheld result would leak by another route. So the detail goes to the user
+/// through `systemMessage`, and the model is told only that the result was
+/// withheld.
+fn withheld_reply(reason: &str) -> String {
+    let reply = serde_json::json!({
+        "hookSpecificOutput": {
+            "hookEventName": "PostToolUse",
+            "updatedToolOutput":
+                "[oboro withheld this tool result: it could not be anonymised]",
+        },
+        "decision": "block",
+        "reason": "oboro could not anonymise this tool result, so it was withheld. \
+                   The reason was reported to the user, who has to resolve it before \
+                   this tool can be used again.",
+        "systemMessage": format!("oboro withheld a tool result: {reason}"),
+    });
+    format!("{reply}\n")
 }
 
 fn clean(
