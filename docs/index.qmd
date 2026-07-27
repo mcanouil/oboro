@@ -29,6 +29,9 @@ flowchart LR
 The name is 朧, Japanese for hazy, or veiled by mist.
 The tool blurs identifying detail rather than silencing it: the document still reads as a document, and the model can still reason about it.
 
+An agent that reads files itself never waits to be handed a cleaned copy, so in Claude Code Oboro sits in the tool path instead of in front of it.
+Two hooks clean what a tool hands the model and put the real values back into what it writes; the [Quickstart](quickstart.qmd#wire-it-into-claude-code) has the four lines of settings.
+
 ## What it looks like
 
 ```text
