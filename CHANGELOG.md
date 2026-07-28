@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 
+- feat: Install both halves with one command, `oboro skill install --with-hooks`, which writes the skill and names both hooks in the same scope, asks once and shows both files it would write, and plans both before writing either, so a scope that refuses one installs neither; drop the flag for the skill alone, or use `oboro hook install` for the hooks alone. (#74)
 - feat: Install the hooks and the skill in one step from a Claude Code plugin marketplace, with `/plugin marketplace add mcanouil/oboro` then `/plugin install oboro@oboro`; the plugin is this repository, so it ships the skill the binary carries rather than a copy of it, and its hooks go through a wrapper that withholds the result and refuses the call when no `oboro` is on `PATH`, rather than leaving a machine unprotected while looking installed. (#74)
 - feat: Report an enabled Oboro plugin in `oboro doctor`, naming the settings file that enables it, since the hooks it carries live in the plugin's own files and reporting them as missing would send you to `oboro hook install` for something you already have. (#74)
 - docs: Name `npx skills add mcanouil/oboro` as the skill-only path, for agents other than Claude Code, saying plainly that it installs the explanation and not the machine and that it symlinks the skill, which is why `oboro skill install` afterwards refuses the path rather than overwriting it. (#74)

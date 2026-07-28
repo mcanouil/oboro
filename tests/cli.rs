@@ -1192,6 +1192,110 @@ fn skill_install_dry_run_names_the_path_and_writes_nothing() {
     );
 }
 
+/// The two halves are one decision: a skill describing placeholders no hook
+/// produces explains nothing, and hooks without the skill leave the agent
+/// guessing at what it is being shown.
+#[test]
+fn skill_install_with_hooks_installs_both_halves_into_one_scope() {
+    let workspace = Workspace::new();
+
+    workspace
+        .command()
+        .arg("skill")
+        .arg("install")
+        .arg("--project")
+        .arg("--with-hooks")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("SKILL.md"))
+        .stderr(predicate::str::contains("PostToolUse"))
+        .stderr(predicate::str::contains("PreToolUse"));
+
+    assert!(
+        workspace
+            .path()
+            .join(".claude/skills/oboro/SKILL.md")
+            .exists()
+    );
+    let settings = std::fs::read_to_string(workspace.path().join(".claude/settings.local.json"))
+        .expect("reading the settings");
+    assert!(settings.contains("oboro hook post-tool-use"));
+    assert!(settings.contains("oboro hook pre-tool-use"));
+
+    workspace
+        .command()
+        .arg("doctor")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("(current)"))
+        .stdout(predicate::str::contains("settings.local.json").count(2));
+}
+
+/// A dry run has to cover both halves or it would answer a question it was not
+/// asked: what one of the two would do.
+#[test]
+fn skill_install_with_hooks_dry_run_shows_both_and_writes_neither() {
+    let workspace = Workspace::new();
+
+    workspace
+        .command()
+        .arg("skill")
+        .arg("install")
+        .arg("--project")
+        .arg("--with-hooks")
+        .arg("--dry-run")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("SKILL.md"))
+        .stderr(predicate::str::contains("nothing was written"))
+        .stdout(predicate::str::contains("oboro hook post-tool-use"));
+
+    assert!(
+        !workspace.path().join(".claude").exists(),
+        "a dry run must not create the directory either"
+    );
+}
+
+/// Both plans are made before either is carried out, so a scope that refuses
+/// one half installs neither. Half an install is the state the pair exists to
+/// avoid: the skill would describe hooks that are not there.
+#[cfg(unix)]
+#[test]
+fn skill_install_with_hooks_writes_nothing_when_the_settings_are_a_symbolic_link() {
+    let workspace = Workspace::new();
+    let elsewhere = workspace.path().join("elsewhere.json");
+    std::fs::write(&elsewhere, "{}").expect("writing the link target");
+    std::fs::create_dir_all(workspace.path().join(".claude")).expect("creating .claude");
+    std::os::unix::fs::symlink(
+        &elsewhere,
+        workspace.path().join(".claude/settings.local.json"),
+    )
+    .expect("linking");
+
+    workspace
+        .command()
+        .arg("skill")
+        .arg("install")
+        .arg("--project")
+        .arg("--with-hooks")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("symbolic link"));
+
+    assert!(
+        !workspace
+            .path()
+            .join(".claude/skills/oboro/SKILL.md")
+            .exists(),
+        "the skill must not be written when the hooks cannot be"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&elsewhere).expect("reading the link target"),
+        "{}",
+        "nothing is written through the link"
+    );
+}
+
 /// Choosing the scope is interactive, and a script has no one to ask. Guessing
 /// would be worse than failing: the wrong scope installs a skill the agent
 /// never reads, and says nothing.

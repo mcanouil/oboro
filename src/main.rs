@@ -137,6 +137,9 @@ enum SkillAction {
     /// Without `--project` or `--user` you are asked which one to write to,
     /// since installing into the wrong scope is a silent no-op rather than an
     /// error: the agent simply never reads it.
+    ///
+    /// `--with-hooks` installs both halves at once, into the same scope, and is
+    /// the same merge `oboro hook install` does.
     Install {
         /// Install into `.claude/skills` here, covering this project
         #[arg(long, conflicts_with = "user")]
@@ -150,6 +153,9 @@ enum SkillAction {
         /// Overwrite an edited skill instead of proposing the new text beside it
         #[arg(long)]
         force: bool,
+        /// Name both hooks in your agent's settings as well, in the same scope
+        #[arg(long)]
+        with_hooks: bool,
     },
     /// Print the skill this build carries
     Show,
@@ -275,7 +281,8 @@ fn run() -> Result<()> {
                 user,
                 dry_run,
                 force,
-            } => skill_install(chosen_scope(project, user), dry_run, force),
+                with_hooks,
+            } => skill_install(chosen_scope(project, user), dry_run, force, with_hooks),
             SkillAction::Show => print_stdout(oboro::skill::SKILL),
         },
         Command::Doctor => doctor(store),
@@ -864,16 +871,33 @@ fn map_purge(confirmed: bool, store: &StoreArgs) -> Result<()> {
     Ok(())
 }
 
-/// Writes the skill an agent reads to understand the hooks' placeholders.
-fn skill_install(scope: Option<Scope>, dry_run: bool, force: bool) -> Result<()> {
+/// Writes the skill an agent reads to understand the hooks' placeholders, and
+/// with `--with-hooks` the hooks that make it worth reading.
+///
+/// The two halves are one decision: a skill without the hooks describes
+/// placeholders the agent will never see, and hooks without the skill leave it
+/// guessing at the ones it does. Both are planned before either is written, so
+/// a scope that refuses one, through a symbolic link or a settings file that
+/// cannot be merged into, stops the pair rather than leaving half of it
+/// installed.
+fn skill_install(scope: Option<Scope>, dry_run: bool, force: bool, with_hooks: bool) -> Result<()> {
     let cwd = std::env::current_dir().context("reading the working directory")?;
-    let scope = match scope {
-        Some(scope) => scope,
-        None => ask_for_scope(&cwd, "skill", oboro::skill::path)?,
+    let scope = match (scope, with_hooks) {
+        (Some(scope), _) => scope,
+        (None, false) => ask_for_scope(&cwd, "skill", &[oboro::skill::path])?,
+        (None, true) => ask_for_scope(
+            &cwd,
+            "skill and hooks",
+            &[oboro::skill::path, oboro::hooks::settings_path],
+        )?,
     };
-    // The plan is made once and then carried out, so what is named here is by
+    // The plans are made once and then carried out, so what is named here is by
     // construction what happens, whether or not `--dry-run` stops it.
     let plan = oboro::skill::plan(scope, &cwd, force)?;
+    let hooks = with_hooks
+        .then(|| oboro::hooks::plan(scope, &cwd))
+        .transpose()?;
+
     match &plan {
         Plan::Write(path) => oboro::note!("writing {}", path.display()),
         Plan::Keep(path) => oboro::note!("{} already holds this skill", path.display()),
@@ -887,13 +911,24 @@ fn skill_install(scope: Option<Scope>, dry_run: bool, force: bool) -> Result<()>
             proposed.display()
         ),
     }
+    if let Some(hooks) = &hooks {
+        describe_hook_plan(hooks);
+    }
+
     if dry_run {
         oboro::note!("--dry-run: nothing was written");
+        if let Some(hooks) = &hooks {
+            oboro::note!("The settings would read:");
+            return print_stdout(&hooks.rendered()?);
+        }
         return Ok(());
     }
 
     if matches!(oboro::skill::install(plan)?, Plan::Write(_)) {
         oboro::note!("installed the skill for {}", describe_scope(scope));
+    }
+    if let Some(hooks) = hooks {
+        install_hook_plan(hooks, scope)?;
     }
     Ok(())
 }
@@ -904,10 +939,21 @@ fn hook_install(scope: Option<Scope>, dry_run: bool) -> Result<()> {
     let cwd = std::env::current_dir().context("reading the working directory")?;
     let scope = match scope {
         Some(scope) => scope,
-        None => ask_for_scope(&cwd, "hooks", oboro::hooks::settings_path)?,
+        None => ask_for_scope(&cwd, "hooks", &[oboro::hooks::settings_path])?,
     };
 
     let plan = oboro::hooks::plan(scope, &cwd)?;
+    describe_hook_plan(&plan);
+    if dry_run {
+        oboro::note!("--dry-run: nothing was written. The settings would read:");
+        return print_stdout(&plan.rendered()?);
+    }
+
+    install_hook_plan(plan, scope)
+}
+
+/// Says what installing the hooks would do to each event, and to the file.
+fn describe_hook_plan(plan: &oboro::hooks::Plan) {
     for (event, change) in &plan.changes {
         match change {
             Change::Add(matcher) => oboro::note!("{event:<11} adding, matched against {matcher}"),
@@ -922,11 +968,10 @@ fn hook_install(scope: Option<Scope>, dry_run: bool) -> Result<()> {
     } else {
         oboro::note!("{} already names both halves", plan.file.display());
     }
-    if dry_run {
-        oboro::note!("--dry-run: nothing was written. The settings would read:");
-        return print_stdout(&plan.rendered()?);
-    }
+}
 
+/// Carries out a hook plan and reports what it did.
+fn install_hook_plan(plan: oboro::hooks::Plan, scope: Scope) -> Result<()> {
     let written = plan.writes();
     let file = plan.file.clone();
     oboro::hooks::install(plan)?;
@@ -960,14 +1005,15 @@ fn chosen_scope(project: bool, user: bool) -> Option<Scope> {
 
 /// Asks which scope to install `what` into, when neither flag named one.
 ///
-/// Both paths are shown rather than named, because the difference that matters
+/// The paths are shown rather than named, because the difference that matters
 /// is which agent sessions will read the file, and a path answers that where
-/// "project" and "user" do not. The two installers write different files, so
-/// each passes its own way of resolving one.
+/// "project" and "user" do not. The installers write different files, so each
+/// passes its own way of resolving one, and installing both halves at once
+/// passes both: what a scope means is exactly the files it would write.
 fn ask_for_scope(
     cwd: &Path,
     what: &str,
-    path_for: fn(Scope, &Path) -> Result<PathBuf>,
+    paths_for: &[fn(Scope, &Path) -> Result<PathBuf>],
 ) -> Result<Scope> {
     if !std::io::stdin().is_terminal() {
         bail!(
@@ -978,9 +1024,18 @@ fn ask_for_scope(
 
     for (choice, scope) in SCOPES.iter().enumerate() {
         let covers = describe_scope(*scope);
-        match path_for(*scope, cwd) {
-            Ok(path) => oboro::note!("{}  {covers:<14} {}", choice + 1, path.display()),
-            Err(error) => oboro::note!("{}  {covers:<14} unavailable: {error:#}", choice + 1),
+        for (line, path_for) in paths_for.iter().enumerate() {
+            // The scope is named once, beside the first of its paths; the rest
+            // line up underneath it rather than repeating it.
+            let label = if line == 0 {
+                format!("{}  {covers:<14}", choice + 1)
+            } else {
+                " ".repeat(17)
+            };
+            match path_for(*scope, cwd) {
+                Ok(path) => oboro::note!("{label} {}", path.display()),
+                Err(error) => oboro::note!("{label} unavailable: {error:#}"),
+            }
         }
     }
     oboro::note!("Install the Oboro {what} where? [1/2]");

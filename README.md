@@ -82,17 +82,22 @@ The plugin still needs the binary on your `PATH`; it cannot install one. Until
 there is one, every matching tool result is withheld and every matching write is
 refused, rather than left unprotected.
 
-With the binary already installed, one command names both hooks instead:
+With the binary already installed, one command does the same without a plugin:
 
 ```bash
-oboro hook install
+oboro skill install --with-hooks
 ```
 
-It asks whether to cover this project, in `.claude/settings.local.json`, or
-every project, in `~/.claude/settings.json`. `--project` and `--user` skip the
-question, and `--dry-run` prints the settings without writing them. Nothing
-already in the file is moved, reordered or removed, and a hook already naming
-`oboro hook` is left exactly as you wrote it. This is what it adds:
+It asks whether to cover this project, in `.claude/settings.local.json` and
+`.claude/skills/`, or every project, in `~/.claude/settings.json` and
+`~/.claude/skills/`. `--project` and `--user` skip the question, and `--dry-run`
+prints what both halves would write without writing either. Both are planned
+before either is written, so a scope that refuses one installs neither.
+
+Drop `--with-hooks` for the skill on its own, or use `oboro hook install` for
+the hooks on their own. Nothing already in the settings is moved, reordered or
+removed, and a hook already naming `oboro hook` is left exactly as you wrote it.
+This is what the hooks half adds:
 
 ```json
 {
@@ -120,18 +125,18 @@ Both are needed: the first without the second means the model writes
 placeholders into your files.
 
 An agent that was never told what `[[PHONE_1]]` is will guess: a bug in your
-file, a template to fill in, or a redaction to work around. Install the skill
-that explains it:
+file, a template to fill in, or a redaction to work around. The skill that
+explains it is the other half of the command above, and it installs on its own
+too:
 
 ```bash
 oboro skill install
 ```
 
-It asks about scope the same way, and `oboro skill show` prints the text without
-writing anything. The plugin carries the same skill, so install it one way or
-the other rather than both.
+`oboro skill show` prints the text without writing anything. The plugin carries
+the same skill, so install it one way or the other rather than both.
 
-For an agent other than Claude Code, or for the skill on its own:
+For an agent other than Claude Code, the skill without any of the above:
 
 ```bash
 npx skills add mcanouil/oboro

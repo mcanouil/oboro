@@ -243,6 +243,7 @@ Writes the skill that tells an agent what the hooks have done to what it reads.
 
 ```bash
 oboro skill install
+oboro skill install --with-hooks
 oboro skill show
 ```
 
@@ -260,6 +261,10 @@ Install the Oboro skill where? [1/2]
 
 There is no default, because the wrong scope fails silently: the agent simply never reads the file.
 With no terminal to ask, the command fails and names both flags rather than choosing for you.
+
+`--with-hooks` names both hooks in the same scope as well, which is the same merge [`hook install`](#install) does, so one command covers what the plugin covers.
+Both halves are planned before either is written: a scope that refuses one, through a symbolic link or settings that cannot be merged into, installs neither, since a skill describing hooks that are not there is worse than no skill.
+The question then shows both files a scope would write, and `--dry-run` shows both.
 
 The same text reaches an agent two other ways, both reading it from this repository rather than copying it: the [plugin](quickstart.qmd#wire-it-into-claude-code), which brings the hooks with it, and `npx skills add mcanouil/oboro`, which brings only the skill and works for agents other than Claude Code.
 The second symlinks by default, and Oboro does not write through a symbolic link, so `install` afterwards names the link and refuses.
