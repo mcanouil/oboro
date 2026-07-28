@@ -65,6 +65,9 @@ The stream is stored as the document holds it, so the codec is still under a lay
 
 Pages holding no image at all, where the text was drawn as vector shapes.
 Nothing is embedded to recognise, and rasterising the page needs a large external library the tool does not carry.
+A page whose only images are too small to be a scan, such as a rule or a spacer, is refused the same way and says so.
+
+A scan drawn through a form XObject rather than placed on the page directly is found, so that shape is read rather than refused.
 
 The refusal is per page rather than per document: once recognition is under way, one unreadable page refuses the whole file rather than dropping out of it silently.
 

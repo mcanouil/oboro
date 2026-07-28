@@ -34,10 +34,22 @@ const MIN_CHARS_PER_PAGE: usize = 8;
 pub fn to_text(path: &Path, ocr_languages: &[String]) -> Result<String> {
     let document = load(path)?;
     let pages = document.get_pages().len();
+
+    // A document showing no pages was not read, whatever the parser returned.
+    // Treating it as one page would set the floor below what a single line of
+    // text clears, so a file whose pages went missing would pass as read.
+    if pages == 0 {
+        bail!(
+            "{} declares no pages, so nothing in it can be read. The file is malformed, \
+             or its pages are stored in a way this cannot follow.",
+            path.display()
+        );
+    }
+
     let text = extract(path)?;
     let visible = text.chars().filter(|c| !c.is_whitespace()).count();
 
-    if visible >= MIN_CHARS_PER_PAGE.saturating_mul(pages.max(1)) {
+    if visible >= MIN_CHARS_PER_PAGE.saturating_mul(pages) {
         return Ok(text);
     }
 
@@ -127,12 +139,17 @@ fn recognise(
     )
 }
 
-/// The most any single stream inside a PDF may decompress to while loading.
+/// The most a cross-reference stream may decompress to while loading.
 ///
-/// Object and cross-reference streams are decoded as the file is parsed, so a
-/// small document can inflate to gigabytes before any of this code runs. Set
-/// well above any real document, since the point is a bound rather than a
-/// judgement about what is reasonable to read.
+/// These are decoded as the file is parsed, so a small document can inflate to
+/// gigabytes before any of this code runs. Set well above any real document,
+/// since the point is a bound rather than a judgement about what is reasonable
+/// to read.
+///
+/// It bounds the cross-reference path only. An object stream that exceeds it is
+/// dropped rather than reported by the parser, which is why a document showing
+/// no pages is refused outright above, and [`extract`] parses the file a second
+/// time through a library that takes no such limit at all.
 const MAX_DECOMPRESSED_BYTES: usize = 256 * 1024 * 1024;
 
 /// Runs `read`, containing any panic it might have on malformed input.
@@ -213,11 +230,25 @@ fn page_images(
     page: u32,
     path: &Path,
 ) -> Result<Vec<Vec<u8>>> {
-    image_streams(document, id)
-        .into_iter()
-        .filter(|image| image.width >= MIN_SCAN_PIXELS && image.height >= MIN_SCAN_PIXELS)
-        .map(|image| readable(document, &image, page, path))
-        .collect()
+    let found = image_streams(document, id);
+    let scans = found
+        .iter()
+        .filter(|image| image.width >= MIN_SCAN_PIXELS && image.height >= MIN_SCAN_PIXELS);
+
+    let images: Vec<Vec<u8>> = scans
+        .map(|image| readable(document, image, page, path))
+        .collect::<Result<_>>()?;
+
+    if images.is_empty() && !found.is_empty() {
+        bail!(
+            "page {page} of {} holds nothing but images too small to be a scan, the \
+             largest {}x{} pixels. Whatever the page says is not in them.",
+            path.display(),
+            found.iter().map(|image| image.width).max().unwrap_or(0),
+            found.iter().map(|image| image.height).max().unwrap_or(0)
+        );
+    }
+    Ok(images)
 }
 
 /// Every image `XObject` reachable from a page, following `/Resources` up the
@@ -229,45 +260,93 @@ fn page_images(
 #[cfg(feature = "ocr")]
 fn image_streams(document: &lopdf::Document, id: lopdf::ObjectId) -> Vec<PageImage<'_>> {
     let mut images = Vec::new();
+    let mut seen = std::collections::HashSet::new();
     for resource in page_resources(document, id) {
-        let Some(xobjects) = resource
-            .get(b"XObject")
-            .ok()
-            .and_then(|object| resolved(document, object))
-            .and_then(|object| object.as_dict().ok())
+        collect_images(document, resource, 0, &mut seen, &mut images);
+    }
+    images
+}
+
+/// Adds every image reachable from one resource dictionary to `images`.
+///
+/// Descends into form `XObject`s, since a page may draw its scan through one
+/// rather than referring to the image directly, and a page whose only image
+/// sits inside a form would otherwise look like a page with no image at all.
+///
+/// `seen` is what keeps the same `XObject` from being read twice, which matters
+/// twice over: a page and its parent may carry the same resources, and a
+/// document can be built so that they do, turning one image into many decoded
+/// copies held at once.
+#[cfg(feature = "ocr")]
+fn collect_images<'a>(
+    document: &'a lopdf::Document,
+    resources: &'a lopdf::Dictionary,
+    depth: usize,
+    seen: &mut std::collections::HashSet<lopdf::ObjectId>,
+    images: &mut Vec<PageImage<'a>>,
+) {
+    if depth >= MAX_XOBJECT_DEPTH {
+        return;
+    }
+
+    let Some(xobjects) = resources
+        .get(b"XObject")
+        .ok()
+        .and_then(|object| resolved(document, object))
+        .and_then(|object| object.as_dict().ok())
+    else {
+        return;
+    };
+
+    for (_, value) in xobjects {
+        // An XObject is named by reference in every document that is not
+        // hand-written, and the reference is what identifies it across the
+        // resource dictionaries it appears in.
+        if let Ok(id) = value.as_reference()
+            && !seen.insert(id)
+        {
+            continue;
+        }
+        let Some(stream) = resolved(document, value).and_then(|object| object.as_stream().ok())
         else {
             continue;
         };
 
-        for (_, value) in xobjects {
-            let Some(stream) = resolved(document, value).and_then(|object| object.as_stream().ok())
-            else {
-                continue;
-            };
-            let is_image = stream
+        let subtype = stream
+            .dict
+            .get(b"Subtype")
+            .and_then(lopdf::Object::as_name)
+            .unwrap_or_default();
+        if subtype == b"Form" {
+            if let Some(inner) = stream
                 .dict
-                .get(b"Subtype")
-                .and_then(lopdf::Object::as_name)
-                .is_ok_and(|subtype| subtype == b"Image");
-            if !is_image {
-                continue;
+                .get(b"Resources")
+                .ok()
+                .and_then(|object| resolved(document, object))
+                .and_then(|object| object.as_dict().ok())
+            {
+                collect_images(document, inner, depth + 1, seen, images);
             }
-            let (Some(width), Some(height)) = (
-                number(document, &stream.dict, b"Width"),
-                number(document, &stream.dict, b"Height"),
-            ) else {
-                continue;
-            };
-            images.push(PageImage {
-                width,
-                height,
-                filters: filters_of(document, &stream.dict),
-                content: &stream.content,
-                dictionary: &stream.dict,
-            });
+            continue;
         }
+        if subtype != b"Image" {
+            continue;
+        }
+
+        let (Some(width), Some(height)) = (
+            number(document, &stream.dict, b"Width"),
+            number(document, &stream.dict, b"Height"),
+        ) else {
+            continue;
+        };
+        images.push(PageImage {
+            width,
+            height,
+            filters: filters_of(document, &stream.dict),
+            content: &stream.content,
+            dictionary: &stream.dict,
+        });
     }
-    images
 }
 
 /// How far up the page tree inherited resources are followed.
@@ -276,6 +355,13 @@ fn image_streams(document: &lopdf::Document, id: lopdf::ObjectId) -> Vec<PageIma
 /// `/Parent` pointing back down one would otherwise spin.
 #[cfg(feature = "ocr")]
 const MAX_PAGE_TREE_DEPTH: usize = 32;
+
+/// How far form `XObject`s are followed when looking for the page's images.
+///
+/// Forms nest, and a document can be built so that they nest into each other
+/// without end.
+#[cfg(feature = "ocr")]
+const MAX_XOBJECT_DEPTH: usize = 8;
 
 /// The resource dictionaries in force for a page, nearest first.
 ///
@@ -287,6 +373,7 @@ const MAX_PAGE_TREE_DEPTH: usize = 32;
 fn page_resources(document: &lopdf::Document, id: lopdf::ObjectId) -> Vec<&lopdf::Dictionary> {
     let mut resources = Vec::new();
     let mut node = document.get_dictionary(id).ok();
+    let mut visited = std::collections::HashSet::from([id]);
 
     for _ in 0..MAX_PAGE_TREE_DEPTH {
         let Some(dictionary) = node else { break };
@@ -298,10 +385,13 @@ fn page_resources(document: &lopdf::Document, id: lopdf::ObjectId) -> Vec<&lopdf
         {
             resources.push(found);
         }
+        // A `/Parent` pointing back at a node already walked is malformed, and
+        // following it would read the same resources over and over.
         node = dictionary
             .get(b"Parent")
             .ok()
             .and_then(|object| object.as_reference().ok())
+            .filter(|parent| visited.insert(*parent))
             .and_then(|parent| document.get_dictionary(parent).ok());
     }
     resources
@@ -1015,6 +1105,126 @@ mod tests {
         assert!(
             text.contains("Acme Consulting SARL"),
             "expected the provider name, got:\n{text}"
+        );
+    }
+
+    /// A document showing no pages was not read, whatever the parser handed
+    /// back.
+    ///
+    /// Treating it as a single page would put the floor below what one line of
+    /// text clears, so a file whose pages were dropped while loading would come
+    /// back looking like a short document that had been read.
+    #[cfg(feature = "ocr")]
+    #[test]
+    fn a_document_showing_no_pages_is_refused() {
+        let (_dir, path) = written(built(Vec::new()));
+        let error = to_text(&path, &[]).expect_err("a document with no pages was not read");
+        assert!(
+            format!("{error:#}").contains("no pages"),
+            "the error must say what is wrong: {error:#}"
+        );
+    }
+
+    /// A page and its parent may carry the same resources, which is legal.
+    /// Reading both would recognise the same image twice and return the page's
+    /// text doubled, and a document can be built to multiply that.
+    #[cfg(feature = "ocr")]
+    #[test]
+    fn an_image_reachable_twice_is_read_once() {
+        let mut document = built(vec![TestPage {
+            image: Some(fixture_image("scan.pdf")),
+            ..TestPage::default()
+        }]);
+
+        let (_, page_id) = document.get_pages().into_iter().next().expect("a page");
+        let resources = document
+            .get_dictionary(page_id)
+            .expect("the page")
+            .get(b"Resources")
+            .expect("its resources")
+            .clone();
+        let parent = document
+            .get_dictionary(page_id)
+            .expect("the page")
+            .get(b"Parent")
+            .expect("its parent")
+            .as_reference()
+            .expect("a reference");
+        document
+            .get_dictionary_mut(parent)
+            .expect("the page tree")
+            .set("Resources", resources);
+
+        let (_dir, path) = written(document);
+        let text = to_text(&path, &[]).expect("the page must still be read");
+        assert_eq!(
+            text.matches("Acme Consulting SARL").count(),
+            1,
+            "the image was read more than once:\n{text}"
+        );
+    }
+
+    /// A page may draw its scan through a form `XObject` rather than refer to
+    /// the image directly. Looking only at the page's own `XObject`s would call
+    /// that a page with no image and refuse a document that reads perfectly.
+    #[cfg(feature = "ocr")]
+    #[test]
+    fn an_image_inside_a_form_xobject_is_found() {
+        use lopdf::{Object, Stream};
+
+        let (image_dictionary, content) = fixture_image("scan.pdf");
+        let mut document = built(vec![TestPage::default()]);
+        let image = document.add_object(Stream::new(image_dictionary, content));
+        let form = document.add_object(Stream::new(
+            dictionary! {
+                "Type" => "XObject",
+                "Subtype" => "Form",
+                "BBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
+                "Resources" => dictionary! { "XObject" => dictionary! { "Im0" => image } },
+            },
+            b"/Im0 Do".to_vec(),
+        ));
+
+        let (_, page_id) = document.get_pages().into_iter().next().expect("a page");
+        let page = document.get_dictionary_mut(page_id).expect("the page");
+        page.set(
+            "Resources",
+            dictionary! { "XObject" => dictionary! { "Fm0" => Object::Reference(form) } },
+        );
+
+        let (_dir, path) = written(document);
+        let text = to_text(&path, &[]).expect("a scan inside a form must be found");
+        assert!(
+            text.contains("Acme Consulting SARL"),
+            "expected the provider name, got:\n{text}"
+        );
+    }
+
+    /// Refusing a page because its images are too small must say so. Telling
+    /// the user the page holds no image sends them looking for the wrong
+    /// thing.
+    #[cfg(feature = "ocr")]
+    #[test]
+    fn a_page_of_only_tiny_images_says_they_are_too_small() {
+        let (_dir, path) = written(built(vec![TestPage {
+            image: Some((
+                dictionary! {
+                    "Type" => "XObject",
+                    "Subtype" => "Image",
+                    "Width" => 8,
+                    "Height" => 8,
+                    "ColorSpace" => "DeviceGray",
+                    "BitsPerComponent" => 8,
+                    "Filter" => "DCTDecode",
+                },
+                b"tiny".to_vec(),
+            )),
+            ..TestPage::default()
+        }]));
+        let error = to_text(&path, &[]).expect_err("a spacer is not a scan");
+        assert!(
+            format!("{error:#}").contains("too small"),
+            "the error must say why the images were passed over: {error:#}"
         );
     }
 
