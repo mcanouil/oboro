@@ -308,6 +308,27 @@ struct Walk {
     forms: std::collections::HashMap<lopdf::ObjectId, usize>,
 }
 
+#[cfg(feature = "ocr")]
+impl Walk {
+    /// Whether a form should be descended into from `depth`, recording it when
+    /// it should.
+    ///
+    /// True the first time, and again when it is reached from higher up than
+    /// before: the descent is bounded, so a form stopped by the limit
+    /// contributed nothing and must be tried again rather than counted as
+    /// read.
+    fn descend(&mut self, id: Option<lopdf::ObjectId>, depth: usize) -> bool {
+        let Some(id) = id else {
+            return true;
+        };
+        if depth >= self.forms.get(&id).copied().unwrap_or(usize::MAX) {
+            return false;
+        }
+        self.forms.insert(id, depth);
+        true
+    }
+}
+
 /// Adds every image reachable from one resource dictionary to `images`.
 ///
 /// Descends into form `XObject`s, since a page may draw its scan through one
@@ -352,14 +373,8 @@ fn collect_images<'a>(
             if depth + 1 >= MAX_XOBJECT_DEPTH {
                 continue;
             }
-            // Marked only once it is actually descended into, and only when
-            // this is the shallowest it has been reached from, so a form
-            // stopped by the limit is not recorded as read.
-            if let Some(id) = id {
-                if depth >= walk.forms.get(&id).copied().unwrap_or(usize::MAX) {
-                    continue;
-                }
-                walk.forms.insert(id, depth);
+            if !walk.descend(id, depth) {
+                continue;
             }
             if let Some(inner) = stream
                 .dict
@@ -461,6 +476,20 @@ fn number(document: &lopdf::Document, dictionary: &lopdf::Dictionary, key: &[u8]
     resolved(document, object)?.as_i64().ok()
 }
 
+/// Reads a boolean entry, following an indirect reference.
+///
+/// A missing or unreadable entry is false, which is the specification's
+/// default for every flag read here.
+#[cfg(feature = "ocr")]
+fn flag(document: &lopdf::Document, dictionary: &lopdf::Dictionary, key: &[u8]) -> bool {
+    dictionary
+        .get(key)
+        .ok()
+        .and_then(|object| resolved(document, object))
+        .and_then(|object| object.as_bool().ok())
+        .unwrap_or(false)
+}
+
 /// Reads `/Filter`, which is one name or an array of them.
 #[cfg(feature = "ocr")]
 fn filters_of(document: &lopdf::Document, dictionary: &lopdf::Dictionary) -> Vec<String> {
@@ -547,26 +576,19 @@ fn describe(filters: &[String]) -> String {
         .join(", ")
 }
 
-/// Wraps an undecoded CCITT fax stream in a TIFF header.
+/// Checks a fax image can be described at all, and returns the width, height
+/// and byte count the header will state.
 ///
-/// TIFF carries Group 3 and Group 4 natively, so this rewraps rather than
-/// decodes: the fax bytes are copied across untouched and only the header
-/// describing them is built here.
+/// Everything the document says about the image is taken on trust until here:
+/// the coding may be one this cannot express, and the size may be one no page
+/// carries and no machine should be asked to allocate.
 #[cfg(feature = "ocr")]
-fn fax_as_tiff(
-    document: &lopdf::Document,
+fn fax_geometry(
     image: &PageImage<'_>,
+    parameters: &FaxParameters,
     page: u32,
     path: &Path,
-) -> Result<Vec<u8>> {
-    /// TIFF field types, of which only these two are needed.
-    const SHORT: u16 = 3;
-    const LONG: u16 = 4;
-    /// Where the fax data sits, immediately after the eight-byte header.
-    const DATA_OFFSET: u32 = 8;
-
-    let parameters = fax_parameters(document, image);
-
+) -> Result<(u32, u32, u32)> {
     // Byte alignment has no equivalent in the header built here, and a stream
     // described without it decodes to noise, which would be recognised as
     // stray characters rather than failing.
@@ -578,9 +600,6 @@ fn fax_as_tiff(
             path.display()
         );
     }
-
-    let impossible =
-        |what: &str| format!("page {page} of {} has an impossible {what}", path.display());
 
     // The stream is coded against Columns, so that is the width to describe it
     // by. Falling back to the image's own width rather than the 1728 the
@@ -601,9 +620,35 @@ fn fax_as_tiff(
         );
     }
 
-    let columns = u32::try_from(stated_columns).with_context(|| impossible("width"))?;
-    let rows = u32::try_from(stated_rows).with_context(|| impossible("height"))?;
-    let bytes = u32::try_from(image.content.len()).with_context(|| impossible("image size"))?;
+    let impossible =
+        |what: &str| format!("page {page} of {} has an impossible {what}", path.display());
+    Ok((
+        u32::try_from(stated_columns).with_context(|| impossible("width"))?,
+        u32::try_from(stated_rows).with_context(|| impossible("height"))?,
+        u32::try_from(image.content.len()).with_context(|| impossible("image size"))?,
+    ))
+}
+
+/// Wraps an undecoded CCITT fax stream in a TIFF header.
+///
+/// TIFF carries Group 3 and Group 4 natively, so this rewraps rather than
+/// decodes: the fax bytes are copied across untouched and only the header
+/// describing them is built here.
+#[cfg(feature = "ocr")]
+fn fax_as_tiff(
+    document: &lopdf::Document,
+    image: &PageImage<'_>,
+    page: u32,
+    path: &Path,
+) -> Result<Vec<u8>> {
+    /// TIFF field types, of which only these two are needed.
+    const SHORT: u16 = 3;
+    const LONG: u16 = 4;
+    /// Where the fax data sits, immediately after the eight-byte header.
+    const DATA_OFFSET: u32 = 8;
+
+    let parameters = fax_parameters(document, image);
+    let (columns, rows, bytes) = fax_geometry(image, &parameters, page, path)?;
 
     // Group 4 is a compression of its own; both flavours of Group 3 share one,
     // and are told apart by a bit in T4Options.
@@ -629,9 +674,12 @@ fn fax_as_tiff(
     let mut tiff = Vec::with_capacity(image.content.len() + fields.len() * 12 + 32);
     tiff.extend_from_slice(b"II");
     tiff.extend_from_slice(&42u16.to_le_bytes());
-    let directory = DATA_OFFSET
-        .checked_add(bytes)
-        .with_context(|| impossible("image size"))?;
+    let directory = DATA_OFFSET.checked_add(bytes).with_context(|| {
+        format!(
+            "page {page} of {} has an impossible image size",
+            path.display()
+        )
+    })?;
     tiff.extend_from_slice(&directory.to_le_bytes());
     tiff.extend_from_slice(image.content);
     tiff.extend_from_slice(&count.to_le_bytes());
@@ -700,23 +748,12 @@ fn fax_parameters(document: &lopdf::Document, image: &PageImage<'_>) -> FaxParam
         };
     };
 
-    let entry = |key: &[u8]| {
-        let object = parameters.get(key).ok()?;
-        document.dereference(object).ok().map(|(_, object)| object)
-    };
-    let number = |key: &[u8]| entry(key).and_then(|object| object.as_i64().ok());
-    let flag = |key: &[u8]| {
-        entry(key)
-            .and_then(|object| object.as_bool().ok())
-            .unwrap_or(false)
-    };
-
     FaxParameters {
-        k: number(b"K").unwrap_or(0),
-        black_is_1: flag(b"BlackIs1"),
-        byte_aligned: flag(b"EncodedByteAlign"),
-        columns: number(b"Columns").filter(|columns| *columns > 0),
-        rows: number(b"Rows").filter(|rows| *rows > 0),
+        k: number(document, parameters, b"K").unwrap_or(0),
+        black_is_1: flag(document, parameters, b"BlackIs1"),
+        byte_aligned: flag(document, parameters, b"EncodedByteAlign"),
+        columns: number(document, parameters, b"Columns").filter(|columns| *columns > 0),
+        rows: number(document, parameters, b"Rows").filter(|rows| *rows > 0),
     }
 }
 

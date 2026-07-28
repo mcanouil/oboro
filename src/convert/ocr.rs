@@ -41,15 +41,10 @@ pub fn image_to_text(path: &Path, languages: &[String]) -> Result<String> {
         bail!("cannot read {}: no such file", path.display());
     }
 
-    let mut engine = engine(languages)?;
-
-    engine
-        .set_image(path)
-        .with_context(|| format!("loading {} as an image", path.display()))?;
-
-    let text = engine
-        .get_utf8_text()
-        .with_context(|| format!("recognising text in {}", path.display()))?;
+    let image = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
+    let text = Recogniser::new(languages)?
+        .read(&image)
+        .with_context(|| format!("reading {} as an image", path.display()))?;
 
     if text.trim().is_empty() {
         bail!(
