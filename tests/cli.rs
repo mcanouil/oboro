@@ -953,6 +953,56 @@ fn doctor_reports_whether_the_hooks_are_installed() {
         .stdout(predicate::str::contains("PreToolUse  not installed"));
 }
 
+/// The plugin brings its own hooks, and they live in the agent's plugin cache
+/// rather than in any settings file. Reporting them as missing would send a
+/// protected user to `oboro hook install` and leave them running two copies.
+#[test]
+fn doctor_reports_the_hooks_the_plugin_carries() {
+    let workspace = Workspace::new();
+
+    let settings = workspace.path().join(".claude");
+    std::fs::create_dir_all(&settings).expect("creating the settings directory");
+    std::fs::write(
+        settings.join("settings.json"),
+        r#"{"enabledPlugins":{"oboro@oboro":true,"something-else@elsewhere":true}}"#,
+    )
+    .expect("writing the settings");
+
+    workspace
+        .command()
+        .arg("doctor")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("plugin      "))
+        .stdout(predicate::str::contains("oboro@oboro, enabled"))
+        .stdout(predicate::str::contains("something-else").not())
+        .stdout(predicate::str::contains("PostToolUse not in your settings"))
+        .stdout(predicate::str::contains("run `oboro hook install`").not());
+}
+
+/// A plugin the user turned off carries nothing, so saying otherwise would be
+/// the same lie in the other direction.
+#[test]
+fn doctor_ignores_a_plugin_that_is_installed_but_disabled() {
+    let workspace = Workspace::new();
+
+    let settings = workspace.path().join(".claude");
+    std::fs::create_dir_all(&settings).expect("creating the settings directory");
+    std::fs::write(
+        settings.join("settings.json"),
+        r#"{"enabledPlugins":{"oboro@oboro":false}}"#,
+    )
+    .expect("writing the settings");
+
+    workspace
+        .command()
+        .arg("doctor")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("plugin      ").not())
+        .stdout(predicate::str::contains("PostToolUse not installed"));
+}
+
 #[test]
 fn doctor_says_where_the_phone_regions_came_from() {
     let workspace = Workspace::new();

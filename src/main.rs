@@ -1136,17 +1136,39 @@ fn doctor(store: &StoreArgs) -> Result<()> {
 /// Both halves are reported even when neither is installed: a user who has only
 /// the cleaning half is in the worse position of the two, with the model writing
 /// placeholders into their files, and silence would not tell them.
+///
+/// The plugin is reported first, since it carries hooks of its own that no
+/// settings file names. Without that line the advice under each event would be
+/// wrong for anyone who installed that way, and following it would leave them
+/// running both copies.
 fn describe_hooks(cwd: &Path) -> Result<String> {
     use std::fmt::Write as _;
 
     let installed = oboro::hooks::installed_from(cwd);
+    let plugins = oboro::hooks::enabled_plugins_from(cwd);
     let mut report = String::new();
+
+    for plugin in &plugins {
+        writeln!(
+            report,
+            "plugin      {} ({}, enabled)",
+            plugin.file.display(),
+            plugin.key
+        )?;
+    }
 
     for event in oboro::hooks::EVENTS {
         let name = event.name;
         let found: Vec<_> = installed.iter().filter(|hook| hook.event == name).collect();
         if found.is_empty() {
-            writeln!(report, "{name:<11} not installed; run `oboro hook install`")?;
+            if plugins.is_empty() {
+                writeln!(report, "{name:<11} not installed; run `oboro hook install`")?;
+            } else {
+                writeln!(
+                    report,
+                    "{name:<11} not in your settings; the plugin carries it"
+                )?;
+            }
             continue;
         }
         for hook in found {

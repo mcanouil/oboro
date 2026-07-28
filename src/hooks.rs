@@ -75,21 +75,12 @@ fn settings_files(cwd: &Path) -> Vec<PathBuf> {
     files
 }
 
-/// Every Oboro hook named in the settings files reachable from `cwd`.
-///
-/// A file that does not exist, cannot be read, or holds invalid JSON
-/// contributes nothing: this is a report, and a settings file Oboro cannot
-/// parse is the agent's business rather than something to fail over.
+/// Every Oboro hook named in the settings files reachable from `cwd`, on the
+/// terms [`settings_documents`] reads them.
 #[must_use]
 pub fn installed_from(cwd: &Path) -> Vec<Installed> {
     let mut found = Vec::new();
-    for file in settings_files(cwd) {
-        let Ok(text) = std::fs::read_to_string(&file) else {
-            continue;
-        };
-        let Ok(settings) = serde_json::from_str::<serde_json::Value>(&text) else {
-            continue;
-        };
+    for (file, settings) in settings_documents(cwd) {
         for event in EVENTS {
             for (command, matcher) in commands_for(&settings, event.name) {
                 if names_oboro_hook(&command, event.subcommand) {
@@ -104,6 +95,63 @@ pub fn installed_from(cwd: &Path) -> Vec<Installed> {
         }
     }
     found
+}
+
+/// The Oboro plugin, where a settings file has it enabled.
+pub struct EnabledPlugin {
+    /// The key as written, such as `oboro@oboro`.
+    pub key: String,
+    /// The settings file enabling it.
+    pub file: PathBuf,
+}
+
+/// How an enabled Oboro plugin names itself in `enabledPlugins`: the plugin's
+/// own name, then the marketplace it was installed from.
+const PLUGIN_PREFIX: &str = "oboro@";
+
+/// Every enabled Oboro plugin named in the settings files reachable from `cwd`.
+///
+/// The plugin carries its own copy of the hooks, and those live in the agent's
+/// plugin cache rather than in any settings file, so [`installed_from`] cannot
+/// see them: `doctor` would tell a protected user to install what they already
+/// have. Enabling a plugin does land in a settings file, and that is what is
+/// read here rather than the cache, whose layout is the agent's business.
+#[must_use]
+pub fn enabled_plugins_from(cwd: &Path) -> Vec<EnabledPlugin> {
+    let mut found = Vec::new();
+    for (file, settings) in settings_documents(cwd) {
+        let Some(plugins) = settings
+            .get("enabledPlugins")
+            .and_then(serde_json::Value::as_object)
+        else {
+            continue;
+        };
+        for (key, enabled) in plugins {
+            if key.starts_with(PLUGIN_PREFIX) && enabled.as_bool() == Some(true) {
+                found.push(EnabledPlugin {
+                    key: key.clone(),
+                    file: file.clone(),
+                });
+            }
+        }
+    }
+    found
+}
+
+/// Every settings file reachable from `cwd` that holds JSON, with its contents.
+///
+/// A file that does not exist, cannot be read, or holds invalid JSON
+/// contributes nothing: these are reports, and a settings file Oboro cannot
+/// parse is the agent's business rather than something to fail over.
+fn settings_documents(cwd: &Path) -> Vec<(PathBuf, serde_json::Value)> {
+    settings_files(cwd)
+        .into_iter()
+        .filter_map(|file| {
+            let text = std::fs::read_to_string(&file).ok()?;
+            let settings = serde_json::from_str::<serde_json::Value>(&text).ok()?;
+            Some((file, settings))
+        })
+        .collect()
 }
 
 /// Every hook command configured for `event`, paired with its matcher.

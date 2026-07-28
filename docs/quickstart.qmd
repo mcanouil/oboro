@@ -139,7 +139,17 @@ Do this first if you use Claude Code.
 The agent reads files itself, so cleaning a copy by hand and pasting it in protects nothing: it already read the original.
 
 Two hooks put Oboro in that path.
-Name them both:
+The plugin names them both and brings the skill that explains their placeholders:
+
+```text
+/plugin marketplace add mcanouil/oboro
+/plugin install oboro@oboro
+```
+
+The plugin cannot install the binary its hooks run, so install that first, with any of the ways above.
+Without one, every matching tool result is withheld and every matching write is refused, and the message says what to install: the plugin fails closed rather than leaving you unprotected while looking installed.
+
+If you would rather keep the hooks in your own settings, one command names them both instead:
 
 ```bash
 oboro hook install
@@ -183,6 +193,14 @@ PostToolUse .claude/settings.local.json (Read|Grep|Bash|WebFetch, reachable)
 PreToolUse  .claude/settings.local.json (Write|Edit, reachable)
 ```
 
+Installed as a plugin, the hooks are in the plugin's own files rather than in your settings, and `doctor` says so:
+
+```text
+plugin      /home/you/.claude/settings.json (oboro@oboro, enabled)
+PostToolUse not in your settings; the plugin carries it
+PreToolUse  not in your settings; the plugin carries it
+```
+
 Ask the agent to read a file holding a phone number, and it will tell you about `[[PHONE_1]]`.
 Ask it to write that back, and the real number lands in the file.
 
@@ -209,6 +227,8 @@ Paste a document rather than retyping what is in it, and the hook covers it.
 
 With the hooks on, the agent reads `[[PHONE_1]]` without being told what that is.
 Left to guess, it reads a placeholder as a bug in your file, as a template to fill in, or as a redaction to work around.
+
+The plugin above already carries it, so this section is for anyone who did not install that way; installing it twice is not worth doing.
 
 Install the skill that explains them:
 
@@ -240,6 +260,16 @@ skill       /home/you/.claude/skills/oboro/SKILL.md (not installed)
 
 The skill is carried in the binary, so it describes the version of the hooks you have rather than the ones documented when you installed.
 Edit the installed copy and a later install leaves your edit alone, writing what it would have installed to `SKILL.md.oboro-proposed` beside it.
+
+For an agent other than Claude Code, the same skill is one command away:
+
+```bash
+npx skills add mcanouil/oboro
+```
+
+That reads `skills/oboro/SKILL.md` from this repository and installs it for whichever agents it finds.
+It installs the explanation and not the machine: no binary, no hooks, and nothing redacted until you add both.
+It also symlinks the skill by default, and Oboro does not write through a symbolic link, so `oboro skill install` afterwards names the link and refuses rather than overwriting what you installed.
 
 ## Clean a document
 

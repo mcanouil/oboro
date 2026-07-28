@@ -137,11 +137,16 @@ jobs:
           sed -E -i 's/^(date-released:[[:space:]]*).*/\1"'"${DATE}"'"/' CITATION.cff
           sed -i "s/^## \[Unreleased\]/## ${VERSION} (${DATE})/" CHANGELOG.md
 
+          # The plugin pins itself to this string, so a user is only offered an
+          # update when it changes; left behind, it would offer them the
+          # release before this one.
+          sed -E -i '0,/^  "version"/s/^(  "version":[[:space:]]*")[^"]+/\1'"${VERSION}"'/' .claude-plugin/plugin.json
+
           # Keep the lockfile in step, or the released tag builds a version that
           # disagrees with its own manifest.
           cargo update --workspace --quiet
 
-          git add Cargo.toml Cargo.lock CITATION.cff CHANGELOG.md
+          git add Cargo.toml Cargo.lock CITATION.cff CHANGELOG.md .claude-plugin/plugin.json
           git commit -m "ci: bump version to ${VERSION} :rocket:" -m "[skip ci]"
           git push --force origin "${BRANCH}"
 
