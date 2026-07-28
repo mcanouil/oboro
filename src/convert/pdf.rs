@@ -343,9 +343,8 @@ fn collect_images<'a>(
     images: &mut Vec<PageImage<'a>>,
 ) {
     let Some(xobjects) = resources
-        .get(b"XObject")
+        .get_deref(b"XObject", document)
         .ok()
-        .and_then(|object| resolved(document, object))
         .and_then(|object| object.as_dict().ok())
     else {
         return;
@@ -363,9 +362,8 @@ fn collect_images<'a>(
 
         let subtype = stream
             .dict
-            .get(b"Subtype")
+            .get_deref(b"Subtype", document)
             .ok()
-            .and_then(|object| resolved(document, object))
             .and_then(|object| object.as_name().ok())
             .unwrap_or_default();
 
@@ -378,9 +376,8 @@ fn collect_images<'a>(
             }
             if let Some(inner) = stream
                 .dict
-                .get(b"Resources")
+                .get_deref(b"Resources", document)
                 .ok()
-                .and_then(|object| resolved(document, object))
                 .and_then(|object| object.as_dict().ok())
             {
                 collect_images(document, inner, depth + 1, walk, images);
@@ -441,9 +438,8 @@ fn page_resources(document: &lopdf::Document, id: lopdf::ObjectId) -> Vec<&lopdf
     for _ in 0..MAX_PAGE_TREE_DEPTH {
         let Some(dictionary) = node else { break };
         if let Some(found) = dictionary
-            .get(b"Resources")
+            .get_deref(b"Resources", document)
             .ok()
-            .and_then(|object| resolved(document, object))
             .and_then(|object| object.as_dict().ok())
         {
             resources.push(found);
@@ -472,8 +468,7 @@ fn resolved<'a>(
 /// Reads an integer entry, following an indirect reference.
 #[cfg(feature = "ocr")]
 fn number(document: &lopdf::Document, dictionary: &lopdf::Dictionary, key: &[u8]) -> Option<i64> {
-    let object = dictionary.get(key).ok()?;
-    resolved(document, object)?.as_i64().ok()
+    dictionary.get_deref(key, document).ok()?.as_i64().ok()
 }
 
 /// Reads a boolean entry, following an indirect reference.
@@ -483,14 +478,18 @@ fn number(document: &lopdf::Document, dictionary: &lopdf::Dictionary, key: &[u8]
 #[cfg(feature = "ocr")]
 fn flag(document: &lopdf::Document, dictionary: &lopdf::Dictionary, key: &[u8]) -> bool {
     dictionary
-        .get(key)
+        .get_deref(key, document)
         .ok()
-        .and_then(|object| resolved(document, object))
         .and_then(|object| object.as_bool().ok())
         .unwrap_or(false)
 }
 
 /// Reads `/Filter`, which is one name or an array of them.
+///
+/// Read here rather than through `lopdf::Stream::filters`, which splits the
+/// same two shapes but takes each name as written: an entry given as an
+/// indirect reference reads as no filter at all, and an image whose codec goes
+/// unread is one this would hand to the recogniser undecoded.
 #[cfg(feature = "ocr")]
 fn filters_of(document: &lopdf::Document, dictionary: &lopdf::Dictionary) -> Vec<String> {
     let name = |object: &lopdf::Object| {
@@ -500,11 +499,7 @@ fn filters_of(document: &lopdf::Document, dictionary: &lopdf::Dictionary) -> Vec
             .map(|name| String::from_utf8_lossy(name).into_owned())
     };
 
-    let Some(filter) = dictionary
-        .get(b"Filter")
-        .ok()
-        .and_then(|object| resolved(document, object))
-    else {
+    let Some(filter) = dictionary.get_deref(b"Filter", document).ok() else {
         return Vec::new();
     };
 
