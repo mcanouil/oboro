@@ -1010,6 +1010,12 @@ fn chosen_scope(project: bool, user: bool) -> Option<Scope> {
 /// "project" and "user" do not. The installers write different files, so each
 /// passes its own way of resolving one, and installing both halves at once
 /// passes both: what a scope means is exactly the files it would write.
+/// How wide the column naming what a scope covers is, in [`ask_for_scope`].
+const COVERS: usize = 14;
+
+/// What precedes that column: the choice's number and the two spaces after it.
+const NUMBER: usize = 3;
+
 fn ask_for_scope(
     cwd: &Path,
     what: &str,
@@ -1028,9 +1034,9 @@ fn ask_for_scope(
             // The scope is named once, beside the first of its paths; the rest
             // line up underneath it rather than repeating it.
             let label = if line == 0 {
-                format!("{}  {covers:<14}", choice + 1)
+                format!("{}  {covers:<COVERS$}", choice + 1)
             } else {
-                " ".repeat(17)
+                " ".repeat(NUMBER + COVERS)
             };
             match path_for(*scope, cwd) {
                 Ok(path) => oboro::note!("{label} {}", path.display()),

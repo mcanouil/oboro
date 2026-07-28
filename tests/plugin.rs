@@ -39,6 +39,19 @@ fn the_plugin_carries_this_build_s_version() {
     assert_eq!(plugin["name"].as_str(), Some("oboro"));
 }
 
+/// `doctor` finds an enabled plugin by the name it goes by in `enabledPlugins`,
+/// which is this manifest's name. Renamed here alone, the plugin would carry
+/// the hooks while `doctor` went on saying nothing was installed.
+#[test]
+fn the_plugin_goes_by_the_name_doctor_looks_for() {
+    let plugin = parse(PLUGIN, "plugin.json");
+
+    assert_eq!(
+        format!("{}@", plugin["name"].as_str().expect("a name")),
+        oboro::hooks::PLUGIN_PREFIX
+    );
+}
+
 /// The entry is what users type, and the source is what makes the skill in
 /// `skills/oboro` the plugin's own rather than a copy of it.
 #[test]

@@ -110,7 +110,11 @@ pub struct EnabledPlugin {
 
 /// How an enabled Oboro plugin names itself in `enabledPlugins`: the plugin's
 /// own name, then the marketplace it was installed from.
-const PLUGIN_PREFIX: &str = "oboro@";
+///
+/// Public so the plugin's own tests can hold it to the name in the manifest.
+/// Renamed there and left alone here, `doctor` would quietly stop reporting a
+/// plugin that was still carrying the hooks.
+pub const PLUGIN_PREFIX: &str = "oboro@";
 
 /// Every enabled Oboro plugin named in the settings files reachable from `cwd`.
 ///
