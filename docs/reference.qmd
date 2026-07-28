@@ -160,6 +160,9 @@ The project scope is deliberately the local file rather than the shared `.claude
 Turning on a hook that intercepts every `Read`, `Grep`, `Bash` and `WebFetch` is a decision for whoever is sitting at the machine, and a committed hook naming a binary a colleague has not installed fails closed on every tool call they make.
 `doctor` reads both files, so either is reported.
 
+The [plugin](quickstart.qmd#wire-it-into-claude-code) names the same two hooks in its own files, so install one or the other rather than both.
+Its hooks go through a wrapper rather than naming `oboro` directly, since a plugin can be installed on a machine that has no binary: without one the wrapper withholds the result and refuses the call itself, with a message saying what to install.
+
 ::: {.callout-note}
 
 ## What it will not do to your settings
@@ -240,6 +243,7 @@ Writes the skill that tells an agent what the hooks have done to what it reads.
 
 ```bash
 oboro skill install
+oboro skill install --with-hooks
 oboro skill show
 ```
 
@@ -257,6 +261,13 @@ Install the Oboro skill where? [1/2]
 
 There is no default, because the wrong scope fails silently: the agent simply never reads the file.
 With no terminal to ask, the command fails and names both flags rather than choosing for you.
+
+`--with-hooks` names both hooks in the same scope as well, which is the same merge [`hook install`](#install) does, so one command covers what the plugin covers.
+Both halves are planned before either is written: a scope that refuses one, through a symbolic link or settings that cannot be merged into, installs neither, since a skill describing hooks that are not there is worse than no skill.
+The question then shows both files a scope would write, and `--dry-run` shows both.
+
+The same text reaches an agent two other ways, both reading it from this repository rather than copying it: the [plugin](quickstart.qmd#wire-it-into-claude-code), which brings the hooks with it, and `npx skills add mcanouil/oboro`, which brings only the skill and works for agents other than Claude Code.
+The second symlinks by default, and Oboro does not write through a symbolic link, so `install` afterwards names the link and refuses.
 
 `--dry-run` prints the path and stops.
 `show` prints the text to standard output and writes nothing.
@@ -325,6 +336,19 @@ The last four lines answer a different question: whether the agent side is wired
 
 Both hook events are reported whether or not they are found, because having only the first is the worst of the three states: the model is shown placeholders and nothing puts the values back, so they reach your files.
 `reachable` means the program the hook names can actually be run; a hook naming a binary that is not on `PATH` is configured and useless.
+
+An enabled plugin is reported above them, since what it carries is in its own files rather than in any settings file or skills directory, and reporting all four as missing would send you to `oboro hook install` and `oboro skill install` for what you already have:
+
+```text
+plugin      /Users/you/.claude/settings.json (oboro@oboro, enabled)
+PostToolUse not in your settings; the plugin carries it
+PreToolUse  not in your settings; the plugin carries it
+skill       /Users/you/work/.claude/skills/oboro/SKILL.md (not installed here; the plugin carries its own)
+skill       /Users/you/.claude/skills/oboro/SKILL.md (not installed here; the plugin carries its own)
+```
+
+Installing on top of it is worth avoiding rather than merely noticing: two copies of a hook both run on every matching tool call, cleaning what is already cleaned and restoring what is already restored.
+`oboro hook install` and `oboro skill install --with-hooks` both say so when they find the plugin enabled, since that is the moment the second copy would be created.
 
 Both [skill](#skill) scopes are reported for the same reason.
 `current` is the text this build carries; `edited` is a copy that has drifted from it, which is the state where the agent is being told something the binary no longer does.

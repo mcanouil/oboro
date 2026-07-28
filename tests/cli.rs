@@ -953,6 +953,87 @@ fn doctor_reports_whether_the_hooks_are_installed() {
         .stdout(predicate::str::contains("PreToolUse  not installed"));
 }
 
+/// The plugin brings its own hooks, and they live in the agent's plugin cache
+/// rather than in any settings file. Reporting them as missing would send a
+/// protected user to `oboro hook install` and leave them running two copies.
+#[test]
+fn doctor_reports_the_hooks_the_plugin_carries() {
+    let workspace = Workspace::new();
+
+    let settings = workspace.path().join(".claude");
+    std::fs::create_dir_all(&settings).expect("creating the settings directory");
+    std::fs::write(
+        settings.join("settings.json"),
+        r#"{"enabledPlugins":{"oboro@oboro":true,"something-else@elsewhere":true}}"#,
+    )
+    .expect("writing the settings");
+
+    workspace
+        .command()
+        .arg("doctor")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("plugin      "))
+        .stdout(predicate::str::contains("oboro@oboro, enabled"))
+        .stdout(predicate::str::contains("something-else").not())
+        .stdout(predicate::str::contains("PostToolUse not in your settings"))
+        .stdout(predicate::str::contains("run `oboro hook install`").not())
+        // The plugin carries a skill too, so reporting both scopes as simply
+        // missing would be the same false report on the other half.
+        .stdout(predicate::str::contains(
+            "not installed here; the plugin carries its own",
+        ));
+}
+
+/// `hook install` is the moment a second copy of the hooks is created, and both
+/// copies then run on every matching tool call. Saying so afterwards in
+/// `doctor` is too late to stop it.
+#[test]
+fn hook_install_says_so_when_a_plugin_already_carries_the_hooks() {
+    let workspace = Workspace::new();
+
+    let settings = workspace.path().join(".claude");
+    std::fs::create_dir_all(&settings).expect("creating the settings directory");
+    std::fs::write(
+        settings.join("settings.json"),
+        r#"{"enabledPlugins":{"oboro@oboro":true}}"#,
+    )
+    .expect("writing the settings");
+
+    workspace
+        .command()
+        .arg("hook")
+        .arg("install")
+        .arg("--project")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("oboro@oboro"))
+        .stderr(predicate::str::contains("twice"));
+}
+
+/// A plugin the user turned off carries nothing, so saying otherwise would be
+/// the same lie in the other direction.
+#[test]
+fn doctor_ignores_a_plugin_that_is_installed_but_disabled() {
+    let workspace = Workspace::new();
+
+    let settings = workspace.path().join(".claude");
+    std::fs::create_dir_all(&settings).expect("creating the settings directory");
+    std::fs::write(
+        settings.join("settings.json"),
+        r#"{"enabledPlugins":{"oboro@oboro":false}}"#,
+    )
+    .expect("writing the settings");
+
+    workspace
+        .command()
+        .arg("doctor")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("plugin      ").not())
+        .stdout(predicate::str::contains("PostToolUse not installed"));
+}
+
 #[test]
 fn doctor_says_where_the_phone_regions_came_from() {
     let workspace = Workspace::new();
@@ -1139,6 +1220,110 @@ fn skill_install_dry_run_names_the_path_and_writes_nothing() {
     assert!(
         !workspace.path().join(".claude").exists(),
         "a dry run must not create the directory either"
+    );
+}
+
+/// The two halves are one decision: a skill describing placeholders no hook
+/// produces explains nothing, and hooks without the skill leave the agent
+/// guessing at what it is being shown.
+#[test]
+fn skill_install_with_hooks_installs_both_halves_into_one_scope() {
+    let workspace = Workspace::new();
+
+    workspace
+        .command()
+        .arg("skill")
+        .arg("install")
+        .arg("--project")
+        .arg("--with-hooks")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("SKILL.md"))
+        .stderr(predicate::str::contains("PostToolUse"))
+        .stderr(predicate::str::contains("PreToolUse"));
+
+    assert!(
+        workspace
+            .path()
+            .join(".claude/skills/oboro/SKILL.md")
+            .exists()
+    );
+    let settings = std::fs::read_to_string(workspace.path().join(".claude/settings.local.json"))
+        .expect("reading the settings");
+    assert!(settings.contains("oboro hook post-tool-use"));
+    assert!(settings.contains("oboro hook pre-tool-use"));
+
+    workspace
+        .command()
+        .arg("doctor")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("(current)"))
+        .stdout(predicate::str::contains("settings.local.json").count(2));
+}
+
+/// A dry run has to cover both halves or it would answer a question it was not
+/// asked: what one of the two would do.
+#[test]
+fn skill_install_with_hooks_dry_run_shows_both_and_writes_neither() {
+    let workspace = Workspace::new();
+
+    workspace
+        .command()
+        .arg("skill")
+        .arg("install")
+        .arg("--project")
+        .arg("--with-hooks")
+        .arg("--dry-run")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("SKILL.md"))
+        .stderr(predicate::str::contains("nothing was written"))
+        .stdout(predicate::str::contains("oboro hook post-tool-use"));
+
+    assert!(
+        !workspace.path().join(".claude").exists(),
+        "a dry run must not create the directory either"
+    );
+}
+
+/// Both plans are made before either is carried out, so a scope that refuses
+/// one half installs neither. Half an install is the state the pair exists to
+/// avoid: the skill would describe hooks that are not there.
+#[cfg(unix)]
+#[test]
+fn skill_install_with_hooks_writes_nothing_when_the_settings_are_a_symbolic_link() {
+    let workspace = Workspace::new();
+    let elsewhere = workspace.path().join("elsewhere.json");
+    std::fs::write(&elsewhere, "{}").expect("writing the link target");
+    std::fs::create_dir_all(workspace.path().join(".claude")).expect("creating .claude");
+    std::os::unix::fs::symlink(
+        &elsewhere,
+        workspace.path().join(".claude/settings.local.json"),
+    )
+    .expect("linking");
+
+    workspace
+        .command()
+        .arg("skill")
+        .arg("install")
+        .arg("--project")
+        .arg("--with-hooks")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("symbolic link"));
+
+    assert!(
+        !workspace
+            .path()
+            .join(".claude/skills/oboro/SKILL.md")
+            .exists(),
+        "the skill must not be written when the hooks cannot be"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&elsewhere).expect("reading the link target"),
+        "{}",
+        "nothing is written through the link"
     );
 }
 

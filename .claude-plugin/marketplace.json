@@ -1,0 +1,16 @@
+{
+  "name": "oboro",
+  "owner": {
+    "name": "Mickaël Canouil",
+    "url": "https://github.com/mcanouil"
+  },
+  "description": "Oboro, a local anonymisation layer between your files and a language model.",
+  "plugins": [
+    {
+      "name": "oboro",
+      "source": "./",
+      "category": "security",
+      "tags": ["privacy", "anonymisation", "pii", "redaction"]
+    }
+  ]
+}
