@@ -70,8 +70,18 @@ The default prebuilt binary and Docker image carry no optional feature. Name rec
 ## In Claude Code
 
 Claude Code reads files itself, so pasting a cleaned copy into it protects
-nothing: the agent already read the original. Two hooks put Oboro in that path.
-Name them in `.claude/settings.json`:
+nothing: the agent already read the original. Two hooks put Oboro in that path,
+and one command names them both:
+
+```bash
+oboro hook install
+```
+
+It asks whether to cover this project, in `.claude/settings.local.json`, or
+every project, in `~/.claude/settings.json`. `--project` and `--user` skip the
+question, and `--dry-run` prints the settings without writing them. Nothing
+already in the file is moved, reordered or removed, and a hook already naming
+`oboro hook` is left exactly as you wrote it. This is what it adds:
 
 ```json
 {
@@ -98,7 +108,20 @@ back into what the model writes, so the placeholder never reaches your source.
 Both are needed: the first without the second means the model writes
 placeholders into your files.
 
-`oboro doctor` reports which halves are installed, since naming them is your job.
+An agent that was never told what `[[PHONE_1]]` is will guess: a bug in your
+file, a template to fill in, or a redaction to work around. Install the skill
+that explains it:
+
+```bash
+oboro skill install
+```
+
+It asks about scope the same way, and `oboro skill show` prints the text without
+writing anything.
+
+`oboro doctor` reports which halves are installed and whether the skill is
+there, since believing the agent side is wired up is not the same as having
+done it.
 
 If Oboro cannot do its job the tool does not quietly get its way: on the way out
 the result is withheld, on the way in the call is refused, and you are told why.
