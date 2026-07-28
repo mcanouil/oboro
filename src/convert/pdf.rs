@@ -239,13 +239,16 @@ fn page_images(
         .map(|image| readable(document, image, page, path))
         .collect::<Result<_>>()?;
 
-    if images.is_empty() && !found.is_empty() {
+    if images.is_empty()
+        && let Some(largest) = found.iter().max_by_key(|image| image.width * image.height)
+    {
         bail!(
-            "page {page} of {} holds nothing but images too small to be a scan, the \
-             largest {}x{} pixels. Whatever the page says is not in them.",
+            "page {page} of {} holds nothing but images too small to be a scan, the largest \
+             {}x{} pixels against a floor of {MIN_SCAN_PIXELS}. Whatever the page says is \
+             not in them.",
             path.display(),
-            found.iter().map(|image| image.width).max().unwrap_or(0),
-            found.iter().map(|image| image.height).max().unwrap_or(0)
+            largest.width,
+            largest.height
         );
     }
     Ok(images)
@@ -260,11 +263,27 @@ fn page_images(
 #[cfg(feature = "ocr")]
 fn image_streams(document: &lopdf::Document, id: lopdf::ObjectId) -> Vec<PageImage<'_>> {
     let mut images = Vec::new();
-    let mut seen = std::collections::HashSet::new();
+    let mut walk = Walk::default();
     for resource in page_resources(document, id) {
-        collect_images(document, resource, 0, &mut seen, &mut images);
+        collect_images(document, resource, 0, &mut walk, &mut images);
     }
     images
+}
+
+/// What has already been looked at while gathering one page's images.
+#[cfg(feature = "ocr")]
+#[derive(Default)]
+struct Walk {
+    /// Images already gathered, so the same one is not read twice. A page and
+    /// its parent may carry the same resources, and a document can be built so
+    /// that they do, turning one image into many decoded copies held at once.
+    images: std::collections::HashSet<lopdf::ObjectId>,
+    /// Forms already descended into, and how deep they were at the time.
+    ///
+    /// The depth is kept because the descent is bounded: a form reached at the
+    /// limit contributes nothing, and reaching it again from higher up must
+    /// try again rather than treat it as done.
+    forms: std::collections::HashMap<lopdf::ObjectId, usize>,
 }
 
 /// Adds every image reachable from one resource dictionary to `images`.
@@ -272,23 +291,14 @@ fn image_streams(document: &lopdf::Document, id: lopdf::ObjectId) -> Vec<PageIma
 /// Descends into form `XObject`s, since a page may draw its scan through one
 /// rather than referring to the image directly, and a page whose only image
 /// sits inside a form would otherwise look like a page with no image at all.
-///
-/// `seen` is what keeps the same `XObject` from being read twice, which matters
-/// twice over: a page and its parent may carry the same resources, and a
-/// document can be built so that they do, turning one image into many decoded
-/// copies held at once.
 #[cfg(feature = "ocr")]
 fn collect_images<'a>(
     document: &'a lopdf::Document,
     resources: &'a lopdf::Dictionary,
     depth: usize,
-    seen: &mut std::collections::HashSet<lopdf::ObjectId>,
+    walk: &mut Walk,
     images: &mut Vec<PageImage<'a>>,
 ) {
-    if depth >= MAX_XOBJECT_DEPTH {
-        return;
-    }
-
     let Some(xobjects) = resources
         .get(b"XObject")
         .ok()
@@ -302,11 +312,7 @@ fn collect_images<'a>(
         // An XObject is named by reference in every document that is not
         // hand-written, and the reference is what identifies it across the
         // resource dictionaries it appears in.
-        if let Ok(id) = value.as_reference()
-            && !seen.insert(id)
-        {
-            continue;
-        }
+        let id = value.as_reference().ok();
         let Some(stream) = resolved(document, value).and_then(|object| object.as_stream().ok())
         else {
             continue;
@@ -315,9 +321,24 @@ fn collect_images<'a>(
         let subtype = stream
             .dict
             .get(b"Subtype")
-            .and_then(lopdf::Object::as_name)
+            .ok()
+            .and_then(|object| resolved(document, object))
+            .and_then(|object| object.as_name().ok())
             .unwrap_or_default();
+
         if subtype == b"Form" {
+            if depth + 1 >= MAX_XOBJECT_DEPTH {
+                continue;
+            }
+            // Marked only once it is actually descended into, and only when
+            // this is the shallowest it has been reached from, so a form
+            // stopped by the limit is not recorded as read.
+            if let Some(id) = id {
+                if depth >= walk.forms.get(&id).copied().unwrap_or(usize::MAX) {
+                    continue;
+                }
+                walk.forms.insert(id, depth);
+            }
             if let Some(inner) = stream
                 .dict
                 .get(b"Resources")
@@ -325,11 +346,16 @@ fn collect_images<'a>(
                 .and_then(|object| resolved(document, object))
                 .and_then(|object| object.as_dict().ok())
             {
-                collect_images(document, inner, depth + 1, seen, images);
+                collect_images(document, inner, depth + 1, walk, images);
             }
             continue;
         }
         if subtype != b"Image" {
+            continue;
+        }
+        if let Some(id) = id
+            && !walk.images.insert(id)
+        {
             continue;
         }
 
@@ -1200,6 +1226,90 @@ mod tests {
         );
     }
 
+    /// A form stopped by the depth limit has contributed nothing, so reaching
+    /// it again from higher up must try it again.
+    ///
+    /// Recording it as looked at the first time would lose the image for good,
+    /// and the page would be refused as holding none.
+    #[cfg(feature = "ocr")]
+    #[test]
+    fn a_form_passed_over_at_the_depth_limit_is_tried_again_from_higher_up() {
+        use lopdf::{Object, Stream};
+
+        let (image_dictionary, content) = fixture_image("scan.pdf");
+        let mut document = built(vec![TestPage::default()]);
+        let image = document.add_object(Stream::new(image_dictionary, content));
+
+        let form = |document: &mut lopdf::Document, holds: Object| {
+            document.add_object(Stream::new(
+                dictionary! {
+                    "Type" => "XObject",
+                    "Subtype" => "Form",
+                    "BBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
+                    "Resources" => dictionary! { "XObject" => dictionary! { "X" => holds } },
+                },
+                b"/X Do".to_vec(),
+            ))
+        };
+
+        // The form holding the scan, then a chain deep enough that reaching
+        // the scan through it runs out of depth first.
+        // One wrapper short of the limit, so the carrier is reached through
+        // the chain at exactly the depth where the descent gives up: seen, but
+        // never read.
+        let carrier = form(&mut document, Object::Reference(image));
+        let mut chain = Object::Reference(carrier);
+        for _ in 0..MAX_XOBJECT_DEPTH - 1 {
+            chain = Object::Reference(form(&mut document, chain));
+        }
+
+        let (_, page_id) = document.get_pages().into_iter().next().expect("a page");
+        document.get_dictionary_mut(page_id).expect("the page").set(
+            "Resources",
+            // The deep chain is named first, so the carrier is reached at
+            // the limit before it is reached directly.
+            dictionary! {
+                "XObject" => dictionary! {
+                    "A" => chain,
+                    "B" => Object::Reference(carrier),
+                },
+            },
+        );
+
+        let (_dir, path) = written(document);
+        let text = to_text(&path, &[]).expect("the scan is reachable within the limit");
+        assert!(
+            text.contains("Acme Consulting SARL"),
+            "the deep chain consumed the form that held the scan:\n{text}"
+        );
+    }
+
+    /// An image whose `/Subtype` is written as an indirect reference is still
+    /// an image. Reading the entry unresolved drops it, and a page carrying
+    /// only that one would be refused as holding no image.
+    #[cfg(feature = "ocr")]
+    #[test]
+    fn an_indirect_subtype_is_resolved() {
+        let (mut image_dictionary, content) = fixture_image("scan.pdf");
+        let mut document = built(vec![TestPage::default()]);
+        let subtype = document.add_object(lopdf::Object::Name(b"Image".to_vec()));
+        image_dictionary.set("Subtype", subtype);
+        let image = document.add_object(lopdf::Stream::new(image_dictionary, content));
+
+        let (_, page_id) = document.get_pages().into_iter().next().expect("a page");
+        document.get_dictionary_mut(page_id).expect("the page").set(
+            "Resources",
+            dictionary! { "XObject" => dictionary! { "Im0" => image } },
+        );
+
+        let (_dir, path) = written(document);
+        let text = to_text(&path, &[]).expect("an indirect subtype must be followed");
+        assert!(
+            text.contains("Acme Consulting SARL"),
+            "expected the provider name, got:\n{text}"
+        );
+    }
+
     /// Refusing a page because its images are too small must say so. Telling
     /// the user the page holds no image sends them looking for the wrong
     /// thing.
@@ -1225,6 +1335,50 @@ mod tests {
         assert!(
             format!("{error:#}").contains("too small"),
             "the error must say why the images were passed over: {error:#}"
+        );
+    }
+
+    /// The size reported must belong to an image that is really there.
+    ///
+    /// Taking the widest width beside the tallest height would describe an
+    /// image no page holds, and one that clears the floor it was refused by.
+    #[cfg(feature = "ocr")]
+    #[test]
+    fn the_size_reported_for_tiny_images_is_one_that_exists() {
+        let rule = |width: i64, height: i64| {
+            (
+                dictionary! {
+                    "Type" => "XObject",
+                    "Subtype" => "Image",
+                    "Width" => width,
+                    "Height" => height,
+                    "ColorSpace" => "DeviceGray",
+                    "BitsPerComponent" => 8,
+                    "Filter" => "DCTDecode",
+                },
+                b"rule".to_vec(),
+            )
+        };
+
+        let mut document = built(vec![TestPage::default()]);
+        let wide = document.add_object(lopdf::Stream::new(rule(20, 8).0, rule(20, 8).1));
+        let tall = document.add_object(lopdf::Stream::new(rule(8, 20).0, rule(8, 20).1));
+        let (_, page_id) = document.get_pages().into_iter().next().expect("a page");
+        document.get_dictionary_mut(page_id).expect("the page").set(
+            "Resources",
+            dictionary! { "XObject" => dictionary! { "A" => wide, "B" => tall } },
+        );
+
+        let (_dir, path) = written(document);
+        let error = to_text(&path, &[]).expect_err("neither rule is a scan");
+        let rendered = format!("{error:#}");
+        assert!(
+            !rendered.contains("20x20"),
+            "the error described an image that is not on the page: {rendered}"
+        );
+        assert!(
+            rendered.contains("20x8") || rendered.contains("8x20"),
+            "the error must name a size the page really holds: {rendered}"
         );
     }
 
