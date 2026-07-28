@@ -71,6 +71,11 @@ A scan drawn through a form XObject rather than placed on the page directly is f
 
 The refusal is per page rather than per document: once recognition is under way, one unreadable page refuses the whole file rather than dropping out of it silently.
 
+What each page must supply is an image, not text recovered from it.
+A page whose image yields no text is kept, and only a document that yields nothing at all is refused.
+That is deliberate, because a blank page is ordinary in a scan and nothing distinguishes it from a page too faint to read.
+It is also the gap worth knowing about: a page whose writing is too faint contributes nothing, and the document still comes back as read.
+
 Without `--features ocr` every scanned PDF is refused, and the error says so.
 
 Note that the decision to recognise at all is taken across the document, not per page, because the extractor reports one body of text rather than one per page.

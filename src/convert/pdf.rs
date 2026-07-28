@@ -16,6 +16,14 @@
 //! the scanner. Once recognition is under way every page must contribute an
 //! image, so a page drawn some other way refuses the document rather than
 //! quietly dropping out of it.
+//!
+//! What is required is the image, not text from it. A page whose image
+//! recognises as nothing is kept and contributes nothing, and only a document
+//! that recognises as nothing throughout is refused. This is a deliberate
+//! exemption rather than an oversight: a blank page is ordinary in a scan, its
+//! real text is empty, and a page too faint to read cannot be told apart from
+//! one that is genuinely blank. Refusing on it would make any duplex scan
+//! unreadable.
 
 use std::panic::AssertUnwindSafe;
 use std::path::Path;
@@ -199,6 +207,15 @@ const PASSTHROUGH_FILTERS: [&str; 2] = ["DCTDecode", "JPXDecode"];
 #[cfg(feature = "ocr")]
 const MIN_SCAN_PIXELS: i64 = 16;
 
+/// The most pixels a fax image may claim before it is refused unread.
+///
+/// The dimensions are the document's to state, and the recogniser allocates
+/// from them: a three-kilobyte file claiming a hundred thousand pixels square
+/// costs most of a gigabyte before the library refuses it. Generous against a
+/// real page, which is some 143 million pixels at 1200 dpi.
+#[cfg(feature = "ocr")]
+const MAX_SCAN_PIXELS: i64 = 400_000_000;
+
 /// How much of a filter name reaches an error message.
 #[cfg(feature = "ocr")]
 const FILTER_NAME_LIMIT: usize = 40;
@@ -240,7 +257,12 @@ fn page_images(
         .collect::<Result<_>>()?;
 
     if images.is_empty()
-        && let Some(largest) = found.iter().max_by_key(|image| image.width * image.height)
+        && let Some(largest) = found
+            .iter()
+            // Both dimensions come from the document unchecked, so the area is
+            // computed defensively: a negative pair multiplies to a positive
+            // that would win, and a large pair overflows.
+            .max_by_key(|image| image.width.max(0).saturating_mul(image.height.max(0)))
     {
         bail!(
             "page {page} of {} holds nothing but images too small to be a scan, the largest \
@@ -564,10 +586,23 @@ fn fax_as_tiff(
     // by. Falling back to the image's own width rather than the 1728 the
     // specification defaults to: a writer omitting Columns for a page that is
     // not fax-width meant the page's width.
-    let columns = u32::try_from(parameters.columns.unwrap_or(image.width))
-        .with_context(|| impossible("width"))?;
-    let rows = u32::try_from(parameters.rows.unwrap_or(image.height))
-        .with_context(|| impossible("height"))?;
+    let stated_columns = parameters.columns.unwrap_or(image.width);
+    let stated_rows = parameters.rows.unwrap_or(image.height);
+
+    // The recogniser allocates from what the header says, so an image claiming
+    // more than a page could hold is refused before it is described rather
+    // than after the memory has gone.
+    if stated_columns.max(0).saturating_mul(stated_rows.max(0)) > MAX_SCAN_PIXELS {
+        bail!(
+            "page {page} of {} holds a fax image claiming {stated_columns}x{stated_rows} \
+             pixels, more than any page carries. Reading it would cost far more memory \
+             than the file could justify.",
+            path.display()
+        );
+    }
+
+    let columns = u32::try_from(stated_columns).with_context(|| impossible("width"))?;
+    let rows = u32::try_from(stated_rows).with_context(|| impossible("height"))?;
     let bytes = u32::try_from(image.content.len()).with_context(|| impossible("image size"))?;
 
     // Group 4 is a compression of its own; both flavours of Group 3 share one,
@@ -1379,6 +1414,66 @@ mod tests {
         assert!(
             rendered.contains("20x8") || rendered.contains("8x20"),
             "the error must name a size the page really holds: {rendered}"
+        );
+    }
+
+    /// Dimensions come from the document unchecked, so working out which
+    /// image was largest must not overflow on the way.
+    ///
+    /// A width of `i64::MAX` beside a small height multiplies past the end of
+    /// the type, which panics where overflow is checked and picks nonsense
+    /// where it is not.
+    #[cfg(feature = "ocr")]
+    #[test]
+    fn an_absurd_size_does_not_overflow_the_comparison() {
+        let (_dir, path) = written(built(vec![TestPage {
+            image: Some((
+                dictionary! {
+                    "Type" => "XObject",
+                    "Subtype" => "Image",
+                    "Width" => i64::MAX,
+                    "Height" => 8,
+                    "ColorSpace" => "DeviceGray",
+                    "BitsPerComponent" => 8,
+                    "Filter" => "DCTDecode",
+                },
+                b"absurd".to_vec(),
+            )),
+            ..TestPage::default()
+        }]));
+        let error = to_text(&path, &[]).expect_err("a one-pixel-tall image is not a scan");
+        let rendered = format!("{error:#}");
+        assert!(
+            rendered.contains("too small"),
+            "expected the refusal, got: {rendered}"
+        );
+        assert!(
+            !rendered.contains("crashed"),
+            "the comparison overflowed: {rendered}"
+        );
+    }
+
+    /// A fax image may claim any size it likes, and the recogniser allocates
+    /// from what it claims. Refusing before the header is built keeps a small
+    /// file from costing most of a gigabyte.
+    #[cfg(feature = "ocr")]
+    #[test]
+    fn a_fax_image_claiming_more_than_a_page_is_refused() {
+        let (mut dictionary, content) = fixture_image("scan-fax.pdf");
+        dictionary.set("Width", 100_000_i64);
+        dictionary.set("Height", 100_000_i64);
+        dictionary.set(
+            "DecodeParms",
+            dictionary! { "K" => -1, "Columns" => 100_000_i64, "Rows" => 100_000_i64 },
+        );
+        let (_dir, path) = written(built(vec![TestPage {
+            image: Some((dictionary, content)),
+            ..TestPage::default()
+        }]));
+        let error = to_text(&path, &[]).expect_err("no page is a hundred thousand pixels square");
+        assert!(
+            format!("{error:#}").contains("more than any page carries"),
+            "the error must say what is wrong: {error:#}"
         );
     }
 
