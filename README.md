@@ -213,7 +213,7 @@ a name in different subfolders do not collide.
 | `.csv`, `.tsv`         | Read byte for byte; the output keeps the tabular extension        |
 | `.docx`                | Text runs from the body, headers, footers, footnotes and comments |
 | `.xlsx`, `.xlsm`       | One TSV file per sheet, named `book.<sheet>.clean.tsv`            |
-| `.pdf`                 | Embedded text, or Tesseract on the page images of a scan          |
+| `.pdf`                 | Embedded text; a scan needs a build compiled `--features ocr`     |
 | `.png`, `.jpg`, `.tif` | Tesseract, with a build compiled `--features ocr`                 |
 
 Optical character recognition is optional because it needs the Tesseract
@@ -347,9 +347,13 @@ Read them before trusting the output with anything that matters.
   name. This is the intended direction of error, not a bug, but it means the
   output needs reading before you send it.
 - Without `--features ner`, names are only redacted if you list them.
-- A PDF made of scanned images is read only with the `ocr` feature. A page
-  whose image is in a codec that cannot be read, or that carries no image at
-  all, is refused rather than half-read.
+- A PDF made of scanned images is read only with the `ocr` feature, and only
+  where the page image is `DCTDecode`, `JPXDecode` or `CCITTFaxDecode` with
+  nothing layered over it. Any other page refuses the file by name rather than
+  being half-read, including one carrying no image at all.
+- Whether to recognise at all is decided across the document, so a mostly
+  textual PDF with one scanned page reads as text and that page is not
+  recovered.
 - Reading images needs the `ocr` feature and Tesseract; a plain build refuses
   them.
 - Recognition is tested on rendered text, not on real photographs. Treat text

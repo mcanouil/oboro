@@ -54,16 +54,24 @@ Add a [custom pattern](configuration.qmd#patterns) if your documents carry ident
 A PDF whose pages are images yields almost no text.
 On a build with `--features ocr` the images on those pages are read instead, which covers what a scanner produces: one image per page.
 
-Two kinds are still refused rather than half read.
+Three kinds are still refused rather than half read, each naming the page.
 
-Pages whose image uses a codec that cannot be handed to the recogniser, which in practice means `JBIG2Decode`.
-The error names the codec.
-`DCTDecode`, `JPXDecode` and `CCITTFaxDecode` are read.
+Pages whose image uses a codec that cannot be handed to the recogniser.
+Only `DCTDecode`, `JPXDecode` and `CCITTFaxDecode` are read, so `JBIG2Decode` is refused, and so is a `FlateDecode` page image of the kind Ghostscript and other re-encoding pipelines produce.
+A fax image with `/EncodedByteAlign` set is refused for the same reason: it cannot be described to the recogniser, and describing it wrongly would recognise noise.
+
+Pages whose image is wrapped in another filter, such as `[/FlateDecode /DCTDecode]`.
+The stream is stored as the document holds it, so the codec is still under a layer this does not unwrap.
 
 Pages holding no image at all, where the text was drawn as vector shapes.
 Nothing is embedded to recognise, and rasterising the page needs a large external library the tool does not carry.
 
+The refusal is per page rather than per document: once recognition is under way, one unreadable page refuses the whole file rather than dropping out of it silently.
+
 Without `--features ocr` every scanned PDF is refused, and the error says so.
+
+Note that the decision to recognise at all is taken across the document, not per page, because the extractor reports one body of text rather than one per page.
+A mostly-textual PDF with a single scanned page among the rest reads as text, and that page is not recovered.
 
 ## Formats it does not read
 
@@ -72,8 +80,8 @@ Neither is anything embedded inside a document: a spreadsheet pasted into a Word
 
 ## Recognition accuracy on real scans is not guaranteed
 
-The tests read rendered text at a generous size and check every planted value comes back, for a plain image and for both PDF codecs.
-That covers the path end to end, not the conditions a real scan arrives in.
+The tests read rendered text at a generous size, for a plain image and for both PDF codecs, and check that none of the planted values survive cleaning and that the provider name restores.
+That covers the path end to end, not the conditions a real scan arrives in, and it does not measure how much of a page was recognised.
 
 A photograph taken at an angle, a low resolution fax or a handwritten note is another matter.
 Treat text recovered from images as less reliable than text read directly, and check the output before sharing it.

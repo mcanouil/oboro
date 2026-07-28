@@ -159,8 +159,10 @@ fn a_scanned_document_is_refused_rather_than_half_read() {
 
     assert!(!output.status.success(), "a scanned PDF must not succeed");
     let stderr = String::from_utf8_lossy(&output.stderr);
+    // Not "scanned", which the fixture's own path carries: the assertion would
+    // pass on the filename alone and prove nothing about the explanation.
     assert!(
-        stderr.contains("scanned"),
+        stderr.contains("sanitised"),
         "the error must say why: {stderr}"
     );
     assert!(

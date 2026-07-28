@@ -61,41 +61,42 @@ pub fn image_to_text(path: &Path, languages: &[String]) -> Result<String> {
     Ok(text)
 }
 
-/// Reads the text in `images`, which are encoded image files held in memory,
-/// and returns it in the order they were given.
+/// A started engine, for reading a series of images one at a time.
 ///
-/// One engine serves all of them: starting Tesseract loads its trained data,
-/// and a scanned document brings one image per page.
-///
-/// An image yielding nothing contributes nothing rather than failing the whole
-/// document, since a blank page among several is not an error. Whether the
-/// document as a whole was readable is the caller's judgement to make, which
-/// is why an empty result comes back as success.
-pub fn images_to_text(images: &[Vec<u8>], languages: &[String]) -> Result<String> {
-    if images.is_empty() {
-        return Ok(String::new());
+/// Held across a document rather than started per image: starting Tesseract
+/// loads its trained data, and a scan brings one image per page. Taking them
+/// one at a time is what keeps a long document's images from being held at
+/// once, so the caller decodes, reads and drops each in turn.
+pub struct Recogniser(leptess::LepTess);
+
+impl Recogniser {
+    /// Starts Tesseract, recognising `languages` when it is not empty.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no trained data can be loaded for the languages
+    /// asked for.
+    pub fn new(languages: &[String]) -> Result<Self> {
+        Ok(Self(engine(languages)?))
     }
 
-    let mut engine = engine(languages)?;
-    let mut text = String::new();
-    for (position, image) in images.iter().enumerate() {
-        let ordinal = position + 1;
-        engine
+    /// Reads the text in one encoded image held in memory.
+    ///
+    /// An image recognising nothing comes back as an empty string rather than
+    /// an error: a blank page among several is not a failure, and whether the
+    /// document as a whole was readable is the caller's judgement. The caller
+    /// also owns the context, since only it knows which page this came from.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the bytes cannot be opened as an image, or if
+    /// recognition itself fails.
+    pub fn read(&mut self, image: &[u8]) -> Result<String> {
+        self.0
             .set_image_from_mem(image)
-            .with_context(|| format!("loading image {ordinal} of {}", images.len()))?;
-        let recognised = engine
-            .get_utf8_text()
-            .with_context(|| format!("recognising text in image {ordinal}"))?;
-        if recognised.trim().is_empty() {
-            continue;
-        }
-        if !text.is_empty() {
-            text.push('\n');
-        }
-        text.push_str(recognised.trim_end());
-        text.push('\n');
+            .context("opening it as an image")?;
+        self.0.get_utf8_text().context("recognising its text")
     }
-    Ok(text)
 }
 
 /// Starts Tesseract with whichever languages [`select_languages`] settles on.

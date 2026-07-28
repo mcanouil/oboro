@@ -1,15 +1,21 @@
 //! PDF text extraction.
 //!
-//! Text-based PDFs are read directly. A page carrying no text is a scan, and
-//! on a build with the `ocr` feature its images are recognised instead. Where
-//! that is not possible the file is refused rather than passed on as a handful
-//! of stray characters: a document that looks sanitised but was never actually
-//! read is the worst outcome this tool has.
+//! Text-based PDFs are read directly. A document yielding almost no text is a
+//! scan, and on a build with the `ocr` feature the images on its pages are
+//! recognised instead. Where that is not possible the file is refused rather
+//! than passed on as a handful of stray characters: a document that looks
+//! sanitised but was never actually read is the worst outcome this tool has.
+//!
+//! The decision is taken across the document rather than per page, since the
+//! extractor reports one body of text and not one per page. A mostly-textual
+//! document with a scanned page among the rest therefore reads as text, and
+//! that page's contents are not recovered.
 //!
 //! Recognition works on the images already embedded in the page rather than by
 //! rasterising it, which is what a scan is: one image per page, put there by
-//! the scanner. Pages drawn some other way are not reached, and are refused as
-//! before.
+//! the scanner. Once recognition is under way every page must contribute an
+//! image, so a page drawn some other way refuses the document rather than
+//! quietly dropping out of it.
 
 use std::panic::AssertUnwindSafe;
 use std::path::Path;
@@ -59,14 +65,44 @@ fn recognise(
     visible: usize,
     pages: usize,
 ) -> Result<String> {
-    let images = page_images(document, path)?;
-    let text = super::ocr::images_to_text(&images, languages)?;
+    let mut recogniser = super::ocr::Recogniser::new(languages)?;
+    let mut text = String::new();
+
+    for (number, id) in document.get_pages() {
+        // One page's images at a time: a document referencing the same large
+        // image from every page would otherwise be held in full.
+        let images = contained(path, || page_images(document, id, number, path))?;
+        if images.is_empty() {
+            bail!(
+                "page {number} of {} yielded no text and holds no image to read. Returning \
+                 the rest would hand back a document short of a page, looking sanitised \
+                 where it was never read. Export that page as an image and pass it \
+                 separately if it is not blank.",
+                path.display()
+            );
+        }
+
+        for image in images {
+            let found = recogniser.read(&image).with_context(|| {
+                format!("reading an image on page {number} of {}", path.display())
+            })?;
+            if found.trim().is_empty() {
+                continue;
+            }
+            if !text.is_empty() {
+                text.push('\n');
+            }
+            text.push_str(found.trim_end());
+            text.push('\n');
+        }
+    }
 
     if text.trim().is_empty() {
         bail!(
-            "{} yielded only {visible} characters across {pages} page(s), and reading the \
-             images on its pages recognised no text either. Returning it would produce \
-             output that looks sanitised without having been read.",
+            "{} yielded only {visible} characters across {pages} page(s), and nothing was \
+             recognised in the images on its pages either. Returning it would produce \
+             output that looks sanitised without having been read. If it does carry \
+             writing, it may be too low resolution to read.",
             path.display()
         );
     }
@@ -91,18 +127,22 @@ fn recognise(
     )
 }
 
-/// Runs the extractor, containing any panic it might have on malformed input.
+/// The most any single stream inside a PDF may decompress to while loading.
 ///
-/// The parser is third-party code being fed documents from wherever the user
+/// Object and cross-reference streams are decoded as the file is parsed, so a
+/// small document can inflate to gigabytes before any of this code runs. Set
+/// well above any real document, since the point is a bound rather than a
+/// judgement about what is reasonable to read.
+const MAX_DECOMPRESSED_BYTES: usize = 256 * 1024 * 1024;
+
+/// Runs `read`, containing any panic it might have on malformed input.
+///
+/// The parsers are third-party code being fed documents from wherever the user
 /// got them, so a crash is a plausible outcome and a poor one: it would give
 /// no indication whether the file was read.
-fn extract(path: &Path) -> Result<String> {
-    let outcome = std::panic::catch_unwind(AssertUnwindSafe(|| pdf_extract::extract_text(path)));
-    match outcome {
-        Ok(Ok(text)) => Ok(text),
-        Ok(Err(error)) => {
-            Err(anyhow!(error)).with_context(|| format!("reading text from {}", path.display()))
-        }
+fn contained<T>(path: &Path, read: impl FnOnce() -> Result<T>) -> Result<T> {
+    match std::panic::catch_unwind(AssertUnwindSafe(read)) {
+        Ok(outcome) => outcome,
         Err(_) => bail!(
             "the PDF parser crashed on {}; the file is malformed or uses an unsupported feature",
             path.display()
@@ -110,8 +150,22 @@ fn extract(path: &Path) -> Result<String> {
     }
 }
 
+fn extract(path: &Path) -> Result<String> {
+    contained(path, || {
+        pdf_extract::extract_text(path)
+            .map_err(|error| anyhow!(error))
+            .with_context(|| format!("reading text from {}", path.display()))
+    })
+}
+
 fn load(path: &Path) -> Result<lopdf::Document> {
-    lopdf::Document::load(path).with_context(|| format!("{} is not a readable PDF", path.display()))
+    contained(path, || {
+        lopdf::Document::load_with_options(
+            path,
+            lopdf::LoadOptions::with_max_decompressed_size(MAX_DECOMPRESSED_BYTES),
+        )
+        .with_context(|| format!("{} is not a readable PDF", path.display()))
+    })
 }
 
 /// Image filters Leptonica reads from the bytes the PDF already holds, so the
@@ -132,51 +186,183 @@ const MIN_SCAN_PIXELS: i64 = 16;
 #[cfg(feature = "ocr")]
 const FILTER_NAME_LIMIT: usize = 40;
 
-/// Every page image in the document, in page order, encoded as something
-/// Leptonica can open.
+/// One image drawn on a page, as the document stores it.
 ///
-/// A page contributing nothing is an error, as is an image in a codec that
-/// cannot be handed over: reading the rest of a document and quietly leaving
-/// one page out is the half-read outcome this module exists to prevent.
+/// Read here rather than through `lopdf::Document::get_page_images`, which
+/// looks for `/Resources` on the page alone though it is inheritable, and
+/// indexes an empty `/ColorSpace` array without checking. Nothing here needs
+/// the colour space, so it is not read at all.
 #[cfg(feature = "ocr")]
-fn page_images(document: &lopdf::Document, path: &Path) -> Result<Vec<Vec<u8>>> {
+struct PageImage<'a> {
+    width: i64,
+    height: i64,
+    filters: Vec<String>,
+    content: &'a [u8],
+    dictionary: &'a lopdf::Dictionary,
+}
+
+/// One page's images, encoded as something Leptonica can open.
+///
+/// An image in a codec that cannot be handed over is an error rather than a
+/// skip: reading the rest of a document and quietly leaving one page out is
+/// the half-read outcome this module exists to prevent.
+#[cfg(feature = "ocr")]
+fn page_images(
+    document: &lopdf::Document,
+    id: lopdf::ObjectId,
+    page: u32,
+    path: &Path,
+) -> Result<Vec<Vec<u8>>> {
+    image_streams(document, id)
+        .into_iter()
+        .filter(|image| image.width >= MIN_SCAN_PIXELS && image.height >= MIN_SCAN_PIXELS)
+        .map(|image| readable(document, &image, page, path))
+        .collect()
+}
+
+/// Every image `XObject` reachable from a page, following `/Resources` up the
+/// page tree as the specification says it is inherited.
+///
+/// A page with no resources or no `XObject`s has no images, which is not an
+/// error here: whether that leaves the document unreadable is decided by the
+/// caller, which is the only place that knows what the page yielded as text.
+#[cfg(feature = "ocr")]
+fn image_streams(document: &lopdf::Document, id: lopdf::ObjectId) -> Vec<PageImage<'_>> {
     let mut images = Vec::new();
-    for (number, id) in document.get_pages() {
-        let found = document.get_page_images(id).with_context(|| {
-            format!("reading the images on page {number} of {}", path.display())
-        })?;
-        let before = images.len();
-        for image in found {
-            if image.width < MIN_SCAN_PIXELS || image.height < MIN_SCAN_PIXELS {
+    for resource in page_resources(document, id) {
+        let Some(xobjects) = resource
+            .get(b"XObject")
+            .ok()
+            .and_then(|object| resolved(document, object))
+            .and_then(|object| object.as_dict().ok())
+        else {
+            continue;
+        };
+
+        for (_, value) in xobjects {
+            let Some(stream) = resolved(document, value).and_then(|object| object.as_stream().ok())
+            else {
+                continue;
+            };
+            let is_image = stream
+                .dict
+                .get(b"Subtype")
+                .and_then(lopdf::Object::as_name)
+                .is_ok_and(|subtype| subtype == b"Image");
+            if !is_image {
                 continue;
             }
-            images.push(readable(document, &image, number, path)?);
-        }
-        if images.len() == before {
-            bail!(
-                "page {number} of {} yielded no text and holds no image to read. \
-                 Returning the rest would hand back a document short of a page, \
-                 looking sanitised where it was never read.",
-                path.display()
-            );
+            let (Some(width), Some(height)) = (
+                number(document, &stream.dict, b"Width"),
+                number(document, &stream.dict, b"Height"),
+            ) else {
+                continue;
+            };
+            images.push(PageImage {
+                width,
+                height,
+                filters: filters_of(document, &stream.dict),
+                content: &stream.content,
+                dictionary: &stream.dict,
+            });
         }
     }
-    Ok(images)
+    images
+}
+
+/// How far up the page tree inherited resources are followed.
+///
+/// A bound rather than a judgement: real trees are shallow, and a malformed
+/// `/Parent` pointing back down one would otherwise spin.
+#[cfg(feature = "ocr")]
+const MAX_PAGE_TREE_DEPTH: usize = 32;
+
+/// The resource dictionaries in force for a page, nearest first.
+///
+/// `/Resources` is inheritable, so a page without its own takes the nearest
+/// ancestor's. Both spellings occur: the entry may be the dictionary itself or
+/// a reference to it, and `lopdf::Document::get_page_resources` collects only
+/// the second on an ancestor.
+#[cfg(feature = "ocr")]
+fn page_resources(document: &lopdf::Document, id: lopdf::ObjectId) -> Vec<&lopdf::Dictionary> {
+    let mut resources = Vec::new();
+    let mut node = document.get_dictionary(id).ok();
+
+    for _ in 0..MAX_PAGE_TREE_DEPTH {
+        let Some(dictionary) = node else { break };
+        if let Some(found) = dictionary
+            .get(b"Resources")
+            .ok()
+            .and_then(|object| resolved(document, object))
+            .and_then(|object| object.as_dict().ok())
+        {
+            resources.push(found);
+        }
+        node = dictionary
+            .get(b"Parent")
+            .ok()
+            .and_then(|object| object.as_reference().ok())
+            .and_then(|parent| document.get_dictionary(parent).ok());
+    }
+    resources
+}
+
+/// Follows `object` through any indirect reference.
+#[cfg(feature = "ocr")]
+fn resolved<'a>(
+    document: &'a lopdf::Document,
+    object: &'a lopdf::Object,
+) -> Option<&'a lopdf::Object> {
+    document.dereference(object).ok().map(|(_, object)| object)
+}
+
+/// Reads an integer entry, following an indirect reference.
+#[cfg(feature = "ocr")]
+fn number(document: &lopdf::Document, dictionary: &lopdf::Dictionary, key: &[u8]) -> Option<i64> {
+    let object = dictionary.get(key).ok()?;
+    resolved(document, object)?.as_i64().ok()
+}
+
+/// Reads `/Filter`, which is one name or an array of them.
+#[cfg(feature = "ocr")]
+fn filters_of(document: &lopdf::Document, dictionary: &lopdf::Dictionary) -> Vec<String> {
+    let name = |object: &lopdf::Object| {
+        object
+            .as_name()
+            .ok()
+            .map(|name| String::from_utf8_lossy(name).into_owned())
+    };
+
+    let Some(filter) = dictionary
+        .get(b"Filter")
+        .ok()
+        .and_then(|object| resolved(document, object))
+    else {
+        return Vec::new();
+    };
+
+    if let Some(single) = name(filter) {
+        return vec![single];
+    }
+    filter
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| resolved(document, entry).and_then(name))
+        .collect()
 }
 
 /// Turns one page image into bytes Leptonica opens.
 #[cfg(feature = "ocr")]
 fn readable(
     document: &lopdf::Document,
-    image: &lopdf::xobject::PdfImage,
+    image: &PageImage<'_>,
     page: u32,
     path: &Path,
 ) -> Result<Vec<u8>> {
-    let filters = image.filters.as_deref().unwrap_or_default();
-
     // The stream is stored as the PDF holds it, so a filter over the image
     // codec is still in the way and the bytes are not yet an image.
-    if let [filter] = filters {
+    if let [filter] = image.filters.as_slice() {
         if PASSTHROUGH_FILTERS.contains(&filter.as_str()) {
             return Ok(image.content.to_vec());
         }
@@ -188,9 +374,9 @@ fn readable(
     bail!(
         "page {page} of {} holds an image encoded with {}, which cannot be read. \
          Only a DCTDecode, JPXDecode or CCITTFaxDecode image with nothing layered \
-         over it is recognised.",
+         over it is recognised. Export that page as an image and pass it separately.",
         path.display(),
-        describe(filters)
+        describe(&image.filters)
     )
 }
 
@@ -231,7 +417,7 @@ fn describe(filters: &[String]) -> String {
 #[cfg(feature = "ocr")]
 fn fax_as_tiff(
     document: &lopdf::Document,
-    image: &lopdf::xobject::PdfImage,
+    image: &PageImage<'_>,
     page: u32,
     path: &Path,
 ) -> Result<Vec<u8>> {
@@ -292,7 +478,10 @@ fn fax_as_tiff(
     let mut tiff = Vec::with_capacity(image.content.len() + fields.len() * 12 + 32);
     tiff.extend_from_slice(b"II");
     tiff.extend_from_slice(&42u16.to_le_bytes());
-    tiff.extend_from_slice(&(DATA_OFFSET + bytes).to_le_bytes());
+    let directory = DATA_OFFSET
+        .checked_add(bytes)
+        .with_context(|| impossible("image size"))?;
+    tiff.extend_from_slice(&directory.to_le_bytes());
     tiff.extend_from_slice(image.content);
     tiff.extend_from_slice(&count.to_le_bytes());
     for entry in fields {
@@ -342,11 +531,11 @@ struct FaxParameters {
 /// no failure: a stream whose parameters are all absent still decodes on the
 /// defaults.
 #[cfg(feature = "ocr")]
-fn fax_parameters(document: &lopdf::Document, image: &lopdf::xobject::PdfImage) -> FaxParameters {
+fn fax_parameters(document: &lopdf::Document, image: &PageImage<'_>) -> FaxParameters {
     let parameters = image
-        .origin_dict
+        .dictionary
         .get(b"DecodeParms")
-        .or_else(|_| image.origin_dict.get(b"DP"))
+        .or_else(|_| image.dictionary.get(b"DP"))
         .ok()
         .and_then(|object| fax_dictionary(document, object));
 
@@ -527,10 +716,17 @@ mod tests {
     /// A page yielding nothing must be refused, since output that looks
     /// sanitised but was never read is the worst outcome here. Recognition
     /// does not change this: there is nothing on the page to recognise.
+    ///
+    /// The assertion deliberately avoids any word that appears in the
+    /// fixture's own name, which would pass on the path alone.
     #[test]
     fn a_page_with_no_text_is_refused() {
         let error = to_text(&fixture("scanned.pdf"), &[]).expect_err("must refuse");
-        assert!(format!("{error:#}").contains("scanned"));
+        let rendered = format!("{error:#}");
+        assert!(
+            rendered.contains("sanitised"),
+            "the error must explain itself: {rendered}"
+        );
     }
 
     #[test]
@@ -775,6 +971,80 @@ mod tests {
         assert!(
             format!("{error:#}").contains("EncodedByteAlign"),
             "the error must name the parameter: {error:#}"
+        );
+    }
+
+    /// `/Resources` is inheritable, so a document putting them on the page
+    /// tree rather than the page is legal and common. Looking only at the page
+    /// would refuse a scan that is perfectly readable.
+    #[cfg(feature = "ocr")]
+    #[test]
+    fn resources_inherited_from_the_page_tree_are_followed() {
+        let mut document = built(vec![TestPage {
+            image: Some(fixture_image("scan.pdf")),
+            ..TestPage::default()
+        }]);
+
+        // Move the page's resources up to its parent, which is where the
+        // inheritance rule says a reader must still find them.
+        let (_, page_id) = document.get_pages().into_iter().next().expect("a page");
+        let resources = document
+            .get_dictionary(page_id)
+            .expect("the page")
+            .get(b"Resources")
+            .expect("its resources")
+            .clone();
+        let parent = document
+            .get_dictionary(page_id)
+            .expect("the page")
+            .get(b"Parent")
+            .expect("its parent")
+            .as_reference()
+            .expect("a reference");
+        document
+            .get_dictionary_mut(page_id)
+            .expect("the page")
+            .remove(b"Resources");
+        document
+            .get_dictionary_mut(parent)
+            .expect("the page tree")
+            .set("Resources", resources);
+
+        let (_dir, path) = written(document);
+        let text = to_text(&path, &[]).expect("inherited resources must be followed");
+        assert!(
+            text.contains("Acme Consulting SARL"),
+            "expected the provider name, got:\n{text}"
+        );
+    }
+
+    /// A malformed image dictionary must be reported, not crash the process.
+    ///
+    /// An empty `/ColorSpace` array is the shape that panics inside the
+    /// library's own image reader, which is why the colour space is not read
+    /// here at all.
+    #[cfg(feature = "ocr")]
+    #[test]
+    fn a_malformed_image_dictionary_does_not_crash() {
+        let (_dir, path) = written(built(vec![TestPage {
+            image: Some((
+                dictionary! {
+                    "Type" => "XObject",
+                    "Subtype" => "Image",
+                    "Width" => 640,
+                    "Height" => 480,
+                    "ColorSpace" => lopdf::Object::Array(Vec::new()),
+                    "BitsPerComponent" => 1,
+                    "Filter" => "DCTDecode",
+                },
+                b"not actually a jpeg".to_vec(),
+            )),
+            ..TestPage::default()
+        }]));
+        let error = to_text(&path, &[]).expect_err("junk is not an image");
+        assert!(
+            format!("{error:#}").contains("page 1"),
+            "the error must name the page: {error:#}"
         );
     }
 
