@@ -14,49 +14,22 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
+
+use crate::claude::{Scope, refuse_symlinks};
 
 /// The skill text, compiled in so the binary and the file cannot disagree.
 pub const SKILL: &str = include_str!("../skills/oboro/SKILL.md");
 
-/// Where a skill is installed.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Scope {
-    /// `.claude/skills/` in the working directory, covering this project.
-    Project,
-    /// `~/.claude/skills/`, covering every project.
-    User,
-}
-
-/// Every scope, in the order a report lists them: nearest first.
-pub const SCOPES: [Scope; 2] = [Scope::Project, Scope::User];
-
-impl Scope {
-    /// The directory the scope is measured from: the project, or the home
-    /// directory.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the user scope is asked for on a machine with no
-    /// home directory.
-    pub fn root(self, cwd: &Path) -> Result<PathBuf> {
-        match self {
-            Self::Project => Ok(cwd.to_path_buf()),
-            Self::User => dirs::home_dir().context(
-                "finding your home directory to install the skill for every project; \
-                 install it for this project alone with --project",
-            ),
-        }
-    }
-
-    /// The skill file itself.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error for the same reason [`Scope::root`] does.
-    pub fn path(self, cwd: &Path) -> Result<PathBuf> {
-        Ok(self.root(cwd)?.join(SKILL_PATH.iter().collect::<PathBuf>()))
-    }
+/// The skill file for `scope`.
+///
+/// # Errors
+///
+/// Returns an error for the same reason [`Scope::root`] does.
+pub fn path(scope: Scope, cwd: &Path) -> Result<PathBuf> {
+    Ok(scope
+        .root(cwd)?
+        .join(SKILL_PATH.iter().collect::<PathBuf>()))
 }
 
 /// Where the skill sits below a scope's root.
@@ -174,40 +147,6 @@ fn write(path: &Path) -> Result<()> {
     std::fs::write(path, SKILL).with_context(|| format!("writing {}", path.display()))
 }
 
-/// Refuses to write through a symbolic link anywhere below the scope's root.
-///
-/// A repository that ships its own `.claude` directory can point any part of
-/// that path somewhere else, and following it would turn an installer into a
-/// way of writing text into a file the user never named. Every component Oboro
-/// would create or overwrite is checked, and the first link found stops the
-/// install rather than being resolved.
-///
-/// Only what is below the root is checked. Above it are the user's home and the
-/// directories leading to their project, which they arranged themselves and
-/// which Oboro is passing through rather than creating.
-///
-/// The components are a parameter rather than the skill's own path, since the
-/// rule belongs to writing inside `.claude` rather than to this one file.
-fn refuse_symlinks(root: &Path, components: &[&str]) -> Result<()> {
-    let mut current = root.to_path_buf();
-
-    for component in components {
-        current.push(component);
-        let Ok(metadata) = std::fs::symlink_metadata(&current) else {
-            // Nothing there yet, so nothing below it exists to be a link.
-            return Ok(());
-        };
-        if metadata.file_type().is_symlink() {
-            bail!(
-                "{} is a symbolic link, and the skill is not written through one; \
-                 remove it, or install into the other scope",
-                current.display()
-            );
-        }
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -230,10 +169,11 @@ mod tests {
     /// for something that no longer fires.
     #[test]
     fn the_skill_names_every_hook_event() {
-        for (event, _) in crate::hooks::EVENTS {
+        for event in crate::hooks::EVENTS {
             assert!(
-                SKILL.contains(event),
-                "the skill must name the {event} hook it describes"
+                SKILL.contains(event.name),
+                "the skill must name the {} hook it describes",
+                event.name
             );
         }
     }
@@ -246,7 +186,7 @@ mod tests {
     #[test]
     fn a_missing_skill_is_written() {
         let home = tempfile::tempdir().expect("temporary directory");
-        let path = Scope::Project.path(home.path()).expect("a path");
+        let path = path(Scope::Project, home.path()).expect("a path");
         assert_eq!(status(&path), Status::Missing);
 
         let done = install_into(home.path(), false).expect("installing");
@@ -262,7 +202,7 @@ mod tests {
 
         let done = install_into(home.path(), false).expect("installing again");
 
-        let path = Scope::Project.path(home.path()).expect("a path");
+        let path = path(Scope::Project, home.path()).expect("a path");
         assert_eq!(done, Plan::Keep(path));
         assert_eq!(done.target(), None, "keeping writes nothing");
     }
@@ -308,7 +248,7 @@ mod tests {
     }
 
     fn plant_an_edited_skill(cwd: &Path) -> PathBuf {
-        let path = Scope::Project.path(cwd).expect("a path");
+        let path = path(Scope::Project, cwd).expect("a path");
         std::fs::create_dir_all(path.parent().expect("a parent")).expect("creating the directory");
         std::fs::write(&path, "mine, edited").expect("writing an edited skill");
         path

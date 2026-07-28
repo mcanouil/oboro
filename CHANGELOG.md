@@ -6,6 +6,10 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 
+- feat: Name both hooks in your agent's settings with `oboro hook install`, so wiring Oboro into Claude Code no longer means pasting JSON by hand; `--project` writes `.claude/settings.local.json` and `--user` writes `~/.claude/settings.json`, without either it asks which, and `--dry-run` prints the settings as they would end up.
+- feat: Merge into the settings file rather than rewriting it: every other key keeps its place and its order, another tool's hooks on the same event are left where they are, and a hook already naming `oboro hook` is left exactly as you wrote it, matcher included, so a matcher you narrowed by hand survives an install.
+- feat: Refuse rather than replace a settings file Oboro cannot merge into, naming it: invalid JSON, a root that is not an object, or a `hooks` entry of the wrong shape. Nothing is written through a symbolic link, and the file is replaced by renaming a complete one into place.
+- feat: Say so when the hooks just installed name an `oboro` that is not on `PATH`, since a hook the agent cannot run fails closed on every matching tool call.
 - feat: Tell an agent what the hooks have done to what it reads, with `oboro skill install`, which writes a skill explaining that `[[EMAIL_1]]` is a real value it cannot see rather than a bug or a template, and that writing the placeholder back verbatim is correct because `pre-tool-use` restores it; the text is compiled into the binary so it cannot drift from the hooks it describes, `oboro skill show` prints it without writing anything, and `oboro doctor` reports both scopes.
 - feat: Ask which scope to install the skill into rather than guessing, since the wrong scope fails silently; `--project` and `--user` skip the question, and with no terminal to ask the command fails and names both flags.
 - feat: Leave an edited skill where it is, writing what would have been installed to `SKILL.md.oboro-proposed` beside it so the edit can be compared rather than lost; `--force` overwrites instead, and nothing is written through a symbolic link.

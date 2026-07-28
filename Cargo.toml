@@ -43,8 +43,10 @@ regex = "1.13.1"
 rusqlite = { version = "0.40.1", features = ["bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }
 # The hook speaks the agent's JSON on both ends, so it parses and emits JSON
-# whose shape it does not own.
-serde_json = "1.0.151"
+# whose shape it does not own. `preserve_order` is what makes `hook install`
+# safe to run on a settings file someone else wrote: without it, every key in
+# that file comes back alphabetised.
+serde_json = { version = "1.0.151", features = ["preserve_order"] }
 toml = "1.1.3"
 zeroize = { version = "1.9.0", features = ["derive"] }
 

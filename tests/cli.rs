@@ -1213,3 +1213,122 @@ fn doctor_reports_the_skill_once_it_is_installed() {
         .success()
         .stdout(predicate::str::contains("(current)"));
 }
+
+#[test]
+fn hook_install_writes_the_local_settings_and_doctor_finds_them() {
+    let workspace = Workspace::new();
+
+    workspace
+        .command()
+        .arg("hook")
+        .arg("install")
+        .arg("--project")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("PostToolUse"))
+        .stderr(predicate::str::contains("PreToolUse"));
+
+    assert!(
+        workspace
+            .path()
+            .join(".claude/settings.local.json")
+            .exists()
+    );
+    assert!(
+        !workspace.path().join(".claude/settings.json").exists(),
+        "the shared settings are not this command's to write"
+    );
+
+    workspace
+        .command()
+        .arg("doctor")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("settings.local.json").count(2));
+}
+
+#[test]
+fn hook_install_for_every_project_writes_under_the_home_directory() {
+    let workspace = Workspace::new();
+
+    workspace
+        .command()
+        .arg("hook")
+        .arg("install")
+        .arg("--user")
+        .assert()
+        .success();
+
+    assert!(workspace.home().join(".claude/settings.json").exists());
+    assert!(!workspace.path().join(".claude").exists());
+}
+
+/// The whole point of the merge is that it can be run on a file someone else
+/// wrote, so the dry run has to show that file as it would end up.
+#[test]
+fn hook_install_dry_run_prints_the_settings_and_writes_nothing() {
+    let workspace = Workspace::new();
+
+    workspace
+        .command()
+        .arg("hook")
+        .arg("install")
+        .arg("--project")
+        .arg("--dry-run")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("oboro hook post-tool-use"))
+        .stdout(predicate::str::contains("oboro hook pre-tool-use"))
+        .stderr(predicate::str::contains("nothing was written"));
+
+    assert!(
+        !workspace.path().join(".claude").exists(),
+        "a dry run must not create the directory either"
+    );
+}
+
+#[test]
+fn hook_install_without_a_scope_and_without_a_terminal_names_both_flags() {
+    let workspace = Workspace::new();
+
+    workspace
+        .command()
+        .arg("hook")
+        .arg("install")
+        .write_stdin(String::new())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--project"))
+        .stderr(predicate::str::contains("--user"));
+}
+
+/// A repository shipping its own `.claude` could otherwise point the settings
+/// at a file outside it and have the installer write there.
+#[test]
+#[cfg(unix)]
+fn hook_install_refuses_a_symlinked_settings_file() {
+    let workspace = Workspace::new();
+    let elsewhere = workspace.path().join("elsewhere.json");
+    std::fs::write(&elsewhere, "{}").expect("writing the link target");
+    std::fs::create_dir_all(workspace.path().join(".claude")).expect("creating .claude");
+    std::os::unix::fs::symlink(
+        &elsewhere,
+        workspace.path().join(".claude/settings.local.json"),
+    )
+    .expect("linking");
+
+    workspace
+        .command()
+        .arg("hook")
+        .arg("install")
+        .arg("--project")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("symbolic link"));
+
+    assert_eq!(
+        std::fs::read_to_string(&elsewhere).expect("reading the link target"),
+        "{}",
+        "the link target is untouched"
+    );
+}
