@@ -34,8 +34,8 @@ const PLANTED: &[&str] = &[
     "CT-874512",
 ];
 
-/// Every readable fixture, so a converter cannot be added without the leak
-/// test covering it.
+/// Every fixture any build can read, so a converter cannot be added without
+/// the leak test covering it.
 const DOCUMENTS: &[&str] = &[
     "contract.txt",
     "contract.docx",
@@ -45,9 +45,25 @@ const DOCUMENTS: &[&str] = &[
     "invoice.pdf",
 ];
 
+/// The fixtures that only a build with the `ocr` feature can read: an image,
+/// and the two ways a scanner stores a page inside a PDF.
+///
+/// Text recovered by recognition is held to the same standard as text read
+/// directly. It reaches the model the same way, so it leaks the same way.
+#[cfg(feature = "ocr")]
+const OCR_DOCUMENTS: &[&str] = &["scan.png", "scan.pdf", "scan-fax.pdf"];
+
+#[cfg(not(feature = "ocr"))]
+const OCR_DOCUMENTS: &[&str] = &[];
+
+/// Every fixture this build can read.
+fn readable() -> impl Iterator<Item = &'static &'static str> {
+    DOCUMENTS.iter().chain(OCR_DOCUMENTS)
+}
+
 #[test]
 fn no_planted_value_survives_cleaning() {
-    for document in DOCUMENTS {
+    for document in readable() {
         let workspace = Workspace::new();
         let cleaned = workspace.clean_fixture(document);
 
@@ -113,7 +129,7 @@ fn accented_text_survives_document_conversion() {
 
 #[test]
 fn every_document_format_round_trips() {
-    for document in DOCUMENTS {
+    for document in readable() {
         let workspace = Workspace::new();
         let cleaned = workspace.clean_fixture(document);
         let restored = workspace.restore(&cleaned);

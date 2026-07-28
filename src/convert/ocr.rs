@@ -41,16 +41,7 @@ pub fn image_to_text(path: &Path, languages: &[String]) -> Result<String> {
         bail!("cannot read {}: no such file", path.display());
     }
 
-    let installed = tessdata_dir().map(|dir| installed_languages(&dir));
-    let requested = select_languages(languages, installed.as_deref())?;
-
-    let mut engine = leptess::LepTess::new(None, &requested).map_err(|error| {
-        anyhow!(
-            "starting Tesseract with languages '{requested}' failed: {error}. \
-             Install the trained data for them, such as the tesseract-ocr-<language> \
-             packages, or set ocr_languages in oboro.toml to what you have."
-        )
-    })?;
+    let mut engine = engine(languages)?;
 
     engine
         .set_image(path)
@@ -68,6 +59,57 @@ pub fn image_to_text(path: &Path, languages: &[String]) -> Result<String> {
         );
     }
     Ok(text)
+}
+
+/// Reads the text in `images`, which are encoded image files held in memory,
+/// and returns it in the order they were given.
+///
+/// One engine serves all of them: starting Tesseract loads its trained data,
+/// and a scanned document brings one image per page.
+///
+/// An image yielding nothing contributes nothing rather than failing the whole
+/// document, since a blank page among several is not an error. Whether the
+/// document as a whole was readable is the caller's judgement to make, which
+/// is why an empty result comes back as success.
+pub fn images_to_text(images: &[Vec<u8>], languages: &[String]) -> Result<String> {
+    if images.is_empty() {
+        return Ok(String::new());
+    }
+
+    let mut engine = engine(languages)?;
+    let mut text = String::new();
+    for (position, image) in images.iter().enumerate() {
+        let ordinal = position + 1;
+        engine
+            .set_image_from_mem(image)
+            .with_context(|| format!("loading image {ordinal} of {}", images.len()))?;
+        let recognised = engine
+            .get_utf8_text()
+            .with_context(|| format!("recognising text in image {ordinal}"))?;
+        if recognised.trim().is_empty() {
+            continue;
+        }
+        if !text.is_empty() {
+            text.push('\n');
+        }
+        text.push_str(recognised.trim_end());
+        text.push('\n');
+    }
+    Ok(text)
+}
+
+/// Starts Tesseract with whichever languages [`select_languages`] settles on.
+fn engine(languages: &[String]) -> Result<leptess::LepTess> {
+    let installed = tessdata_dir().map(|dir| installed_languages(&dir));
+    let requested = select_languages(languages, installed.as_deref())?;
+
+    leptess::LepTess::new(None, &requested).map_err(|error| {
+        anyhow!(
+            "starting Tesseract with languages '{requested}' failed: {error}. \
+             Install the trained data for them, such as the tesseract-ocr-<language> \
+             packages, or set ocr_languages in oboro.toml to what you have."
+        )
+    })
 }
 
 /// Chooses the language string to hand Tesseract.

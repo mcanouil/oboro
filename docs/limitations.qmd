@@ -49,23 +49,34 @@ A mistyped IBAN, a SIREN with a digit dropped, a card number that fails Luhn: no
 The check is what makes the rules trustworthy rather than noisy, so it stays.
 Add a [custom pattern](configuration.qmd#patterns) if your documents carry identifiers that do not validate.
 
-## Scanned PDFs are refused, not read
+## Some scanned PDFs are still refused
 
 A PDF whose pages are images yields almost no text.
-Rather than hand back a nearly empty file that looks sanitised, `oboro` refuses it and says why.
+On a build with `--features ocr` the images on those pages are read instead, which covers what a scanner produces: one image per page.
 
-Reading those pages needs rasterising them, which needs a large external library the tool does not carry.
-Export the pages as images and pass those to a build with `--features ocr`.
+Two kinds are still refused rather than half read.
+
+Pages whose image uses a codec that cannot be handed to the recogniser, which in practice means `JBIG2Decode`.
+The error names the codec.
+`DCTDecode`, `JPXDecode` and `CCITTFaxDecode` are read.
+
+Pages holding no image at all, where the text was drawn as vector shapes.
+Nothing is embedded to recognise, and rasterising the page needs a large external library the tool does not carry.
+
+Without `--features ocr` every scanned PDF is refused, and the error says so.
 
 ## Formats it does not read
 
 Older `.doc`, `.xls` and `.ppt`, along with `.pptx`, are not read at all.
 Neither is anything embedded inside a document: a spreadsheet pasted into a Word file is not reached.
 
-## Recognition accuracy on real images is not tested
+## Recognition accuracy on real scans is not guaranteed
 
-The OCR path compiles and its failure paths are covered, but no automated test feeds Tesseract a photograph and checks the result.
-Treat text recovered from images as less reliable than text read directly.
+The tests read rendered text at a generous size and check every planted value comes back, for a plain image and for both PDF codecs.
+That covers the path end to end, not the conditions a real scan arrives in.
+
+A photograph taken at an angle, a low resolution fax or a handwritten note is another matter.
+Treat text recovered from images as less reliable than text read directly, and check the output before sharing it.
 
 ## The hook does not cover what you type
 

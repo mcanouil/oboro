@@ -1159,7 +1159,7 @@ fn doctor(store: &StoreArgs) -> Result<()> {
         if convert::ocr_available() {
             "available"
         } else {
-            "not compiled in; images cannot be read"
+            "not compiled in; images and scanned PDFs cannot be read"
         }
     )?;
     if convert::ocr_available() {
