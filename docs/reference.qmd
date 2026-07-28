@@ -337,13 +337,18 @@ The last four lines answer a different question: whether the agent side is wired
 Both hook events are reported whether or not they are found, because having only the first is the worst of the three states: the model is shown placeholders and nothing puts the values back, so they reach your files.
 `reachable` means the program the hook names can actually be run; a hook naming a binary that is not on `PATH` is configured and useless.
 
-An enabled plugin is reported above them, since the hooks it carries are in its own files rather than in any settings file, and reporting those events as missing would send you to `oboro hook install` for something you already have:
+An enabled plugin is reported above them, since what it carries is in its own files rather than in any settings file or skills directory, and reporting all four as missing would send you to `oboro hook install` and `oboro skill install` for what you already have:
 
 ```text
 plugin      /Users/you/.claude/settings.json (oboro@oboro, enabled)
 PostToolUse not in your settings; the plugin carries it
 PreToolUse  not in your settings; the plugin carries it
+skill       /Users/you/work/.claude/skills/oboro/SKILL.md (not installed here; the plugin carries its own)
+skill       /Users/you/.claude/skills/oboro/SKILL.md (not installed here; the plugin carries its own)
 ```
+
+Installing on top of it is worth avoiding rather than merely noticing: two copies of a hook both run on every matching tool call, cleaning what is already cleaned and restoring what is already restored.
+`oboro hook install` and `oboro skill install --with-hooks` both say so when they find the plugin enabled, since that is the moment the second copy would be created.
 
 Both [skill](#skill) scopes are reported for the same reason.
 `current` is the text this build carries; `edited` is a copy that has drifted from it, which is the state where the agent is being told something the binary no longer does.

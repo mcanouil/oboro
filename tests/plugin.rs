@@ -237,6 +237,101 @@ fn the_wrapper_hands_the_payload_to_the_binary_untouched() {
     );
 }
 
+/// The wrapper's replies are the binary's replies, written out by hand because
+/// the binary is absent exactly when they are needed. Nothing anchors the two
+/// but this: an agent that renamed a field would have the Rust side updated and
+/// the shell side left describing the old protocol, and a stale `PostToolUse`
+/// reply is the raw result reaching the model.
+///
+/// The binary is driven into the same corner the way `tests/hook.rs` does it, by
+/// breaking the vault, so what is compared is two answers to one question.
+#[cfg(unix)]
+#[test]
+fn the_wrapper_answers_in_the_shape_the_binary_answers() {
+    for (subcommand, payload, decisive) in [
+        (
+            "post-tool-use",
+            r#"{"tool_name":"Read","tool_result":"call me on 06 12 34 56 78"}"#,
+            "decision",
+        ),
+        (
+            "pre-tool-use",
+            r#"{"tool_name":"Write","tool_input":{"content":"[[PHONE_1]]"}}"#,
+            "hookSpecificOutput.permissionDecision",
+        ),
+    ] {
+        let theirs = reply(&run(subcommand, WITHOUT_OBORO, payload));
+        let ours = broken_binary_reply(subcommand, payload);
+
+        assert_eq!(
+            keys(&theirs),
+            keys(&ours),
+            "the {subcommand} wrapper reply must carry the fields the binary's does"
+        );
+        assert_eq!(
+            keys(&theirs["hookSpecificOutput"]),
+            keys(&ours["hookSpecificOutput"]),
+            "the {subcommand} wrapper's hookSpecificOutput must match the binary's"
+        );
+        let value = |reply: &serde_json::Value| {
+            decisive
+                .split('.')
+                .fold(reply.clone(), |value, key| value[key].clone())
+        };
+        assert_eq!(
+            value(&theirs),
+            value(&ours),
+            "the {subcommand} wrapper must fail closed the way the binary does"
+        );
+    }
+}
+
+/// The field names of a JSON object, sorted, for comparing two shapes.
+#[cfg(unix)]
+fn keys(value: &serde_json::Value) -> Vec<String> {
+    let mut names: Vec<_> = value
+        .as_object()
+        .expect("an object")
+        .keys()
+        .cloned()
+        .collect();
+    names.sort();
+    names
+}
+
+/// What the binary replies when it cannot do its job, obtained by pointing it
+/// at a vault it cannot open.
+#[cfg(unix)]
+fn broken_binary_reply(subcommand: &str, payload: &str) -> serde_json::Value {
+    use std::io::Write as _;
+
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let vault = directory.path().join("vault.db");
+    std::fs::create_dir(&vault).expect("creating a directory where a vault is expected");
+
+    let mut child = std::process::Command::new(assert_cmd::cargo::cargo_bin("oboro"))
+        .current_dir(directory.path())
+        .arg("--vault")
+        .arg(&vault)
+        .arg("--key")
+        .arg(directory.path().join("key"))
+        .arg("hook")
+        .arg(subcommand)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("running oboro");
+    child
+        .stdin
+        .take()
+        .expect("a standard input")
+        .write_all(payload.as_bytes())
+        .expect("writing the payload");
+    let output = child.wait_with_output().expect("waiting for oboro");
+
+    reply(&output)
+}
+
 /// The wrapper is named by the plugin's own manifest, so a subcommand it does
 /// not know is a manifest that has drifted rather than a user's mistake, and
 /// failing loudly is how that gets noticed.

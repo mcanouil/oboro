@@ -977,7 +977,38 @@ fn doctor_reports_the_hooks_the_plugin_carries() {
         .stdout(predicate::str::contains("oboro@oboro, enabled"))
         .stdout(predicate::str::contains("something-else").not())
         .stdout(predicate::str::contains("PostToolUse not in your settings"))
-        .stdout(predicate::str::contains("run `oboro hook install`").not());
+        .stdout(predicate::str::contains("run `oboro hook install`").not())
+        // The plugin carries a skill too, so reporting both scopes as simply
+        // missing would be the same false report on the other half.
+        .stdout(predicate::str::contains(
+            "not installed here; the plugin carries its own",
+        ));
+}
+
+/// `hook install` is the moment a second copy of the hooks is created, and both
+/// copies then run on every matching tool call. Saying so afterwards in
+/// `doctor` is too late to stop it.
+#[test]
+fn hook_install_says_so_when_a_plugin_already_carries_the_hooks() {
+    let workspace = Workspace::new();
+
+    let settings = workspace.path().join(".claude");
+    std::fs::create_dir_all(&settings).expect("creating the settings directory");
+    std::fs::write(
+        settings.join("settings.json"),
+        r#"{"enabledPlugins":{"oboro@oboro":true}}"#,
+    )
+    .expect("writing the settings");
+
+    workspace
+        .command()
+        .arg("hook")
+        .arg("install")
+        .arg("--project")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("oboro@oboro"))
+        .stderr(predicate::str::contains("twice"));
 }
 
 /// A plugin the user turned off carries nothing, so saying otherwise would be

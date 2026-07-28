@@ -10,7 +10,7 @@ use oboro::claude::{SCOPES, Scope};
 use oboro::config::{self, Config, RegionSource};
 use oboro::convert;
 use oboro::detect::Detector;
-use oboro::hooks::Change;
+use oboro::hooks::{Change, EnabledPlugin};
 use oboro::pipeline;
 use oboro::skill::{Plan, Status};
 use oboro::vault::{self, Vault};
@@ -877,9 +877,10 @@ fn map_purge(confirmed: bool, store: &StoreArgs) -> Result<()> {
 /// The two halves are one decision: a skill without the hooks describes
 /// placeholders the agent will never see, and hooks without the skill leave it
 /// guessing at the ones it does. Both are planned before either is written, so
-/// a scope that refuses one, through a symbolic link or a settings file that
-/// cannot be merged into, stops the pair rather than leaving half of it
-/// installed.
+/// the refusals that can be seen up front, a symbolic link or a settings file
+/// that cannot be merged into, stop the pair rather than leaving half of it
+/// installed. A write that fails partway through is not covered by that and
+/// says which half it managed.
 fn skill_install(scope: Option<Scope>, dry_run: bool, force: bool, with_hooks: bool) -> Result<()> {
     let cwd = std::env::current_dir().context("reading the working directory")?;
     let scope = match (scope, with_hooks) {
@@ -912,6 +913,7 @@ fn skill_install(scope: Option<Scope>, dry_run: bool, force: bool, with_hooks: b
         ),
     }
     if let Some(hooks) = &hooks {
+        note_if_a_plugin_carries_the_hooks(&cwd);
         describe_hook_plan(hooks);
     }
 
@@ -943,6 +945,7 @@ fn hook_install(scope: Option<Scope>, dry_run: bool) -> Result<()> {
     };
 
     let plan = oboro::hooks::plan(scope, &cwd)?;
+    note_if_a_plugin_carries_the_hooks(&cwd);
     describe_hook_plan(&plan);
     if dry_run {
         oboro::note!("--dry-run: nothing was written. The settings would read:");
@@ -950,6 +953,23 @@ fn hook_install(scope: Option<Scope>, dry_run: bool) -> Result<()> {
     }
 
     install_hook_plan(plan, scope)
+}
+
+/// Says so when a plugin already carries the hooks about to be named.
+///
+/// Both copies run on every matching tool call, cleaning what is already
+/// cleaned and restoring what is already restored, for as long as both are
+/// installed. `doctor` reports the collision afterwards; this is the moment it
+/// would be created, so it is said here rather than left to be discovered.
+fn note_if_a_plugin_carries_the_hooks(cwd: &Path) {
+    for plugin in oboro::hooks::enabled_plugins_from(cwd) {
+        oboro::note!(
+            "note: the {} plugin is enabled in {} and carries both hooks already; \
+             naming them here as well runs each of them twice",
+            plugin.key,
+            plugin.file.display()
+        );
+    }
 }
 
 /// Says what installing the hooks would do to each event, and to the file.
@@ -1184,10 +1204,13 @@ fn doctor(store: &StoreArgs) -> Result<()> {
     #[cfg(not(feature = "ner"))]
     writeln!(report, "network:    never contacted")?;
     // One working directory for both, so the two halves of the agent report
-    // cannot describe different places.
+    // cannot describe different places. The plugin is resolved once here for
+    // the same reason: it carries a skill and hooks, so a report where one half
+    // knows about it and the other does not would contradict itself.
     let cwd = std::env::current_dir().context("reading the working directory")?;
-    write!(report, "{}", describe_hooks(&cwd)?)?;
-    write!(report, "{}", describe_skill(&cwd)?)?;
+    let plugins = oboro::hooks::enabled_plugins_from(&cwd);
+    write!(report, "{}", describe_hooks(&cwd, &plugins)?)?;
+    write!(report, "{}", describe_skill(&cwd, &plugins)?)?;
     print_stdout(&report)
 }
 
@@ -1202,14 +1225,13 @@ fn doctor(store: &StoreArgs) -> Result<()> {
 /// settings file names. Without that line the advice under each event would be
 /// wrong for anyone who installed that way, and following it would leave them
 /// running both copies.
-fn describe_hooks(cwd: &Path) -> Result<String> {
+fn describe_hooks(cwd: &Path, plugins: &[EnabledPlugin]) -> Result<String> {
     use std::fmt::Write as _;
 
     let installed = oboro::hooks::installed_from(cwd);
-    let plugins = oboro::hooks::enabled_plugins_from(cwd);
     let mut report = String::new();
 
-    for plugin in &plugins {
+    for plugin in plugins {
         writeln!(
             report,
             "plugin      {} ({}, enabled)",
@@ -1222,14 +1244,12 @@ fn describe_hooks(cwd: &Path) -> Result<String> {
         let name = event.name;
         let found: Vec<_> = installed.iter().filter(|hook| hook.event == name).collect();
         if found.is_empty() {
-            if plugins.is_empty() {
-                writeln!(report, "{name:<11} not installed; run `oboro hook install`")?;
+            let advice = if plugins.is_empty() {
+                "not installed; run `oboro hook install`"
             } else {
-                writeln!(
-                    report,
-                    "{name:<11} not in your settings; the plugin carries it"
-                )?;
-            }
+                "not in your settings; the plugin carries it"
+            };
+            writeln!(report, "{name:<11} {advice}")?;
             continue;
         }
         for hook in found {
@@ -1256,10 +1276,19 @@ fn describe_hooks(cwd: &Path) -> Result<String> {
 /// Both scopes are listed whatever their state. An `edited` copy is the one
 /// worth noticing, since that is the agent being taught something this build no
 /// longer does.
-fn describe_skill(cwd: &Path) -> Result<String> {
+///
+/// A plugin carries a skill of its own, in its own files, so `not installed` on
+/// both scopes is true of these paths and misleading about the agent. It is
+/// said differently when one is enabled, for the reason the hooks are.
+fn describe_skill(cwd: &Path, plugins: &[EnabledPlugin]) -> Result<String> {
     use std::fmt::Write as _;
 
     let mut report = String::new();
+    let missing = if plugins.is_empty() {
+        "not installed"
+    } else {
+        "not installed here; the plugin carries its own"
+    };
 
     for scope in SCOPES {
         let Ok(path) = oboro::skill::path(scope, cwd) else {
@@ -1271,7 +1300,7 @@ fn describe_skill(cwd: &Path) -> Result<String> {
             continue;
         };
         let state = match oboro::skill::status(&path) {
-            Status::Missing => "not installed",
+            Status::Missing => missing,
             Status::Current => "current",
             Status::Edited => "edited; `oboro skill install` will propose the new text",
             Status::Unreadable => "UNREADABLE",

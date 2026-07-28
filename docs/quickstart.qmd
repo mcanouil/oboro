@@ -203,7 +203,12 @@ Installed as a plugin, the hooks are in the plugin's own files rather than in yo
 plugin      /home/you/.claude/settings.json (oboro@oboro, enabled)
 PostToolUse not in your settings; the plugin carries it
 PreToolUse  not in your settings; the plugin carries it
+skill       /home/you/project/.claude/skills/oboro/SKILL.md (not installed here; the plugin carries its own)
+skill       /home/you/.claude/skills/oboro/SKILL.md (not installed here; the plugin carries its own)
 ```
+
+Installing them again in your settings on top of the plugin is worth avoiding: both copies would run on every matching tool call.
+`oboro hook install` says so when it finds the plugin enabled.
 
 Ask the agent to read a file holding a phone number, and it will tell you about `[[PHONE_1]]`.
 Ask it to write that back, and the real number lands in the file.
