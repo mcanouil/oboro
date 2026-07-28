@@ -75,8 +75,11 @@ fn settings_files(cwd: &Path) -> Vec<PathBuf> {
     files
 }
 
-/// Every Oboro hook named in the settings files reachable from `cwd`, on the
-/// terms [`settings_documents`] reads them.
+/// Every Oboro hook named in the settings files reachable from `cwd`.
+///
+/// A file that does not exist, cannot be read, or holds invalid JSON
+/// contributes nothing: this is a report, and a settings file Oboro cannot
+/// parse is the agent's business rather than something to fail over.
 #[must_use]
 pub fn installed_from(cwd: &Path) -> Vec<Installed> {
     let mut found = Vec::new();
@@ -138,11 +141,9 @@ pub fn enabled_plugins_from(cwd: &Path) -> Vec<EnabledPlugin> {
     found
 }
 
-/// Every settings file reachable from `cwd` that holds JSON, with its contents.
-///
-/// A file that does not exist, cannot be read, or holds invalid JSON
-/// contributes nothing: these are reports, and a settings file Oboro cannot
-/// parse is the agent's business rather than something to fail over.
+/// Every settings file reachable from `cwd` that holds JSON, with its
+/// contents, on the terms the two readers above describe: a file that is
+/// missing, unreadable or not JSON contributes nothing.
 fn settings_documents(cwd: &Path) -> Vec<(PathBuf, serde_json::Value)> {
     settings_files(cwd)
         .into_iter()
