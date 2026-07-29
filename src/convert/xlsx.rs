@@ -28,9 +28,15 @@ pub fn to_sheets(path: &Path) -> Result<Vec<Sheet>> {
 
     let mut sheets = Vec::new();
     for (index, name) in workbook.sheet_names().into_iter().enumerate() {
-        let range = workbook
-            .worksheet_range(&name)
-            .with_context(|| format!("reading sheet '{name}' of {}", path.display()))?;
+        // A sheet name may hold personal data and any byte at all, so it is
+        // bounded before it reaches a message the user may pass on.
+        let range = workbook.worksheet_range(&name).with_context(|| {
+            format!(
+                "reading sheet '{}' of {}",
+                super::quoted(&name),
+                path.display()
+            )
+        })?;
 
         let mut text = String::new();
         for row in range.rows() {
