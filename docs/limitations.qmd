@@ -84,6 +84,19 @@ That second one is the gap worth knowing about: a page whose writing is too fain
 
 Without `--features ocr` a page short of text is refused, and the error says so.
 
+## A PDF page can be read short without anything saying so
+
+A page that cannot be processed at all is caught: the extractor stops there, `oboro` notices the document came back shorter than its page count and refuses it, naming the page.
+
+A page read *incompletely* is not caught, and cannot be.
+The extractor drops text it does not recognise the shape of rather than failing on it: a `Tj` operand that is not a string is skipped, as are surrogate-range code units.
+The page still comes back, just with less on it than it holds, and nothing distinguishes that from a page which really did say less.
+
+The per-page floor catches the worst of it, since a page reduced to almost nothing is then read as a scan.
+A page that loses a line or two stays above the floor and is used as it is, so a value in that line is neither redacted nor reported.
+
+This is the one place where output can be short of the input without an error, so a PDF whose text matters is worth reading over before you send it.
+
 ## Formats it does not read
 
 Older `.doc`, `.xls` and `.ppt`, along with `.pptx`, are not read at all.
