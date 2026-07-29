@@ -59,15 +59,11 @@ pub fn to_text(path: &Path, ocr_languages: &[String]) -> Result<String> {
 
     let extracted = extract_pages(path)?;
 
-    // The extractor stops at the first page it cannot process and returns the
-    // ones before it, so a short answer means a page went unread rather than
-    // that the document ended.
-    if extracted.len() < pages.len() {
+    if let Some(number) = unread_page(pages.len(), &extracted) {
         bail!(
-            "{} stopped being readable at page {} of {}. Returning the pages before it \
-             would hand back part of a document as though it were the whole.",
+            "{} stopped being readable at page {number} of {}. Returning the pages before \
+             it would hand back part of a document as though it were the whole.",
             path.display(),
-            extracted.len() + 1,
             pages.len()
         );
     }
@@ -111,6 +107,22 @@ pub fn to_text(path: &Path, ocr_languages: &[String]) -> Result<String> {
         }
     }
     Ok(text)
+}
+
+/// The first page the extractor did not return, counted from one.
+///
+/// It stops at the first page it cannot process and hands back the pages
+/// before it, reporting nothing, so a short answer means a page went unread
+/// rather than that the document ended. Comparing the count is the only way to
+/// tell those apart from out here.
+///
+/// Kept separate because it is the whole of the guard: a refactor that
+/// inverted the comparison or lost the offset would otherwise go unnoticed,
+/// and no fixture reaches this branch. A page that fails the extractor without
+/// also failing `lopdf` could not be built, since the paths that would do it
+/// panic and are reported by [`contained`] as a crashed parser instead.
+fn unread_page(pages: usize, extracted: &[String]) -> Option<usize> {
+    (extracted.len() < pages).then(|| extracted.len() + 1)
 }
 
 /// Characters that count towards the floor, which is to say not whitespace.
@@ -757,6 +769,44 @@ mod tests {
             text.contains("Acme Consulting SARL"),
             "expected the provider name, got:\n{text}"
         );
+    }
+
+    /// A whole document has nothing missing, however many pages it has.
+    #[test]
+    fn every_page_returned_leaves_none_unread() {
+        assert_eq!(unread_page(0, &[]), None);
+        assert_eq!(unread_page(1, &[text("a")]), None);
+        assert_eq!(unread_page(3, &[text("a"), text("b"), text("c")]), None);
+    }
+
+    /// The extractor stops at the first page it cannot process and returns the
+    /// pages before it, so the first page missing is the one it stopped at,
+    /// counted from one as the message states it.
+    #[test]
+    fn the_first_page_not_returned_is_the_one_it_stopped_at() {
+        assert_eq!(unread_page(3, &[text("a"), text("b")]), Some(3));
+        assert_eq!(unread_page(3, &[text("a")]), Some(2));
+        assert_eq!(unread_page(3, &[]), Some(1));
+    }
+
+    /// A page returned empty is still a page returned. Whether it holds too
+    /// little to be text is the floor's business, not this one's.
+    #[test]
+    fn an_empty_page_still_counts_as_returned() {
+        assert_eq!(unread_page(2, &[text(""), text("")]), None);
+    }
+
+    /// More pages than the document declares means the count cannot be
+    /// trusted, which is not this check's to report and must not be read as
+    /// pages missing.
+    #[test]
+    fn more_pages_than_declared_is_not_a_missing_page() {
+        assert_eq!(unread_page(1, &[text("a"), text("b")]), None);
+    }
+
+    #[cfg(test)]
+    fn text(content: &str) -> String {
+        content.to_owned()
     }
 
     /// A document showing no pages was not read, whatever the parser handed
