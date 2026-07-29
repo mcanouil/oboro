@@ -31,13 +31,16 @@ pub fn to_text(path: &Path) -> Result<String> {
     let mut text = String::new();
     for part in parts {
         let mut xml = String::new();
+        // The part name comes from the archive, so it is the document's to
+        // choose and is bounded before it reaches a message.
+        let named = super::quoted(&part);
         archive
             .by_name(&part)
-            .with_context(|| format!("opening {part} of {}", path.display()))?
+            .with_context(|| format!("opening {named} of {}", path.display()))?
             .read_to_string(&mut xml)
-            .with_context(|| format!("reading {part} of {}", path.display()))?;
+            .with_context(|| format!("reading {named} of {}", path.display()))?;
         let extracted =
-            extract(&xml).with_context(|| format!("parsing {part} of {}", path.display()))?;
+            extract(&xml).with_context(|| format!("parsing {named} of {}", path.display()))?;
         text.push_str(&extracted);
     }
 
@@ -154,7 +157,7 @@ fn named_entity(name: &[u8]) -> Result<&'static str> {
         b"apos" => Ok("'"),
         other => bail!(
             "the document uses an entity '&{};' this reader cannot expand",
-            String::from_utf8_lossy(other)
+            super::quoted(&String::from_utf8_lossy(other))
         ),
     }
 }
@@ -254,6 +257,26 @@ mod tests {
         assert!(
             format!("{error:#}").contains("nbsp"),
             "the error must name the offending entity"
+        );
+    }
+
+    /// The entity name is the document's to choose, so it must not decide how
+    /// long the error is or what reaches the terminal.
+    #[test]
+    fn a_hostile_entity_name_is_not_echoed_wholesale() {
+        let mut hostile = b"\x1b[2J\n".to_vec();
+        hostile.extend(std::iter::repeat_n(b'A', 10_000));
+        let error = named_entity(&hostile).expect_err("an undeclared entity must fail");
+        let rendered = format!("{error:#}");
+
+        assert!(
+            rendered.len() < 200,
+            "the message grew with the entity name: {} bytes",
+            rendered.len()
+        );
+        assert!(
+            !rendered.contains(['\x1b', '\n']),
+            "control characters reached the message: {rendered:?}"
         );
     }
 

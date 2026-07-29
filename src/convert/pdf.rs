@@ -216,10 +216,6 @@ const MIN_SCAN_PIXELS: i64 = 16;
 #[cfg(feature = "ocr")]
 const MAX_SCAN_PIXELS: i64 = 400_000_000;
 
-/// How much of a filter name reaches an error message.
-#[cfg(feature = "ocr")]
-const FILTER_NAME_LIMIT: usize = 40;
-
 /// One image drawn on a page, as the document stores it.
 ///
 /// Read here rather than through `lopdf::Document::get_page_images`, which
@@ -555,18 +551,7 @@ fn describe(filters: &[String]) -> String {
     }
     filters
         .iter()
-        .map(|filter| {
-            let printable: String = filter
-                .chars()
-                .filter(char::is_ascii_graphic)
-                .take(FILTER_NAME_LIMIT)
-                .collect();
-            if printable.is_empty() {
-                "an unprintable name".to_owned()
-            } else {
-                printable
-            }
-        })
+        .map(|filter| super::quoted(filter))
         .collect::<Vec<_>>()
         .join(", ")
 }

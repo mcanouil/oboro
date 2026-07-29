@@ -111,6 +111,34 @@ pub fn output_suffix(format: Option<Format>) -> &'static str {
     }
 }
 
+/// How much text taken from a document may reach an error message.
+const QUOTED_LIMIT: usize = 60;
+
+/// Renders a name taken from a document for an error message.
+///
+/// Names inside a document are written by whoever produced it: a zip entry, a
+/// sheet, an XML entity, an image filter. Each may be any length and carry any
+/// byte, so repeating one as found lets a file of someone else's making decide
+/// how long an error is and what control characters reach the terminal it is
+/// printed to.
+///
+/// A sheet name is also one of the places personal data turns up, as
+/// [`Sheet::name`] says, which is a second reason not to quote one at length
+/// into a message the user may paste elsewhere.
+#[must_use]
+pub fn quoted(name: &str) -> String {
+    let printable = name.chars().filter(|character| !character.is_control());
+    let mut kept: String = printable.clone().take(QUOTED_LIMIT).collect();
+
+    if kept.is_empty() {
+        return "an unprintable name".to_owned();
+    }
+    if printable.count() > QUOTED_LIMIT {
+        kept.push('…');
+    }
+    kept
+}
+
 /// Whether this build can perform optical character recognition.
 #[must_use]
 pub const fn ocr_available() -> bool {
@@ -404,6 +432,40 @@ mod tests {
                 "{suffix} missing from OUTPUT_SUFFIXES; walks would re-clean outputs"
             );
         }
+    }
+
+    /// A name out of a document decides neither how long an error is nor what
+    /// reaches the terminal it is printed to.
+    #[test]
+    fn a_hostile_name_is_bounded_and_stripped_for_an_error() {
+        let hostile = format!("\x1b[2J\nwipe\r{}", "A".repeat(10_000));
+        let rendered = quoted(&hostile);
+
+        assert!(
+            !rendered.contains(['\x1b', '\n', '\r']),
+            "control characters survived: {rendered:?}"
+        );
+        assert!(
+            rendered.chars().count() <= QUOTED_LIMIT + 1,
+            "the name was not bounded: {} characters",
+            rendered.chars().count()
+        );
+        assert!(rendered.ends_with('…'), "truncation must show: {rendered}");
+    }
+
+    /// An ordinary name must survive intact, accents and spaces included, or
+    /// the error stops naming what the user has to go and fix.
+    #[test]
+    fn an_ordinary_name_is_left_alone() {
+        assert_eq!(quoted("Clients à Lille"), "Clients à Lille");
+        assert_eq!(quoted("word/document.xml"), "word/document.xml");
+    }
+
+    /// A name of nothing but control characters would otherwise render as an
+    /// empty pair of quotes, which reads as though nothing were wrong.
+    #[test]
+    fn a_name_of_only_control_characters_is_described_instead() {
+        assert_eq!(quoted("\x00\x1b\r\n"), "an unprintable name");
     }
 
     #[test]
