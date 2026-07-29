@@ -41,24 +41,10 @@ pub fn image_to_text(path: &Path, languages: &[String]) -> Result<String> {
         bail!("cannot read {}: no such file", path.display());
     }
 
-    let installed = tessdata_dir().map(|dir| installed_languages(&dir));
-    let requested = select_languages(languages, installed.as_deref())?;
-
-    let mut engine = leptess::LepTess::new(None, &requested).map_err(|error| {
-        anyhow!(
-            "starting Tesseract with languages '{requested}' failed: {error}. \
-             Install the trained data for them, such as the tesseract-ocr-<language> \
-             packages, or set ocr_languages in oboro.toml to what you have."
-        )
-    })?;
-
-    engine
-        .set_image(path)
-        .with_context(|| format!("loading {} as an image", path.display()))?;
-
-    let text = engine
-        .get_utf8_text()
-        .with_context(|| format!("recognising text in {}", path.display()))?;
+    let image = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
+    let text = Recogniser::new(languages)?
+        .read(&image)
+        .with_context(|| format!("reading {} as an image", path.display()))?;
 
     if text.trim().is_empty() {
         bail!(
@@ -68,6 +54,58 @@ pub fn image_to_text(path: &Path, languages: &[String]) -> Result<String> {
         );
     }
     Ok(text)
+}
+
+/// A started engine, for reading a series of images one at a time.
+///
+/// Held across a document rather than started per image: starting Tesseract
+/// loads its trained data, and a scan brings one image per page. Taking them
+/// one at a time is what keeps a long document's images from being held at
+/// once, so the caller decodes, reads and drops each in turn.
+pub struct Recogniser(leptess::LepTess);
+
+impl Recogniser {
+    /// Starts Tesseract, recognising `languages` when it is not empty.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no trained data can be loaded for the languages
+    /// asked for.
+    pub fn new(languages: &[String]) -> Result<Self> {
+        Ok(Self(engine(languages)?))
+    }
+
+    /// Reads the text in one encoded image held in memory.
+    ///
+    /// An image recognising nothing comes back as an empty string rather than
+    /// an error: a blank page among several is not a failure, and whether the
+    /// document as a whole was readable is the caller's judgement. The caller
+    /// also owns the context, since only it knows which page this came from.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the bytes cannot be opened as an image, or if
+    /// recognition itself fails.
+    pub fn read(&mut self, image: &[u8]) -> Result<String> {
+        self.0
+            .set_image_from_mem(image)
+            .context("opening it as an image")?;
+        self.0.get_utf8_text().context("recognising its text")
+    }
+}
+
+/// Starts Tesseract with whichever languages [`select_languages`] settles on.
+fn engine(languages: &[String]) -> Result<leptess::LepTess> {
+    let installed = tessdata_dir().map(|dir| installed_languages(&dir));
+    let requested = select_languages(languages, installed.as_deref())?;
+
+    leptess::LepTess::new(None, &requested).map_err(|error| {
+        anyhow!(
+            "starting Tesseract with languages '{requested}' failed: {error}. \
+             Install the trained data for them, such as the tesseract-ocr-<language> \
+             packages, or set ocr_languages in oboro.toml to what you have."
+        )
+    })
 }
 
 /// Chooses the language string to hand Tesseract.

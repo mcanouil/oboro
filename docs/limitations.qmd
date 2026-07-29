@@ -49,23 +49,50 @@ A mistyped IBAN, a SIREN with a digit dropped, a card number that fails Luhn: no
 The check is what makes the rules trustworthy rather than noisy, so it stays.
 Add a [custom pattern](configuration.qmd#patterns) if your documents carry identifiers that do not validate.
 
-## Scanned PDFs are refused, not read
+## Some scanned PDFs are still refused
 
 A PDF whose pages are images yields almost no text.
-Rather than hand back a nearly empty file that looks sanitised, `oboro` refuses it and says why.
+On a build with `--features ocr` the images on those pages are read instead, which covers what a scanner produces: one image per page.
 
-Reading those pages needs rasterising them, which needs a large external library the tool does not carry.
-Export the pages as images and pass those to a build with `--features ocr`.
+Three kinds are still refused rather than half read, each naming the page.
+
+Pages whose image uses a codec that cannot be handed to the recogniser.
+Only `DCTDecode`, `JPXDecode` and `CCITTFaxDecode` are read, so `JBIG2Decode` is refused, and so is a `FlateDecode` page image of the kind Ghostscript and other re-encoding pipelines produce.
+A fax image with `/EncodedByteAlign` set is refused for the same reason: it cannot be described to the recogniser, and describing it wrongly would recognise noise.
+
+Pages whose image is wrapped in another filter, such as `[/FlateDecode /DCTDecode]`.
+The stream is stored as the document holds it, so the codec is still under a layer this does not unwrap.
+
+Pages holding no image at all, where the text was drawn as vector shapes.
+Nothing is embedded to recognise, and rasterising the page needs a large external library the tool does not carry.
+A page whose only images are too small to be a scan, such as a rule or a spacer, is refused the same way and says so.
+
+A scan drawn through a form XObject rather than placed on the page directly is found, so that shape is read rather than refused.
+
+The refusal is per page rather than per document: once recognition is under way, one unreadable page refuses the whole file rather than dropping out of it silently.
+
+What each page must supply is an image, not text recovered from it.
+A page whose image yields no text is kept, and only a document that yields nothing at all is refused.
+That is deliberate, because a blank page is ordinary in a scan and nothing distinguishes it from a page too faint to read.
+It is also the gap worth knowing about: a page whose writing is too faint contributes nothing, and the document still comes back as read.
+
+Without `--features ocr` every scanned PDF is refused, and the error says so.
+
+Note that the decision to recognise at all is taken across the document, not per page, because the extractor reports one body of text rather than one per page.
+A mostly-textual PDF with a single scanned page among the rest reads as text, and that page is not recovered.
 
 ## Formats it does not read
 
 Older `.doc`, `.xls` and `.ppt`, along with `.pptx`, are not read at all.
 Neither is anything embedded inside a document: a spreadsheet pasted into a Word file is not reached.
 
-## Recognition accuracy on real images is not tested
+## Recognition accuracy on real scans is not guaranteed
 
-The OCR path compiles and its failure paths are covered, but no automated test feeds Tesseract a photograph and checks the result.
-Treat text recovered from images as less reliable than text read directly.
+The tests read rendered text at a generous size, for a plain image and for both PDF codecs, and check that none of the planted values survive cleaning and that the provider name restores.
+That covers the path end to end, not the conditions a real scan arrives in, and it does not measure how much of a page was recognised.
+
+A photograph taken at an angle, a low resolution fax or a handwritten note is another matter.
+Treat text recovered from images as less reliable than text read directly, and check the output before sharing it.
 
 ## The hook does not cover what you type
 

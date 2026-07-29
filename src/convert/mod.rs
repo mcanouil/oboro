@@ -169,7 +169,7 @@ pub fn read(path: &Path, ocr_languages: &[String]) -> Result<Conversion> {
         Format::Csv | Format::Tsv => read_utf8(path).map(Conversion::Document),
         Format::Docx => docx::to_text(path).map(Conversion::Document),
         Format::Xlsx => xlsx::to_sheets(path).map(Conversion::Sheets),
-        Format::Pdf => pdf::to_text(path).map(Conversion::Document),
+        Format::Pdf => pdf::to_text(path, ocr_languages).map(Conversion::Document),
         Format::Image => image_to_text(path, ocr_languages).map(Conversion::Document),
     }
 }
