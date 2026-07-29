@@ -69,17 +69,20 @@ A page whose only images are too small to be a scan, such as a rule or a spacer,
 
 A scan drawn through a form XObject rather than placed on the page directly is found, so that shape is read rather than refused.
 
-The refusal is per page rather than per document: once recognition is under way, one unreadable page refuses the whole file rather than dropping out of it silently.
+Both the decision and the refusal are per page.
+A page short of text is read as a scan whatever the pages around it hold, so a scanned page in an otherwise textual PDF is recognised rather than carried along by the text on the others.
+One unreadable page refuses the whole file rather than dropping out of it silently.
 
-What each page must supply is an image, not text recovered from it.
-A page whose image yields no text is kept, and only a document that yields nothing at all is refused.
-That is deliberate, because a blank page is ordinary in a scan and nothing distinguishes it from a page too faint to read.
-It is also the gap worth knowing about: a page whose writing is too faint contributes nothing, and the document still comes back as read.
+Two pages are kept rather than refused, both deliberately.
 
-Without `--features ocr` every scanned PDF is refused, and the error says so.
+A page carrying a few words and no image, such as a section divider or a continuation sheet.
+Demanding an image of one would refuse documents that read perfectly well.
 
-Note that the decision to recognise at all is taken across the document, not per page, because the extractor reports one body of text rather than one per page.
-A mostly-textual PDF with a single scanned page among the rest reads as text, and that page is not recovered.
+A page whose image yields no text.
+A blank page is ordinary in a scan and nothing distinguishes it from a page too faint to read.
+That second one is the gap worth knowing about: a page whose writing is too faint contributes nothing, and the document still comes back as read.
+
+Without `--features ocr` a page short of text is refused, and the error says so.
 
 ## Formats it does not read
 
