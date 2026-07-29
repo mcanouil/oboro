@@ -6,24 +6,26 @@
 //! than passed on as a handful of stray characters: a document that looks
 //! sanitised but was never actually read is the worst outcome this tool has.
 //!
-//! The decision is taken across the document rather than per page, since the
-//! extractor reports one body of text and not one per page. A mostly-textual
-//! document with a scanned page among the rest therefore reads as text, and
-//! that page's contents are not recovered.
+//! The decision is taken page by page. A page falling short of
+//! [`MIN_CHARS_PER_PAGE`] is read as a scan whatever the pages around it hold,
+//! so a scanned page in an otherwise textual document is recognised rather
+//! than hidden behind the document's total.
 //!
 //! Recognition works on the images already embedded in the page rather than by
 //! rasterising it, which is what a scan is: one image per page, put there by
-//! the scanner. Once recognition is under way every page must contribute an
-//! image, so a page drawn some other way refuses the document rather than
-//! quietly dropping out of it.
+//! the scanner. A page short of text and holding no image is refused, naming
+//! the page, rather than dropping quietly out of the document.
 //!
-//! What is required is the image, not text from it. A page whose image
-//! recognises as nothing is kept and contributes nothing, and only a document
-//! that recognises as nothing throughout is refused. This is a deliberate
-//! exemption rather than an oversight: a blank page is ordinary in a scan, its
-//! real text is empty, and a page too faint to read cannot be told apart from
-//! one that is genuinely blank. Refusing on it would make any duplex scan
-//! unreadable.
+//! Two exemptions, both deliberate.
+//!
+//! A page carrying a few words and no image is kept as it is. A section
+//! divider or a continuation sheet is a real thing, and demanding an image of
+//! one would refuse documents that read perfectly well.
+//!
+//! A page whose image recognises as nothing is kept and contributes nothing.
+//! A blank page is ordinary in a scan, its real text is empty, and a page too
+//! faint to read cannot be told apart from one that is genuinely blank, so
+//! refusing on it would make any duplex scan unreadable.
 
 use std::panic::AssertUnwindSafe;
 use std::path::Path;
@@ -41,12 +43,10 @@ const MIN_CHARS_PER_PAGE: usize = 8;
 
 pub fn to_text(path: &Path, ocr_languages: &[String]) -> Result<String> {
     let document = load(path)?;
-    let pages = document.get_pages().len();
+    let pages = document.get_pages();
 
     // A document showing no pages was not read, whatever the parser returned.
-    // Treating it as one page would set the floor below what a single line of
-    // text clears, so a file whose pages went missing would pass as read.
-    if pages == 0 {
+    if pages.is_empty() {
         bail!(
             "{} declares no pages, so nothing in it can be read. The file is malformed, \
              or its pages are stored in a way this cannot follow.",
@@ -54,22 +54,73 @@ pub fn to_text(path: &Path, ocr_languages: &[String]) -> Result<String> {
         );
     }
 
-    let text = extract(path)?;
-    let visible = text.chars().filter(|c| !c.is_whitespace()).count();
+    let extracted = extract_pages(path)?;
 
-    if visible >= MIN_CHARS_PER_PAGE.saturating_mul(pages) {
-        return Ok(text);
+    // The extractor stops at the first page it cannot process and returns the
+    // ones before it, so a short answer means a page went unread rather than
+    // that the document ended.
+    if extracted.len() < pages.len() {
+        bail!(
+            "{} stopped being readable at page {} of {}. Returning the pages before it \
+             would hand back part of a document as though it were the whole.",
+            path.display(),
+            extracted.len() + 1,
+            pages.len()
+        );
     }
 
-    let recognised = recognise(&document, path, ocr_languages, visible, pages)?;
+    // Below the floor a page is a scan, or close enough to be worth reading as
+    // one. Judged per page: a scanned page among textual ones used to hide
+    // behind the document's total and go unread.
+    let thin: Vec<ThinPage<'_>> = pages
+        .iter()
+        .zip(&extracted)
+        .filter(|(_, text)| visible(text) < MIN_CHARS_PER_PAGE)
+        .map(|((number, id), text)| ThinPage {
+            number: *number,
+            id: *id,
+            text,
+        })
+        .collect();
+
+    let recognised = recognise(&document, path, ocr_languages, &thin)?;
 
     // A page can carry both: a scan with a searchable text layer, or a form
     // whose labels are drawn and whose answers are an image. Keeping only the
     // recognised half would drop text the detectors would have caught.
-    if text.trim().is_empty() {
-        return Ok(recognised);
+    let mut text = String::new();
+    for (number, extracted) in pages.keys().zip(&extracted) {
+        for part in [
+            extracted.trim_end(),
+            recognised
+                .iter()
+                .find(|(page, _)| page == number)
+                .map_or("", |(_, found)| found.trim_end()),
+        ] {
+            if part.is_empty() {
+                continue;
+            }
+            if !text.is_empty() {
+                text.push('\n');
+            }
+            text.push_str(part);
+            text.push('\n');
+        }
     }
-    Ok(format!("{}\n{recognised}", text.trim_end()))
+    Ok(text)
+}
+
+/// Characters that count towards the floor, which is to say not whitespace.
+fn visible(text: &str) -> usize {
+    text.chars().filter(|c| !c.is_whitespace()).count()
+}
+
+/// A page whose text falls short of the floor, and so may be a scan.
+struct ThinPage<'a> {
+    number: u32,
+    #[cfg_attr(not(feature = "ocr"), allow(dead_code))]
+    id: lopdf::ObjectId,
+    text: &'a str,
 }
 
 /// Reads the page images and returns whatever they say.
@@ -82,17 +133,26 @@ fn recognise(
     document: &lopdf::Document,
     path: &Path,
     languages: &[String],
-    visible: usize,
-    pages: usize,
-) -> Result<String> {
-    let mut recogniser = super::ocr::Recogniser::new(languages)?;
-    let mut text = String::new();
+    thin: &[ThinPage<'_>],
+) -> Result<Vec<(u32, String)>> {
+    // Started on the first page that actually has an image: a sparse page of
+    // text is now common enough that loading Tesseract's trained data for a
+    // document holding no scan at all would be waste.
+    let mut recogniser = None;
+    let mut per_page = Vec::new();
 
-    for (number, id) in document.get_pages() {
+    for page in thin {
+        let number = page.number;
         // One page's images at a time: a document referencing the same large
         // image from every page would otherwise be held in full.
-        let images = contained(path, || page_images(document, id, number, path))?;
+        let images = contained(path, || page_images(document, page.id, number, path))?;
+
         if images.is_empty() {
+            // A page carrying a few words and no image is a section divider or
+            // a continuation sheet, and its text is all there is to read.
+            if !page.text.trim().is_empty() {
+                continue;
+            }
             bail!(
                 "page {number} of {} yielded no text and holds no image to read. Returning \
                  the rest would hand back a document short of a page, looking sanitised \
@@ -102,8 +162,14 @@ fn recognise(
             );
         }
 
+        let engine = match recogniser {
+            Some(ref mut engine) => engine,
+            None => recogniser.insert(super::ocr::Recogniser::new(languages)?),
+        };
+
+        let mut text = String::new();
         for image in images {
-            let found = recogniser.read(&image).with_context(|| {
+            let found = engine.read(&image).with_context(|| {
                 format!("reading an image on page {number} of {}", path.display())
             })?;
             if found.trim().is_empty() {
@@ -113,20 +179,20 @@ fn recognise(
                 text.push('\n');
             }
             text.push_str(found.trim_end());
-            text.push('\n');
         }
-    }
 
-    if text.trim().is_empty() {
-        bail!(
-            "{} yielded only {visible} characters across {pages} page(s), and nothing was \
-             recognised in the images on its pages either. Returning it would produce \
-             output that looks sanitised without having been read. If it does carry \
-             writing, it may be too low resolution to read.",
-            path.display()
-        );
+        if text.is_empty() && page.text.trim().is_empty() {
+            bail!(
+                "page {number} of {} yielded no text, and nothing was recognised in the \
+                 images on it either. Returning it would produce output that looks \
+                 sanitised without having been read. If the page does carry writing, it \
+                 may be too low resolution to read.",
+                path.display()
+            );
+        }
+        per_page.push((number, text));
     }
-    Ok(text)
+    Ok(per_page)
 }
 
 #[cfg(not(feature = "ocr"))]
@@ -134,17 +200,20 @@ fn recognise(
     _document: &lopdf::Document,
     path: &Path,
     _languages: &[String],
-    visible: usize,
-    pages: usize,
-) -> Result<String> {
-    bail!(
-        "{} yielded only {visible} characters across {pages} page(s), so it is almost \
-         certainly scanned images rather than text. Reading it would produce output that \
-         looks sanitised without having been read. Reading the pages needs optical \
-         character recognition, which this build was compiled without: rebuild with \
-         `--features ocr` after installing Tesseract.",
-        path.display()
-    )
+    thin: &[ThinPage<'_>],
+) -> Result<Vec<(u32, String)>> {
+    if let Some(page) = thin.iter().find(|page| page.text.trim().is_empty()) {
+        bail!(
+            "page {} of {} yielded no text, so it is almost certainly scanned images \
+             rather than text. Reading it would produce output that looks sanitised \
+             without having been read. Reading the page needs optical character \
+             recognition, which this build was compiled without: rebuild with \
+             `--features ocr` after installing Tesseract.",
+            page.number,
+            path.display()
+        );
+    }
+    Ok(Vec::new())
 }
 
 /// The most a cross-reference stream may decompress to while loading.
@@ -175,9 +244,13 @@ fn contained<T>(path: &Path, read: impl FnOnce() -> Result<T>) -> Result<T> {
     }
 }
 
-fn extract(path: &Path) -> Result<String> {
+/// The text of each page, in order.
+///
+/// One entry per page, so a page can be judged on what it carries rather than
+/// on what the document carries between them.
+fn extract_pages(path: &Path) -> Result<Vec<String>> {
     contained(path, || {
-        pdf_extract::extract_text(path)
+        pdf_extract::extract_text_by_pages(path)
             .map_err(|error| anyhow!(error))
             .with_context(|| format!("reading text from {}", path.display()))
     })
@@ -1007,6 +1080,65 @@ mod tests {
         assert!(
             text.contains("Acme Consulting SARL"),
             "the recognised text was dropped, got:\n{text}"
+        );
+    }
+
+    /// A scanned page inside an otherwise textual document must still be
+    /// recognised.
+    ///
+    /// Judging the whole document at once let a page of images hide behind the
+    /// pages of text around it: the document cleared the floor, was returned
+    /// as text, and whatever that page carried never reached the detectors.
+    /// That is a value left in the output, which is the failure this tool
+    /// exists to prevent.
+    #[cfg(feature = "ocr")]
+    #[test]
+    fn a_scanned_page_among_textual_ones_is_still_recognised() {
+        let (_dir, path) = written(built(vec![
+            TestPage {
+                content: b"BT /F1 12 Tf 50 700 Td (Minutes of the meeting held on Tuesday) Tj ET"
+                    .to_vec(),
+                ..TestPage::default()
+            },
+            TestPage {
+                image: Some(fixture_image("scan.pdf")),
+                ..TestPage::default()
+            },
+        ]));
+
+        let text = to_text(&path, &[]).expect("a document of text and one scan must be read");
+        assert!(
+            text.contains("Minutes of the meeting"),
+            "the textual page was dropped, got:\n{text}"
+        );
+        assert!(
+            text.contains("Acme Consulting SARL"),
+            "the scanned page was never recognised, got:\n{text}"
+        );
+    }
+
+    /// A page carrying only a few words is a real thing: a section divider, a
+    /// continuation sheet. It has no image and needs none, and refusing it
+    /// would break documents that read perfectly well today.
+    #[cfg(feature = "ocr")]
+    #[test]
+    fn a_sparse_page_without_an_image_is_kept_rather_than_refused() {
+        let (_dir, path) = written(built(vec![
+            TestPage {
+                content: b"BT /F1 12 Tf 50 700 Td (Minutes of the meeting held on Tuesday) Tj ET"
+                    .to_vec(),
+                ..TestPage::default()
+            },
+            TestPage {
+                content: b"BT /F1 12 Tf 50 700 Td (Annex) Tj ET".to_vec(),
+                ..TestPage::default()
+            },
+        ]));
+
+        let text = to_text(&path, &[]).expect("a sparse page is not a scan");
+        assert!(
+            text.contains("Annex"),
+            "the sparse page was dropped, got:\n{text}"
         );
     }
 

@@ -351,9 +351,9 @@ Read them before trusting the output with anything that matters.
   where the page image is `DCTDecode`, `JPXDecode` or `CCITTFaxDecode` with
   nothing layered over it. Any other page refuses the file by name rather than
   being half-read, including one carrying no image at all.
-- Whether to recognise at all is decided across the document, so a mostly
-  textual PDF with one scanned page reads as text and that page is not
-  recovered.
+- Whether to recognise is decided per page, so a scanned page in an otherwise
+  textual PDF is still read. A page carrying a few words and no image is kept
+  as it is rather than refused.
 - Reading images needs the `ocr` feature and Tesseract; a plain build refuses
   them.
 - Recognition is tested on rendered text, not on real photographs. Treat text
