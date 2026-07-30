@@ -100,7 +100,7 @@ This is the one place where output can be short of the input without an error, s
 ## Formats it does not read
 
 Older `.doc`, `.xls` and `.ppt` are not read at all, nor are the OpenDocument
-text, spreadsheet and presentation formats, `.odt`, `.ods` and `.odp`.
+spreadsheet and presentation formats, `.ods` and `.odp`.
 Neither is anything embedded inside a document: a spreadsheet pasted into a Word file is not reached.
 
 Inside a `.pptx`, a footer set through PowerPoint's Header and Footer dialog
@@ -111,6 +111,16 @@ A chart's cached category labels, under `ppt/charts/`, are visible on the
 slide and are not read either.
 `SmartArt` is read, because the `mc:Fallback` inside the slide carries its
 shapes and their runs.
+
+Inside a `.odt`, an embedded object such as a chart or a spreadsheet is stored
+as its own sub-document in the archive, and only `content.xml` and `styles.xml`
+are read, so an object's text is missed.
+Text that is not part of a paragraph, an annotation's author and date, a
+footnote's marker, an image's alt text, is read but placed on a line of its own
+rather than where it sits in the page.
+That is deliberate: it is what stops such a value concatenating onto the word
+beside it and escaping detection, and it means the output reads less like the
+original than the other formats do.
 
 ## Recognition accuracy on real scans is not guaranteed
 
