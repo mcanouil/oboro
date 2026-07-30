@@ -1,9 +1,9 @@
 //! XML reading shared by the readers for zip-and-XML document formats.
 //!
-//! `.docx`, `.pptx` and `.odt` are all zip archives of XML parts, and all
-//! three need the same three things: a part read into a string, namespace
-//! prefixes stripped so `w:t` and `a:t` match one rule, and the five entities
-//! XML predefines expanded.
+//! `.docx` and `.pptx` are both zip archives of XML parts, and both need the
+//! same three things: a part read into a string, namespace prefixes stripped
+//! so `w:t` and `a:t` match one rule, and the five entities XML predefines
+//! expanded.
 //!
 //! Entity expansion is the reason this is shared rather than copied. Dropping
 //! an entity reference silently strips accents, so "Société" would reach the
@@ -49,10 +49,10 @@ pub(super) fn named_entity(name: &[u8]) -> Result<&'static str> {
 /// These parts are read as the archive is opened, before any of the size
 /// checks that run once a document is assembled into text apply. Deflate
 /// reaches roughly 1000:1 on a repeated byte, and a run of `A` is valid
-/// UTF-8, so a small, malicious `.docx`, `.pptx` or `.odt` could otherwise
-/// inflate one part to gigabytes before this code has even started parsing
-/// it, and `odt.rs` and `pptx.rs` then accumulate every part into one more
-/// string on top of that. A single XML part is much smaller than a whole
+/// UTF-8, so a small, malicious `.docx` or `.pptx` could otherwise inflate
+/// one part to gigabytes before this code has even started parsing it, and
+/// `pptx.rs` then accumulates every part into one more string on top of
+/// that. A single XML part is much smaller than a whole
 /// document, so this sits well under the PDF reader's 256 MiB ceiling on a
 /// whole decompressed cross-reference stream; 64 MiB is comfortably past the
 /// largest part a real document has been seen to carry.
@@ -240,7 +240,7 @@ mod tests {
         use std::io::Write as _;
 
         let dir = tempfile::tempdir().expect("temporary directory");
-        let path = dir.path().join("bomb.odt");
+        let path = dir.path().join("bomb.pptx");
         let file = std::fs::File::create(&path).expect("creating");
         let mut writer = zip::ZipWriter::new(file);
         let options = zip::write::SimpleFileOptions::default()
