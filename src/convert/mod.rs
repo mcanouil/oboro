@@ -6,6 +6,7 @@
 //! sanitised without ever having been read.
 
 mod docx;
+mod odt;
 mod pdf;
 mod pptx;
 mod xlsx;
