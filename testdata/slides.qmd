@@ -1,0 +1,59 @@
+---
+title: "Fixture deck"
+author: "Fixture Author"
+format: pptx
+---
+
+## Client
+
+Acme Consulting SARL
+
+## Contact
+
+Jean Dupont
+
+## Electronic mail
+
+jean.dupont@acme-consulting.example
+
+## Telephone
+
+06 12 34 56 78
+
+## Address
+
+12 bis rue de la Paix
+
+## Postcode
+
+75002 Paris
+
+## Bank
+
+FR14 2004 1010 0505 0001 3M02 606
+
+## Card
+
+4242 4242 4242 4242
+
+## Registration
+
+12345678200002
+
+## Reference
+
+CT-874512
+
+## Second client
+
+Globex Industries
+
+::: {.notes}
+Notes for the reviewer: marie.martin@globex.example
+:::
+
+## Table
+
+| Client | Contact |
+| --- | --- |
+| Acme Consulting SARL | +33 1 42 68 53 00 |

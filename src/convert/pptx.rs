@@ -10,29 +10,20 @@
 //! `PowerPoint` merges a paragraph into roughly one run. The shared reader
 //! concatenates run text with no separator, which is what makes the first case
 //! reassemble correctly, so no separator may be introduced.
-//!
-//! Nothing calls [`to_text`] yet: the dispatch that reaches it belongs to a
-//! later step of the pptx/odt reader work, which is why the module is
-//! otherwise complete but unreachable. Each item below carries its own
-//! `#[allow(dead_code)]` for that reason; remove all eight once a later step
-//! adds the `Format::Pptx` dispatch arm that calls [`to_text`].
 
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 
 /// Where the slides live. Also the marker for a readable presentation.
-#[allow(dead_code)]
 const SLIDES: &str = "ppt/slides/";
 /// Speaker notes, read because they are text the author wrote.
-#[allow(dead_code)]
 const NOTES: &str = "ppt/notesSlides/";
 /// Comments, read because they are author-written and carry personal data,
 /// the same reason `docx.rs` reads `word/comments.xml`.
 ///
 /// Matched by directory rather than by filename prefix: a real deck names the
 /// part `modernComment_100_0.xml`, which no `comment*` prefix matches.
-#[allow(dead_code)]
 const COMMENTS: &str = "ppt/comments/";
 /// The local elements holding comment text.
 ///
@@ -40,7 +31,6 @@ const COMMENTS: &str = "ppt/comments/";
 /// puts its text directly in `p:text`, which would otherwise read as empty.
 /// Scoped to comments rather than added to the shared reader, so no element
 /// named `text` becomes text-bearing across every part of every format.
-#[allow(dead_code)]
 const COMMENT_TEXT: &[&[u8]] = &[b"t", b"text"];
 
 /// The parts that carry readable text, in reading order.
@@ -48,7 +38,6 @@ const COMMENT_TEXT: &[&[u8]] = &[b"t", b"text"];
 /// Slide layouts and masters are excluded. Their text is template prompt
 /// material such as "Click to edit Master title style", which would be
 /// injected into every cleaned presentation.
-#[allow(dead_code)]
 fn selected<S: AsRef<str>>(names: &[S]) -> Vec<String> {
     let pick = |prefix: &str| -> Vec<String> {
         let mut found: Vec<String> = names
@@ -68,7 +57,6 @@ fn selected<S: AsRef<str>>(names: &[S]) -> Vec<String> {
 }
 
 /// Whether `name` is an XML part directly inside `prefix`.
-#[allow(dead_code)]
 fn is_part_of(name: &str, prefix: &str) -> bool {
     let Some(rest) = name.strip_prefix(prefix) else {
         return false;
@@ -80,7 +68,6 @@ fn is_part_of(name: &str, prefix: &str) -> bool {
 ///
 /// A part with no number sorts first, and ties fall back to the name, so the
 /// order is total rather than dependent on the archive's listing.
-#[allow(dead_code)]
 fn index_of(name: &str) -> u32 {
     let digits: String = name
         .trim_end_matches(|character: char| !character.is_ascii_digit())
@@ -102,7 +89,6 @@ fn index_of(name: &str) -> u32 {
 ///
 /// Returns an error if the file is not a readable archive, if it holds no
 /// slide part, if a part cannot be read or parsed, or if it yields no text.
-#[allow(dead_code)]
 pub fn to_text(path: &Path) -> Result<String> {
     let file = std::fs::File::open(path).with_context(|| format!("opening {}", path.display()))?;
     let mut archive = zip::ZipArchive::new(file)
@@ -110,7 +96,7 @@ pub fn to_text(path: &Path) -> Result<String> {
 
     let names: Vec<String> = archive.file_names().map(str::to_owned).collect();
     let parts = selected(&names);
-    if parts.is_empty() {
+    if !parts.iter().any(|part| part.starts_with(SLIDES)) {
         bail!(
             "{} has no {SLIDES} part; it may be an older .ppt renamed to .pptx",
             path.display()
@@ -190,6 +176,32 @@ mod tests {
         std::fs::write(&path, "this is not a zip").expect("writing");
         let error = to_text(&path).expect_err("must reject");
         assert!(format!("{error:#}").contains("readable .pptx"));
+    }
+
+    /// A deck holding notes or comments but no slide part must still be
+    /// refused, and the message it gives must name the part that is missing
+    /// rather than claim the whole archive is empty.
+    #[test]
+    fn an_archive_with_notes_but_no_slides_is_refused() {
+        use std::io::Write as _;
+
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let path = dir.path().join("notes-only.pptx");
+        let file = std::fs::File::create(&path).expect("creating");
+        let mut writer = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default();
+        writer
+            .start_file("ppt/notesSlides/notesSlide1.xml", options)
+            .expect("starting entry");
+        writer
+            .write_all(
+                br#"<?xml version="1.0"?><p:notes xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:t>note</a:t></p:notes>"#,
+            )
+            .expect("writing entry");
+        writer.finish().expect("finishing archive");
+
+        let error = to_text(&path).expect_err("must reject");
+        assert!(format!("{error:#}").contains(SLIDES));
     }
 
     /// A real commented deck names the part `modernComment_100_0.xml`, which a
