@@ -14,8 +14,8 @@
 //! Nothing calls [`to_text`] yet: the dispatch that reaches it belongs to a
 //! later step of the pptx/odt reader work, which is why the module is
 //! otherwise complete but unreachable. Each item below carries its own
-//! `#[allow(dead_code)]` for that reason, to come out once that dispatch
-//! arm lands.
+//! `#[allow(dead_code)]` for that reason; remove all six once a later step
+//! adds the `Format::Pptx` dispatch arm that calls [`to_text`].
 
 use std::path::Path;
 
