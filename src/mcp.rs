@@ -16,7 +16,19 @@ use anyhow::{Context, Result};
 use serde_json::{Value, json};
 
 use crate::config::Config;
-use crate::vault::Vault;
+use crate::detect::Detector;
+use crate::vault::{Entry, Vault};
+
+/// What the server carries between messages.
+///
+/// The detector is built on the first `clean` rather than at startup: under
+/// `--features ner` building one loads a 348 MB model, and a client that
+/// connects and lists tools without cleaning anything should not pay for it.
+struct State<'a> {
+    config: &'a Config,
+    vault: Vault,
+    detector: Option<Detector<'a>>,
+}
 
 /// Serves the protocol until `input` reaches end of file.
 ///
@@ -35,13 +47,17 @@ pub fn serve(
     config: &Config,
     vault: Vault,
 ) -> Result<()> {
-    let _ = (config, vault);
+    let mut state = State {
+        config,
+        vault,
+        detector: None,
+    };
     for line in input.lines() {
         let line = line.context("reading a message from standard input")?;
         if line.trim().is_empty() {
             continue;
         }
-        if let Some(reply) = handle(&line) {
+        if let Some(reply) = handle(&line, &mut state) {
             writeln!(output, "{reply}").context("writing a message to standard output")?;
             output.flush().context("flushing standard output")?;
         }
@@ -51,7 +67,7 @@ pub fn serve(
 
 /// Answers one message, or `None` when it is a notification and must not be
 /// answered.
-fn handle(line: &str) -> Option<String> {
+fn handle(line: &str, state: &mut State<'_>) -> Option<String> {
     let Ok(message) = serde_json::from_str::<Value>(line) else {
         return Some(rendered(&error(
             None,
@@ -103,6 +119,18 @@ fn handle(line: &str) -> Option<String> {
         // send a `cursor`, which this server ignores because it returns every
         // tool in one page.
         "tools/list" => success(id, &json!({"tools": descriptors()})),
+        "tools/call" => match message.get("params") {
+            Some(Value::Object(params)) => {
+                let name = params
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let empty = json!({});
+                let arguments = params.get("arguments").unwrap_or(&empty);
+                success(id, &call(name, arguments, state))
+            }
+            _ => error(Some(id), -32602, "tools/call needs a params object"),
+        },
         "ping" => success(id, &json!({})),
         _ => error(Some(id), -32601, &format!("unknown method {method:?}")),
     };
@@ -144,6 +172,59 @@ fn descriptors() -> Value {
             "inputSchema": {"type": "object", "properties": {}},
         },
     ])
+}
+
+/// A successful `tools/call` result, one content block per entry in `blocks`.
+fn text_result(blocks: Vec<String>) -> Value {
+    let content: Vec<Value> = blocks
+        .into_iter()
+        .map(|text| json!({"type": "text", "text": text}))
+        .collect();
+    json!({"content": content, "isError": false})
+}
+
+/// A failed `tools/call` result.
+///
+/// Not a JSON-RPC error: those are for protocol faults, and a tool that ran
+/// and failed is something the model should be able to read and act on.
+fn failed(message: &str) -> Value {
+    json!({"content": [{"type": "text", "text": message}], "isError": true})
+}
+
+/// Runs one tool.
+fn call(name: &str, arguments: &Value, state: &mut State<'_>) -> Value {
+    // `arguments` and the lazily built detector are both consumed by `clean`,
+    // which lands in the next task.
+    let _ = (arguments, &state.config, &state.detector);
+    match name {
+        "map_list" => map_list(&state.vault),
+        // `restore` lands here deliberately. See `descriptors`.
+        other => failed(&format!(
+            "there is no tool named {other:?}; this server offers clean and map_list"
+        )),
+    }
+}
+
+/// Lists the placeholders the vault has issued.
+///
+/// Placeholders only. `oboro map list` prints the time each was created and
+/// this does not: the model needs to know which placeholders exist and what
+/// kind each stands for, and a timestamp per entry is a record of the user's
+/// working hours rather than anything it can reason with.
+fn map_list(vault: &Vault) -> Value {
+    match vault.entries() {
+        Ok(entries) if entries.is_empty() => {
+            text_result(vec!["the vault holds no placeholders yet".to_owned()])
+        }
+        Ok(entries) => {
+            let listing: Vec<String> = entries.iter().map(Entry::placeholder).collect();
+            text_result(vec![listing.join("\n")])
+        }
+        Err(error) => {
+            crate::note!("oboro mcp: listing the vault failed: {error:#}");
+            failed("the vault could not be read; the reason is in the server's log")
+        }
+    }
 }
 
 /// A successful reply carrying `result`.
@@ -208,9 +289,32 @@ fn rendered(reply: &Value) -> String {
 mod tests {
     use super::*;
 
+    /// A temporary directory and the default configuration, so no test can
+    /// touch the developer's real `~/.oboro`.
+    ///
+    /// The two are returned rather than folded into [`state`] because the
+    /// state borrows the configuration and the directory has to outlive the
+    /// vault opened inside it.
+    fn fixture() -> (tempfile::TempDir, Config) {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        (dir, Config::load(None).expect("the default configuration"))
+    }
+
+    /// A server state over a vault in `dir`.
+    fn state<'a>(dir: &std::path::Path, config: &'a Config) -> State<'a> {
+        State {
+            config,
+            vault: Vault::open(&dir.join("vault.db"), &dir.join("key")).expect("a vault"),
+            detector: None,
+        }
+    }
+
     #[test]
     fn a_request_is_answered_with_its_own_id() {
-        let reply = handle(r#"{"jsonrpc":"2.0","id":7,"method":"ping"}"#).expect("a reply");
+        let (dir, config) = fixture();
+        let mut state = state(dir.path(), &config);
+        let reply =
+            handle(r#"{"jsonrpc":"2.0","id":7,"method":"ping"}"#, &mut state).expect("a reply");
         let value: Value = serde_json::from_str(&reply).expect("valid JSON");
         assert_eq!(value["id"], 7);
         assert_eq!(value["jsonrpc"], "2.0");
@@ -218,24 +322,42 @@ mod tests {
 
     #[test]
     fn a_string_id_comes_back_as_a_string() {
-        let reply = handle(r#"{"jsonrpc":"2.0","id":"abc","method":"ping"}"#).expect("a reply");
+        let (dir, config) = fixture();
+        let mut state = state(dir.path(), &config);
+        let reply = handle(
+            r#"{"jsonrpc":"2.0","id":"abc","method":"ping"}"#,
+            &mut state,
+        )
+        .expect("a reply");
         let value: Value = serde_json::from_str(&reply).expect("valid JSON");
         assert_eq!(value["id"], "abc");
     }
 
     #[test]
     fn a_notification_is_not_answered() {
-        assert!(handle(r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#).is_none());
+        let (dir, config) = fixture();
+        let mut state = state(dir.path(), &config);
+        assert!(
+            handle(
+                r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
+                &mut state
+            )
+            .is_none()
+        );
     }
 
     #[test]
     fn an_unknown_notification_is_not_answered_either() {
-        assert!(handle(r#"{"jsonrpc":"2.0","method":"who/knows"}"#).is_none());
+        let (dir, config) = fixture();
+        let mut state = state(dir.path(), &config);
+        assert!(handle(r#"{"jsonrpc":"2.0","method":"who/knows"}"#, &mut state).is_none());
     }
 
     #[test]
     fn a_line_that_is_not_json_is_a_parse_error_with_no_id() {
-        let reply = handle("not json at all").expect("a reply");
+        let (dir, config) = fixture();
+        let mut state = state(dir.path(), &config);
+        let reply = handle("not json at all", &mut state).expect("a reply");
         let value: Value = serde_json::from_str(&reply).expect("valid JSON");
         assert_eq!(value["error"]["code"], -32700);
         assert!(
@@ -246,7 +368,10 @@ mod tests {
 
     #[test]
     fn a_batch_is_rejected_rather_than_ignored() {
-        let reply = handle(r#"[{"jsonrpc":"2.0","id":1,"method":"ping"}]"#).expect("a reply");
+        let (dir, config) = fixture();
+        let mut state = state(dir.path(), &config);
+        let reply =
+            handle(r#"[{"jsonrpc":"2.0","id":1,"method":"ping"}]"#, &mut state).expect("a reply");
         let value: Value = serde_json::from_str(&reply).expect("valid JSON");
         assert_eq!(value["error"]["code"], -32600);
         assert!(
@@ -257,15 +382,23 @@ mod tests {
 
     #[test]
     fn an_unknown_method_is_a_method_not_found() {
-        let reply =
-            handle(r#"{"jsonrpc":"2.0","id":1,"method":"server/discover"}"#).expect("a reply");
+        let (dir, config) = fixture();
+        let mut state = state(dir.path(), &config);
+        let reply = handle(
+            r#"{"jsonrpc":"2.0","id":1,"method":"server/discover"}"#,
+            &mut state,
+        )
+        .expect("a reply");
         let value: Value = serde_json::from_str(&reply).expect("valid JSON");
         assert_eq!(value["error"]["code"], -32601);
     }
 
     #[test]
     fn a_reply_never_contains_a_newline() {
-        let reply = handle(r#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#).expect("a reply");
+        let (dir, config) = fixture();
+        let mut state = state(dir.path(), &config);
+        let reply =
+            handle(r#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#, &mut state).expect("a reply");
         assert!(!reply.contains('\n'), "framing would break: {reply}");
     }
 
@@ -296,8 +429,10 @@ mod tests {
 
     #[test]
     fn initialize_advertises_tools_and_names_the_server() {
+        let (dir, config) = fixture();
+        let mut state = state(dir.path(), &config);
         let reply =
-            handle(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}"#)
+            handle(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}"#, &mut state)
                 .expect("a reply");
         let value: Value = serde_json::from_str(&reply).expect("valid JSON");
         assert_eq!(value["result"]["protocolVersion"], "2025-11-25");
@@ -311,14 +446,23 @@ mod tests {
 
     #[test]
     fn initialize_without_params_is_an_invalid_params_error() {
-        let reply = handle(r#"{"jsonrpc":"2.0","id":1,"method":"initialize"}"#).expect("a reply");
+        let (dir, config) = fixture();
+        let mut state = state(dir.path(), &config);
+        let reply = handle(
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize"}"#,
+            &mut state,
+        )
+        .expect("a reply");
         let value: Value = serde_json::from_str(&reply).expect("valid JSON");
         assert_eq!(value["error"]["code"], -32602);
     }
 
     #[test]
     fn ping_takes_no_params_and_does_not_demand_them() {
-        let reply = handle(r#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#).expect("a reply");
+        let (dir, config) = fixture();
+        let mut state = state(dir.path(), &config);
+        let reply =
+            handle(r#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#, &mut state).expect("a reply");
         let value: Value = serde_json::from_str(&reply).expect("valid JSON");
         assert!(value["result"].is_object());
         assert!(value.get("error").is_none());
@@ -326,7 +470,13 @@ mod tests {
 
     #[test]
     fn exactly_two_tools_are_offered() {
-        let reply = handle(r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#).expect("a reply");
+        let (dir, config) = fixture();
+        let mut state = state(dir.path(), &config);
+        let reply = handle(
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#,
+            &mut state,
+        )
+        .expect("a reply");
         let value: Value = serde_json::from_str(&reply).expect("valid JSON");
         let tools = value["result"]["tools"].as_array().expect("an array");
         let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
@@ -338,7 +488,13 @@ mod tests {
         // Restoring over MCP is equivalent to `map list --reveal` for any client
         // that can read a file. If this test fails, read the spec before changing
         // it.
-        let reply = handle(r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#).expect("a reply");
+        let (dir, config) = fixture();
+        let mut state = state(dir.path(), &config);
+        let reply = handle(
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#,
+            &mut state,
+        )
+        .expect("a reply");
         assert!(
             !reply.contains("restore"),
             "restore must not be exposed: {reply}"
@@ -347,8 +503,18 @@ mod tests {
 
     #[test]
     fn the_tool_order_is_fixed() {
-        let once = handle(r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#).expect("a reply");
-        let twice = handle(r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#).expect("a reply");
+        let (dir, config) = fixture();
+        let mut state = state(dir.path(), &config);
+        let once = handle(
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#,
+            &mut state,
+        )
+        .expect("a reply");
+        let twice = handle(
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#,
+            &mut state,
+        )
+        .expect("a reply");
         let first: Value = serde_json::from_str(&once).expect("valid JSON");
         let second: Value = serde_json::from_str(&twice).expect("valid JSON");
         assert_eq!(first["result"]["tools"], second["result"]["tools"]);
@@ -356,7 +522,13 @@ mod tests {
 
     #[test]
     fn map_list_offers_no_way_to_reveal_values() {
-        let reply = handle(r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#).expect("a reply");
+        let (dir, config) = fixture();
+        let mut state = state(dir.path(), &config);
+        let reply = handle(
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#,
+            &mut state,
+        )
+        .expect("a reply");
         assert!(
             !reply.contains("reveal"),
             "the mapping must not be revealable: {reply}"
@@ -365,7 +537,13 @@ mod tests {
 
     #[test]
     fn clean_requires_a_path() {
-        let reply = handle(r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#).expect("a reply");
+        let (dir, config) = fixture();
+        let mut state = state(dir.path(), &config);
+        let reply = handle(
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#,
+            &mut state,
+        )
+        .expect("a reply");
         let value: Value = serde_json::from_str(&reply).expect("valid JSON");
         let clean = &value["result"]["tools"][0];
         assert_eq!(clean["inputSchema"]["required"][0], "path");
@@ -374,12 +552,14 @@ mod tests {
 
     #[test]
     fn tools_list_tolerates_a_cursor_and_absent_params() {
+        let (dir, config) = fixture();
+        let mut state = state(dir.path(), &config);
         for line in [
             r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#,
             r#"{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}"#,
             r#"{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"cursor":"x"}}"#,
         ] {
-            let reply = handle(line).expect("a reply");
+            let reply = handle(line, &mut state).expect("a reply");
             let value: Value = serde_json::from_str(&reply).expect("valid JSON");
             assert!(value.get("error").is_none(), "{line} was refused: {reply}");
         }

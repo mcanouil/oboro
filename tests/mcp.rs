@@ -30,6 +30,24 @@ fn session(workspace: &Workspace, messages: &[&str]) -> Vec<serde_json::Value> {
         .collect()
 }
 
+/// A `tools/call` message for `name` with `arguments`.
+fn call(name: &str, arguments: &str) -> String {
+    format!(
+        r#"{{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{{"name":"{name}","arguments":{arguments}}}}}"#
+    )
+}
+
+/// The text of every content block in a `tools/call` result, joined.
+fn text_of(reply: &serde_json::Value) -> String {
+    reply["result"]["content"]
+        .as_array()
+        .expect("a content array")
+        .iter()
+        .map(|block| block["text"].as_str().expect("a text block"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 #[test]
 fn the_server_completes_a_handshake_and_lists_its_tools() {
     let workspace = Workspace::new();
@@ -70,4 +88,64 @@ fn nothing_but_protocol_messages_reaches_standard_output() {
         serde_json::from_str::<serde_json::Value>(line)
             .unwrap_or_else(|_| panic!("stdout must carry only MCP messages, found: {line}"));
     }
+}
+
+#[test]
+fn map_list_reports_placeholders_without_values_or_timestamps() {
+    let workspace = Workspace::new();
+    // Seeded over the command line rather than over the protocol: the `clean`
+    // tool does not run yet, and this asserts what `map_list` returns whatever
+    // filled the vault.
+    workspace.clean_piped("Call Marie on 06 12 34 56 78.");
+
+    let replies = session(&workspace, &[&call("map_list", "{}")]);
+
+    let listing = text_of(&replies[0]);
+    assert!(
+        listing.contains("[[PHONE_1]]"),
+        "the placeholder is missing:\n{listing}"
+    );
+    assert!(
+        !listing.contains("06 12 34 56 78"),
+        "the value reached the model:\n{listing}"
+    );
+    // `oboro map list` prints a created_at column; this deliberately does not.
+    assert!(
+        !listing.contains("20"),
+        "a timestamp reached the model:\n{listing}"
+    );
+}
+
+#[test]
+fn an_empty_vault_says_so_rather_than_returning_nothing() {
+    let workspace = Workspace::new();
+    let replies = session(&workspace, &[&call("map_list", "{}")]);
+    assert_eq!(replies[0]["result"]["isError"], false);
+    assert!(
+        !text_of(&replies[0]).is_empty(),
+        "an empty vault must still say something: {}",
+        replies[0]
+    );
+}
+
+#[test]
+fn an_unknown_tool_is_a_tool_error_rather_than_a_protocol_error() {
+    let workspace = Workspace::new();
+    let replies = session(&workspace, &[&call("restore", r#"{"path":"x"}"#)]);
+    assert_eq!(replies[0]["result"]["isError"], true);
+    assert!(
+        replies[0].get("error").is_none(),
+        "a missing tool is not a protocol fault: {}",
+        replies[0]
+    );
+}
+
+#[test]
+fn tools_call_without_params_is_an_invalid_params_error() {
+    let workspace = Workspace::new();
+    let replies = session(
+        &workspace,
+        &[r#"{"jsonrpc":"2.0","id":1,"method":"tools/call"}"#],
+    );
+    assert_eq!(replies[0]["error"]["code"], -32602);
 }
