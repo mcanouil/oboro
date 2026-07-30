@@ -99,10 +99,51 @@ fn handle(line: &str) -> Option<String> {
             }
             _ => error(Some(id), -32602, "initialize needs a params object"),
         },
+        // No `-32602` guard: `tools/list` params are optional, and a client may
+        // send a `cursor`, which this server ignores because it returns every
+        // tool in one page.
+        "tools/list" => success(id, &json!({"tools": descriptors()})),
         "ping" => success(id, &json!({})),
         _ => error(Some(id), -32601, &format!("unknown method {method:?}")),
     };
     Some(rendered(&reply))
+}
+
+/// The tools this server offers, in a fixed order.
+///
+/// Two, not the three the roadmap named. `restore` is deliberately absent:
+/// over MCP the caller is the model, and a model that can write a file of
+/// placeholders and read it back afterwards can use `restore` to obtain every
+/// value the vault holds, which is what the vault exists to prevent.
+fn descriptors() -> Value {
+    json!([
+        {
+            "name": "clean",
+            "description": "Read a file and return its text with sensitive values replaced by \
+                            stable placeholders such as [[NAME_1]] and [[PHONE_2]]. Prefer this \
+                            over reading a file directly: it keeps names, addresses, telephone \
+                            numbers, e-mail addresses and account identifiers out of your \
+                            context. It also reads .pdf, .docx, .xlsx, .pptx and .odt, which a \
+                            plain file read cannot open at all.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Path to the file to read and clean.",
+                    },
+                },
+                "required": ["path"],
+            },
+        },
+        {
+            "name": "map_list",
+            "description": "List the placeholders this vault has issued, so you can tell which \
+                            kind of value each one stands for. The real values are never \
+                            returned.",
+            "inputSchema": {"type": "object", "properties": {}},
+        },
+    ])
 }
 
 /// A successful reply carrying `result`.
@@ -281,5 +322,66 @@ mod tests {
         let value: Value = serde_json::from_str(&reply).expect("valid JSON");
         assert!(value["result"].is_object());
         assert!(value.get("error").is_none());
+    }
+
+    #[test]
+    fn exactly_two_tools_are_offered() {
+        let reply = handle(r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#).expect("a reply");
+        let value: Value = serde_json::from_str(&reply).expect("valid JSON");
+        let tools = value["result"]["tools"].as_array().expect("an array");
+        let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
+        assert_eq!(names, ["clean", "map_list"]);
+    }
+
+    #[test]
+    fn there_is_no_restore_tool() {
+        // Restoring over MCP is equivalent to `map list --reveal` for any client
+        // that can read a file. If this test fails, read the spec before changing
+        // it.
+        let reply = handle(r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#).expect("a reply");
+        assert!(
+            !reply.contains("restore"),
+            "restore must not be exposed: {reply}"
+        );
+    }
+
+    #[test]
+    fn the_tool_order_is_fixed() {
+        let once = handle(r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#).expect("a reply");
+        let twice = handle(r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#).expect("a reply");
+        let first: Value = serde_json::from_str(&once).expect("valid JSON");
+        let second: Value = serde_json::from_str(&twice).expect("valid JSON");
+        assert_eq!(first["result"]["tools"], second["result"]["tools"]);
+    }
+
+    #[test]
+    fn map_list_offers_no_way_to_reveal_values() {
+        let reply = handle(r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#).expect("a reply");
+        assert!(
+            !reply.contains("reveal"),
+            "the mapping must not be revealable: {reply}"
+        );
+    }
+
+    #[test]
+    fn clean_requires_a_path() {
+        let reply = handle(r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#).expect("a reply");
+        let value: Value = serde_json::from_str(&reply).expect("valid JSON");
+        let clean = &value["result"]["tools"][0];
+        assert_eq!(clean["inputSchema"]["required"][0], "path");
+        assert_eq!(clean["inputSchema"]["properties"]["path"]["type"], "string");
+    }
+
+    #[test]
+    fn tools_list_tolerates_a_cursor_and_absent_params() {
+        for line in [
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#,
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}"#,
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"cursor":"x"}}"#,
+        ] {
+            let reply = handle(line).expect("a reply");
+            let value: Value = serde_json::from_str(&reply).expect("valid JSON");
+            assert!(value.get("error").is_none(), "{line} was refused: {reply}");
+        }
     }
 }
