@@ -320,7 +320,7 @@ allowlist:  1 entr(y/ies)
 denylist:   3 term(s)
 patterns:   1 custom
 filenames:  redacted
-formats:    txt, text, md, markdown, csv, tsv, docx, xlsx, xlsm, pdf
+formats:    txt, text, md, markdown, csv, tsv, docx, pptx, xlsx, xlsm, pdf
 ocr:        not compiled in; images and scanned PDFs cannot be read
 model:      installed
 network:    only `models pull`, and only when you run it

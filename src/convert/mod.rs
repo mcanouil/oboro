@@ -7,7 +7,9 @@
 
 mod docx;
 mod pdf;
+mod pptx;
 mod xlsx;
+mod xml;
 
 #[cfg(feature = "ocr")]
 mod ocr;
@@ -26,6 +28,7 @@ pub enum Format {
     /// Tab-separated values, read as-is; the output keeps the extension.
     Tsv,
     Docx,
+    Pptx,
     Xlsx,
     Pdf,
     Image,
@@ -44,6 +47,7 @@ const FORMATS: &[(&str, Format)] = &[
     ("csv", Format::Csv),
     ("tsv", Format::Tsv),
     ("docx", Format::Docx),
+    ("pptx", Format::Pptx),
     ("xlsx", Format::Xlsx),
     ("xlsm", Format::Xlsx),
     ("pdf", Format::Pdf),
@@ -196,6 +200,7 @@ pub fn read(path: &Path, ocr_languages: &[String]) -> Result<Conversion> {
         Format::Text => read_utf8(path).map(|text| Conversion::Document(tidy(&text))),
         Format::Csv | Format::Tsv => read_utf8(path).map(Conversion::Document),
         Format::Docx => docx::to_text(path).map(Conversion::Document),
+        Format::Pptx => pptx::to_text(path).map(Conversion::Document),
         Format::Xlsx => xlsx::to_sheets(path).map(Conversion::Sheets),
         Format::Pdf => pdf::to_text(path, ocr_languages).map(Conversion::Document),
         Format::Image => image_to_text(path, ocr_languages).map(Conversion::Document),
@@ -356,6 +361,33 @@ mod tests {
         assert_eq!(read_document(&path).expect("reading"), "");
     }
 
+    /// The fixture plants "Jean Dupont" with inline emphasis, which forces
+    /// Pandoc to split it across two runs in one paragraph, so this only
+    /// passes if the runs are concatenated with nothing between them.
+    #[test]
+    fn a_presentation_is_read_including_notes_and_tables() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("testdata")
+            .join("slides.pptx");
+        let text = read_document(&path).expect("reading");
+        assert!(
+            text.contains("Jean Dupont"),
+            "the runs of a value split by inline emphasis were not concatenated:\n{text}"
+        );
+        assert!(
+            text.contains("jean.dupont@acme-consulting.example"),
+            "slide text dropped:\n{text}"
+        );
+        assert!(
+            text.contains("marie.martin@globex.example"),
+            "speaker notes dropped:\n{text}"
+        );
+        assert!(
+            text.contains("+33 1 42 68 53 00"),
+            "table text dropped:\n{text}"
+        );
+    }
+
     #[test]
     fn a_spreadsheet_reads_as_sheets() {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -421,6 +453,7 @@ mod tests {
             Some(Format::Csv),
             Some(Format::Tsv),
             Some(Format::Docx),
+            Some(Format::Pptx),
             Some(Format::Xlsx),
             Some(Format::Pdf),
             Some(Format::Image),

@@ -55,8 +55,9 @@ The same value always becomes the same placeholder, so a model can still tell th
 | `.txt`, `.md` | Directly. |
 | `.csv`, `.tsv` | Directly. The output keeps the tabular extension. |
 | `.docx` | Text runs from the body, headers, footers, footnotes and comments. |
+| `.pptx` | Text from slides, speaker notes and comments. |
 | `.xlsx`, `.xlsm` | One TSV file per sheet, named `book.<sheet>.clean.tsv`. |
-| `.pdf` | Embedded text. Scanned PDFs are refused rather than half-read. |
+| `.pdf` | Embedded text; a scan needs a build compiled `--features ocr`. |
 | `.png`, `.jpg`, `.tif` | Tesseract, in a build compiled with `--features ocr`. |
 
 ## What it finds

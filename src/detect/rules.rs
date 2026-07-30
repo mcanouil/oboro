@@ -30,8 +30,17 @@ static EMAIL: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 /// Candidate digit runs that `libphonenumber` then accepts or rejects.
+///
+/// The separator class is `[ \t\u{A0}\u{202F}.\-]`, not `\s`: `\s` is
+/// `\p{White_Space}` in this crate, which includes a newline, and letting a
+/// valid number on one line merge with a leading digit on the next produces
+/// an invalid candidate, discarding the whole match rather than falling back
+/// to the number actually written. The class here excludes line terminators
+/// rather than being ASCII: French typography writes a phone number with
+/// U+00A0 (no-break space) or U+202F (narrow no-break space) between groups,
+/// and a narrower, ASCII-only class dropped that spelling entirely.
 static PHONE_CANDIDATE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?:\+\d{1,3}[\s.\-]?)?(?:\(\d{1,4}\)[\s.\-]?)?\d(?:[\s.\-]?\d){6,14}")
+    Regex::new(r"(?:\+\d{1,3}[ \t\u{A0}\u{202F}.\-]?)?(?:\(\d{1,4}\)[ \t\u{A0}\u{202F}.\-]?)?\d(?:[ \t\u{A0}\u{202F}.\-]?\d){6,14}")
         .expect("phone pattern is valid")
 });
 
@@ -397,6 +406,32 @@ mod tests {
     fn ignores_numbers_that_are_not_valid_phones() {
         let found = kinds_of("Reference 0000000 and 1234567.", &EntityKind::Phone);
         assert!(found.is_empty(), "unexpected phone matches: {found:?}");
+    }
+
+    /// A phone number on its own line, immediately followed by a line that
+    /// starts with a digit, must not merge across the newline into an
+    /// invalid candidate that then gets discarded whole.
+    #[test]
+    fn a_phone_number_is_found_even_when_the_next_line_starts_with_a_digit() {
+        let found = kinds_of("06 12 34 56 78\n12 bis rue de la Paix", &EntityKind::Phone);
+        assert_eq!(found, ["06 12 34 56 78"]);
+    }
+
+    /// French typography separates the groups of a phone number with a
+    /// no-break space, U+00A0, rather than an ordinary one; excluding it from
+    /// the separator class along with the newline would drop the number as
+    /// actually written.
+    #[test]
+    fn a_phone_number_separated_by_a_no_break_space_is_still_found() {
+        let found = kinds_of(
+            "Tel : 06\u{A0}12\u{A0}34\u{A0}56\u{A0}78 et 06 12 34 56 79",
+            &EntityKind::Phone,
+        );
+        assert_eq!(found.len(), 2, "expected both numbers, got {found:?}");
+        assert!(
+            found.iter().any(|f| f.contains('\u{A0}')),
+            "the no-break-space number must be matched as written: {found:?}"
+        );
     }
 
     #[test]

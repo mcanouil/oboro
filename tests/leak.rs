@@ -43,6 +43,7 @@ const DOCUMENTS: &[&str] = &[
     "clients.csv",
     "clients.tsv",
     "invoice.pdf",
+    "slides.pptx",
 ];
 
 /// The fixtures that only a build with the `ocr` feature can read: an image,
@@ -127,16 +128,61 @@ fn accented_text_survives_document_conversion() {
     }
 }
 
+/// Values each fixture plants that must survive a clean/restore round trip,
+/// as recorded in `testdata/README.md`.
+///
+/// Checking only one value per fixture, as this test used to, catches total
+/// conversion failure but not partial loss: a converter that silently dropped
+/// everything past the first paragraph would still pass. A value the
+/// converter glues to its neighbour, such as an annotation's author name
+/// concatenated onto the paragraph it anchors to, fails a whole-word match
+/// and is never turned into a placeholder, so it never comes back on
+/// restore; listing more than one value per fixture is what catches that.
+const ROUND_TRIP_VALUES: &[(&str, &[&str])] = &[
+    (
+        "contract.txt",
+        &["Acme Consulting SARL", "Jean Dupont", "CT-874512"],
+    ),
+    (
+        "contract.docx",
+        &["Acme Consulting SARL", "Jean Dupont", "CT-874512"],
+    ),
+    (
+        "clients.xlsx",
+        &["Acme Consulting SARL", "Globex Industries"],
+    ),
+    ("clients.csv", &["Jean Dupont", "Acme Consulting SARL"]),
+    ("clients.tsv", &["Jean Dupont", "Acme Consulting SARL"]),
+    ("invoice.pdf", &["Acme Consulting SARL", "Jean Dupont"]),
+    (
+        "slides.pptx",
+        &["Acme Consulting SARL", "Jean Dupont", "Globex Industries"],
+    ),
+    ("scan.png", &["Acme Consulting SARL"]),
+    ("scan.pdf", &["Acme Consulting SARL"]),
+    ("scan-fax.pdf", &["Acme Consulting SARL"]),
+];
+
 #[test]
 fn every_document_format_round_trips() {
     for document in readable() {
         let workspace = Workspace::new();
         let cleaned = workspace.clean_fixture(document);
         let restored = workspace.restore(&cleaned);
-        assert!(
-            restored.contains("Acme Consulting SARL"),
-            "{document} did not restore its provider name:\n{restored}"
-        );
+
+        let values = ROUND_TRIP_VALUES
+            .iter()
+            .find(|(name, _)| name == document)
+            .map_or_else(
+                || panic!("{document} has no round-trip values listed"),
+                |(_, values)| *values,
+            );
+        for expected in values {
+            assert!(
+                restored.contains(expected),
+                "{document} did not restore {expected:?}:\n{restored}"
+            );
+        }
         assert!(
             !restored.contains("[["),
             "{document} left placeholders behind after restoring:\n{restored}"
