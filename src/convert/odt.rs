@@ -74,6 +74,22 @@ pub fn to_text(path: &Path) -> Result<String> {
 /// nests a `text:p` inside a `text:p` for annotations and footnotes, and a
 /// flag would clear on the inner close and drop the rest of the outer
 /// paragraph.
+///
+/// `annotation`, `note`, `creator`, `date` and `note-citation` are also
+/// boundaries, pushing a newline on both `Start` and `End`, independent of
+/// the depth counter. `office:annotation` and `text:note` are inline inside
+/// the `text:p` they anchor to, so depth is already above zero at their
+/// `Start`; the metadata a real producer writes as an annotation's first
+/// children, `dc:creator` and `dc:date`, is character data that sits
+/// directly inside it with no `text:p` of its own, and a footnote's
+/// `text:note-citation` is the same shape. Left unbounded, that metadata
+/// concatenates onto whatever word in the host paragraph precedes it with no
+/// separator, and `dc:creator` onto `dc:date` right after it, with no
+/// separator either: a commenter's name glued to a neighbour like that no
+/// longer has a word boundary on the side that touches, so it no longer
+/// matches a denylisted name and reaches output unredacted. Boundaries
+/// around each of these four, not only around the annotation or note as a
+/// whole, are what closes every side a name can be glued from.
 fn extract(xml: &str) -> Result<String> {
     let mut reader = Reader::from_str(xml);
     let mut text = String::new();
@@ -83,6 +99,9 @@ fn extract(xml: &str) -> Result<String> {
         match reader.read_event()? {
             Event::Start(tag) => match local_name(tag.name().as_ref()) {
                 b"p" | b"h" => depth += 1,
+                b"annotation" | b"note" | b"creator" | b"date" | b"note-citation" => {
+                    text.push('\n');
+                }
                 b"tab" => text.push('\t'),
                 b"line-break" => text.push('\n'),
                 _ => {}
@@ -97,13 +116,18 @@ fn extract(xml: &str) -> Result<String> {
                 }
                 _ => {}
             },
-            Event::End(tag) => {
-                if matches!(local_name(tag.name().as_ref()), b"p" | b"h") {
+            Event::End(tag) => match local_name(tag.name().as_ref()) {
+                b"p" | b"h" => {
                     depth = depth.saturating_sub(1);
                     text.push('\n');
                 }
-            }
+                b"annotation" | b"note" | b"creator" | b"date" | b"note-citation" => {
+                    text.push('\n');
+                }
+                _ => {}
+            },
             Event::Text(chunk) if depth > 0 => text.push_str(&chunk.decode()?),
+            Event::CData(chunk) if depth > 0 => text.push_str(&chunk.decode()?),
             Event::GeneralRef(reference) if depth > 0 => match reference.resolve_char_ref()? {
                 Some(character) => text.push(character),
                 None => text.push_str(named_entity(reference.as_ref())?),
@@ -183,6 +207,43 @@ mod tests {
         assert!(text.contains("a note"), "annotation text dropped:\n{text}");
     }
 
+    /// A real producer writes `dc:creator` and `dc:date` as the first
+    /// children of `office:annotation`, both character data with no
+    /// `text:p` of their own. Without a boundary at the annotation itself,
+    /// the commenter's name concatenates onto the preceding word with no
+    /// separator, which is how it used to escape redaction.
+    #[test]
+    fn an_annotations_author_name_does_not_glue_to_the_host_paragraph() {
+        let xml = content(
+            "<text:p>Signe par<office:annotation><dc:creator>Jean Dupont</dc:creator><dc:date>2026-07-30T08:15:29</dc:date><text:p>rappeler</text:p></office:annotation> suite</text:p>",
+        );
+        let text = extract(&xml).expect("parsing");
+        assert!(
+            !text.contains("parJean"),
+            "the author's name glued onto the host paragraph:\n{text}"
+        );
+        assert!(
+            text.contains("Jean Dupont"),
+            "the author's name was dropped entirely:\n{text}"
+        );
+    }
+
+    /// `text:note-citation` glues onto the host paragraph the same way
+    /// `dc:creator` does: it is character data sitting directly inside
+    /// `text:note`, itself inline in the paragraph it footnotes, with no
+    /// `text:p` of its own.
+    #[test]
+    fn a_footnote_citation_does_not_glue_to_the_host_paragraph() {
+        let xml = content(
+            "<text:p>Signe par<text:note><text:note-citation>1</text:note-citation><text:note-body><text:p>Jean Dupont</text:p></text:note-body></text:note> suite</text:p>",
+        );
+        let text = extract(&xml).expect("parsing");
+        assert!(
+            !text.contains("par1"),
+            "the citation glued onto the host paragraph:\n{text}"
+        );
+    }
+
     #[test]
     fn a_space_element_expands_its_count() {
         let xml = content("<text:p>a<text:s text:c=\"3\"/>b</text:p>");
@@ -215,6 +276,14 @@ mod tests {
     fn decodes_entities_and_accents() {
         let xml = content("<text:p>Soci&#233;t&#233; &amp; Fils</text:p>");
         assert_eq!(extract(&xml).expect("parsing"), "Société & Fils\n");
+    }
+
+    /// Character data in a `CDATA` section must reach the output the same as
+    /// ordinary text, rather than being silently dropped.
+    #[test]
+    fn cdata_inside_a_paragraph_is_kept() {
+        let xml = content("<text:p><![CDATA[Jean Dupont]]></text:p>");
+        assert_eq!(extract(&xml).expect("parsing"), "Jean Dupont\n");
     }
 
     #[test]
