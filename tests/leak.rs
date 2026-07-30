@@ -128,40 +128,185 @@ fn accented_text_survives_document_conversion() {
     }
 }
 
-/// Values each fixture plants that must survive a clean/restore round trip,
-/// as recorded in `testdata/README.md`.
+/// The values each fixture plants, as its converter actually produces them.
 ///
-/// Checking only one value per fixture, as this test used to, catches total
-/// conversion failure but not partial loss: a converter that silently dropped
-/// everything past the first paragraph would still pass. A value the
-/// converter glues to its neighbour, such as an annotation's author name
-/// concatenated onto the paragraph it anchors to, fails a whole-word match
-/// and is never turned into a placeholder, so it never comes back on
-/// restore; listing more than one value per fixture is what catches that.
-const ROUND_TRIP_VALUES: &[(&str, &[&str])] = &[
+/// One list, used in both directions: [`no_planted_value_survives_cleaning`]
+/// proves nothing here survived, and [`no_planted_value_is_lost_in_conversion`]
+/// proves nothing here was lost on the way in. The leak test alone can only
+/// see survival, since text a converter never produced matches nothing and so
+/// passes silently, and loss is the failure `src/convert/mod.rs` names as its
+/// own: output that looks sanitised without having been read.
+///
+/// Listing every value a fixture carries, rather than one per fixture, is what
+/// catches partial loss: a converter that dropped everything past the first
+/// paragraph would otherwise still pass.
+///
+/// The recognised fixtures carry a deliberately short list. Their text comes
+/// back from Tesseract rather than from the document, so an assertion on a
+/// mixed-case identifier would be pinning one version's recognition rather
+/// than this code; the two plain names are what recognition gets right across
+/// versions.
+const PLANTED_IN: &[(&str, &[&str])] = &[
     (
         "contract.txt",
-        &["Acme Consulting SARL", "Jean Dupont", "CT-874512"],
+        &[
+            "jean.dupont@acme-consulting.example",
+            "marie.martin@globex.example",
+            "06 12 34 56 78",
+            "+33 1 42 68 53 00",
+            "FR14 2004 1010 0505 0001 3M02 606",
+            "4242 4242 4242 4242",
+            "12345678200002",
+            "192.168.14.201",
+            "12 bis rue de la Paix",
+            "8 avenue des Champs-Élysées",
+            "75002 Paris",
+            "75008 Paris",
+            "Acme Consulting SARL",
+            "Globex Industries",
+            "Jean Dupont",
+            "CT-874512",
+        ],
     ),
     (
         "contract.docx",
-        &["Acme Consulting SARL", "Jean Dupont", "CT-874512"],
+        &[
+            "jean.dupont@acme-consulting.example",
+            "06 12 34 56 78",
+            "FR14 2004 1010 0505 0001 3M02 606",
+            "12345678200002",
+            "12 bis rue de la Paix",
+            "75002 Paris",
+            "Acme Consulting SARL",
+            "Jean Dupont",
+            "CT-874512",
+        ],
     ),
     (
         "clients.xlsx",
-        &["Acme Consulting SARL", "Globex Industries"],
+        &[
+            "jean.dupont@acme-consulting.example",
+            "marie.martin@globex.example",
+            "06 12 34 56 78",
+            "+33 1 42 68 53 00",
+            "123456782",
+            "Acme Consulting SARL",
+            "Globex Industries",
+        ],
     ),
-    ("clients.csv", &["Jean Dupont", "Acme Consulting SARL"]),
-    ("clients.tsv", &["Jean Dupont", "Acme Consulting SARL"]),
-    ("invoice.pdf", &["Acme Consulting SARL", "Jean Dupont"]),
+    (
+        "clients.csv",
+        &[
+            "jean.dupont@acme-consulting.example",
+            "marie.martin@globex.example",
+            "06 12 34 56 78",
+            "+33 1 42 68 53 00",
+            "FR14 2004 1010 0505 0001 3M02 606",
+            "12345678200002",
+            "Acme Consulting SARL",
+            "Globex Industries",
+            "Jean Dupont",
+        ],
+    ),
+    (
+        "clients.tsv",
+        &[
+            "jean.dupont@acme-consulting.example",
+            "marie.martin@globex.example",
+            "06 12 34 56 78",
+            "+33 1 42 68 53 00",
+            "FR14 2004 1010 0505 0001 3M02 606",
+            "12345678200002",
+            "Acme Consulting SARL",
+            "Globex Industries",
+            "Jean Dupont",
+        ],
+    ),
+    (
+        "invoice.pdf",
+        &[
+            "jean.dupont@acme-consulting.example",
+            "06 12 34 56 78",
+            "FR14 2004 1010 0505 0001 3M02 606",
+            "12 bis rue de la Paix",
+            "75002 Paris",
+            "Acme Consulting SARL",
+            "Jean Dupont",
+            "CT-874512",
+        ],
+    ),
     (
         "slides.pptx",
-        &["Acme Consulting SARL", "Jean Dupont", "Globex Industries"],
+        &[
+            "jean.dupont@acme-consulting.example",
+            "marie.martin@globex.example",
+            "06 12 34 56 78",
+            "+33 1 42 68 53 00",
+            "FR14 2004 1010 0505 0001 3M02 606",
+            "4242 4242 4242 4242",
+            "12345678200002",
+            "12 bis rue de la Paix",
+            "75002 Paris",
+            "Acme Consulting SARL",
+            "Globex Industries",
+            "Jean Dupont",
+            "CT-874512",
+        ],
     ),
-    ("scan.png", &["Acme Consulting SARL"]),
-    ("scan.pdf", &["Acme Consulting SARL"]),
-    ("scan-fax.pdf", &["Acme Consulting SARL"]),
+    ("scan.png", &["Acme Consulting SARL", "Jean Dupont"]),
+    ("scan.pdf", &["Acme Consulting SARL", "Jean Dupont"]),
+    ("scan-fax.pdf", &["Acme Consulting SARL", "Jean Dupont"]),
 ];
+
+/// The values a fixture plants, or a failure naming the fixture that has none.
+///
+/// Failing rather than skipping is what stops a new format being added to
+/// [`DOCUMENTS`] without anything asserting its text arrives whole.
+fn planted_in(document: &str) -> &'static [&'static str] {
+    PLANTED_IN
+        .iter()
+        .find(|(name, _)| *name == document)
+        .map_or_else(
+            || panic!("{document} has no planted values listed"),
+            |(_, values)| *values,
+        )
+}
+
+/// The counterpart to the leak test: every value a fixture plants must be in
+/// the text its converter produces, before any detection runs.
+///
+/// A value the converter drops is absent, so it is never detected, never
+/// redacted, and never in the output; the leak test passes on it precisely
+/// because it was lost. A value the converter glues to its neighbour fails
+/// this test too, since the planted spelling is no longer a substring of what
+/// was read.
+///
+/// This reads the converters directly rather than going through `clean`, so a
+/// failure points at the reader rather than at the pipeline.
+#[test]
+fn no_planted_value_is_lost_in_conversion() {
+    for document in readable() {
+        let text = oboro::convert::read(&support::fixture(document), &["eng".to_owned()])
+            .unwrap_or_else(|error| panic!("reading {document}: {error:#}"))
+            .into_parts()
+            .into_iter()
+            .map(|(_, part)| part)
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let lost: Vec<&str> = planted_in(document)
+            .iter()
+            .copied()
+            .filter(|planted| !text.contains(planted))
+            .collect();
+
+        assert!(
+            lost.is_empty(),
+            "{document} lost {} value(s) in conversion: {lost:#?}\n\n--- read ---\n{text}",
+            lost.len()
+        );
+    }
+}
 
 #[test]
 fn every_document_format_round_trips() {
@@ -170,14 +315,7 @@ fn every_document_format_round_trips() {
         let cleaned = workspace.clean_fixture(document);
         let restored = workspace.restore(&cleaned);
 
-        let values = ROUND_TRIP_VALUES
-            .iter()
-            .find(|(name, _)| name == document)
-            .map_or_else(
-                || panic!("{document} has no round-trip values listed"),
-                |(_, values)| *values,
-            );
-        for expected in values {
+        for expected in planted_in(document) {
             assert!(
                 restored.contains(expected),
                 "{document} did not restore {expected:?}:\n{restored}"
