@@ -29,35 +29,58 @@ static EMAIL: LazyLock<Regex> = LazyLock::new(|| {
     .expect("email pattern is valid")
 });
 
+/// The characters that may sit between the groups an identifier is written
+/// in, as the body of a character class.
+///
+/// Decided once and shared, because every one of these recognisers reads the
+/// same written value. French typography groups a number with U+00A0, the
+/// no-break space, or U+202F, the narrow no-break space, and a word processor
+/// inserts one on its own, so an ASCII-only class silently misses the value as
+/// people actually write it. The module favours recall precisely because a
+/// missed entity is a leak.
+///
+/// Line terminators are deliberately absent, and `\s` is deliberately not used
+/// in their place: `\s` is `\p{White_Space}` in this crate, so it matches a
+/// newline, and a candidate that crosses a line merges two values into one
+/// that validates as neither.
+const GROUP_SPACE: &str = r" \u{A0}\u{202F}";
+
 /// Candidate digit runs that `libphonenumber` then accepts or rejects.
 ///
-/// The separator class is `[ \t\u{A0}\u{202F}.\-]`, not `\s`: `\s` is
-/// `\p{White_Space}` in this crate, which includes a newline, and letting a
-/// valid number on one line merge with a leading digit on the next produces
-/// an invalid candidate, discarding the whole match rather than falling back
-/// to the number actually written. The class here excludes line terminators
-/// rather than being ASCII: French typography writes a phone number with
-/// U+00A0 (no-break space) or U+202F (narrow no-break space) between groups,
-/// and a narrower, ASCII-only class dropped that spelling entirely.
+/// A phone number takes a tab and a dot between its groups as well as
+/// [`GROUP_SPACE`], neither of which appears inside a written identifier.
 static PHONE_CANDIDATE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?:\+\d{1,3}[ \t\u{A0}\u{202F}.\-]?)?(?:\(\d{1,4}\)[ \t\u{A0}\u{202F}.\-]?)?\d(?:[ \t\u{A0}\u{202F}.\-]?\d){6,14}")
-        .expect("phone pattern is valid")
+    let gap = format!("[{GROUP_SPACE}\\t.\\-]");
+    Regex::new(&format!(
+        r"(?:\+\d{{1,3}}{gap}?)?(?:\(\d{{1,4}}\){gap}?)?\d(?:{gap}?\d){{6,14}}"
+    ))
+    .expect("phone pattern is valid")
 });
 
 static IBAN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\b[a-z]{2}\d{2}(?:[ ]?[a-z0-9]{4}){2,7}(?:[ ]?[a-z0-9]{1,3})?\b")
-        .expect("iban pattern is valid")
+    Regex::new(&format!(
+        r"(?i)\b[a-z]{{2}}\d{{2}}(?:[{GROUP_SPACE}]?[a-z0-9]{{4}}){{2,7}}(?:[{GROUP_SPACE}]?[a-z0-9]{{1,3}})?\b"
+    ))
+    .expect("iban pattern is valid")
 });
 
-static CARD: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\b\d(?:[ \-]?\d){12,18}\b").expect("card pattern is valid"));
+static CARD: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(&format!(r"\b\d(?:[{GROUP_SPACE}\-]?\d){{12,18}}\b")).expect("card pattern is valid")
+});
 
 static SIRET: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\b\d{3}[ ]?\d{3}[ ]?\d{3}[ ]?\d{5}\b").expect("siret pattern is valid")
+    Regex::new(&format!(
+        r"\b\d{{3}}[{GROUP_SPACE}]?\d{{3}}[{GROUP_SPACE}]?\d{{3}}[{GROUP_SPACE}]?\d{{5}}\b"
+    ))
+    .expect("siret pattern is valid")
 });
 
-static SIREN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\b\d{3}[ ]?\d{3}[ ]?\d{3}\b").expect("siren pattern is valid"));
+static SIREN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(&format!(
+        r"\b\d{{3}}[{GROUP_SPACE}]?\d{{3}}[{GROUP_SPACE}]?\d{{3}}\b"
+    ))
+    .expect("siren pattern is valid")
+});
 
 static IPV4: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\b\d{1,3}(?:\.\d{1,3}){3}\b").expect("ipv4 pattern is valid"));
@@ -569,6 +592,61 @@ mod tests {
             found.iter().any(|f| f.contains('\u{A0}')),
             "the no-break-space number must be matched as written: {found:?}"
         );
+    }
+
+    /// The no-break space is not a curiosity here: French typography writes
+    /// grouped numbers with U+00A0, and a word processor inserts it on its
+    /// own, so a `.docx` is exactly the input that carries one. Every
+    /// identifier pattern has to accept it, not only the phone number.
+    #[test]
+    fn identifiers_separated_by_a_no_break_space_are_found() {
+        let found = kinds_of(
+            "IBAN FR14\u{A0}2004\u{A0}1010\u{A0}0505\u{A0}0001\u{A0}3M02\u{A0}606 fin",
+            &EntityKind::Iban,
+        );
+        assert_eq!(
+            found,
+            ["FR14\u{A0}2004\u{A0}1010\u{A0}0505\u{A0}0001\u{A0}3M02\u{A0}606"]
+        );
+
+        let found = kinds_of(
+            "Carte 4242\u{A0}4242\u{A0}4242\u{A0}4242 fin",
+            &EntityKind::CreditCard,
+        );
+        assert_eq!(found, ["4242\u{A0}4242\u{A0}4242\u{A0}4242"]);
+
+        let found = kinds_of(
+            "SIRET 123\u{A0}456\u{A0}782\u{A0}00002 fin",
+            &EntityKind::Siret,
+        );
+        assert_eq!(found, ["123\u{A0}456\u{A0}782\u{A0}00002"]);
+
+        let found = kinds_of("SIREN 552\u{A0}100\u{A0}554 fin", &EntityKind::Siren);
+        assert_eq!(found, ["552\u{A0}100\u{A0}554"]);
+    }
+
+    /// The narrow no-break space, U+202F, is what modern French typography
+    /// actually specifies for grouping, so it has to be accepted alongside
+    /// U+00A0 rather than instead of it.
+    #[test]
+    fn identifiers_separated_by_a_narrow_no_break_space_are_found() {
+        let found = kinds_of("SIREN 552\u{202F}100\u{202F}554 fin", &EntityKind::Siren);
+        assert_eq!(found, ["552\u{202F}100\u{202F}554"]);
+
+        let found = kinds_of(
+            "Carte 4242\u{202F}4242\u{202F}4242\u{202F}4242 fin",
+            &EntityKind::CreditCard,
+        );
+        assert_eq!(found, ["4242\u{202F}4242\u{202F}4242\u{202F}4242"]);
+    }
+
+    /// A line terminator stays out of the separator class. Two values on
+    /// consecutive lines must not merge into one candidate that validates as
+    /// neither, which is the failure the phone pattern was narrowed to avoid.
+    #[test]
+    fn an_identifier_does_not_run_across_a_line_break() {
+        let found = kinds_of("552 100 554\n552 100 554", &EntityKind::Siren);
+        assert_eq!(found, ["552 100 554", "552 100 554"]);
     }
 
     #[test]
