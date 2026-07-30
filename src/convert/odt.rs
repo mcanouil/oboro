@@ -68,40 +68,61 @@ pub fn to_text(path: &Path) -> Result<String> {
     Ok(text)
 }
 
+/// A container `ODF` character data can be nested inside.
+///
+/// The distinction is what decides whether that character data is part of
+/// a paragraph's running text or a standalone chunk; see [`extract`].
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Container {
+    /// `text:p` or `text:h`.
+    Paragraph,
+    /// `office:annotation`, `text:note` or `office:change-info`: elements
+    /// that hold metadata as bare character data, such as `dc:creator` and
+    /// `dc:date`, sitting alongside a nested paragraph rather than only
+    /// holding one.
+    Region,
+}
+
 /// Pulls the text out of an `ODF` part.
 ///
-/// Paragraph tracking is a depth counter rather than a flag because `ODF`
-/// nests a `text:p` inside a `text:p` for annotations and footnotes, and a
-/// flag would clear on the inner close and drop the rest of the outer
-/// paragraph.
+/// Whether character data belongs to a paragraph's running text is decided
+/// by position, tracked with a stack of open containers, rather than by
+/// enumerating the names of elements that hold metadata. `ODF` puts the
+/// metadata a real producer writes as an annotation's first children,
+/// `dc:creator` and `dc:date`, directly inside it with no `text:p` of its
+/// own, and a footnote's `text:note-citation` is the same shape; naming
+/// those was previously how this reader told them apart from running text.
+/// That approach cannot close the class it is trying to describe: `ODF`
+/// also defines `meta:date-string`, the localised rendering of `dc:date`, as
+/// a further child of `office:annotation` with the same shape, and any
+/// element this reader has not been told about is missed the same way.
 ///
-/// `annotation`, `note`, `creator`, `date` and `note-citation` are also
-/// boundaries, pushing a newline on both `Start` and `End`, independent of
-/// the depth counter. `office:annotation` and `text:note` are inline inside
-/// the `text:p` they anchor to, so depth is already above zero at their
-/// `Start`; the metadata a real producer writes as an annotation's first
-/// children, `dc:creator` and `dc:date`, is character data that sits
-/// directly inside it with no `text:p` of its own, and a footnote's
-/// `text:note-citation` is the same shape. Left unbounded, that metadata
-/// concatenates onto whatever word in the host paragraph precedes it with no
-/// separator, and `dc:creator` onto `dc:date` right after it, with no
-/// separator either: a commenter's name glued to a neighbour like that no
-/// longer has a word boundary on the side that touches, so it no longer
-/// matches a denylisted name and reaches output unredacted. Boundaries
-/// around each of these four, not only around the annotation or note as a
-/// whole, are what closes every side a name can be glued from.
+/// The stack holds a [`Container::Paragraph`] for each open `text:p` or
+/// `text:h`, and a [`Container::Region`] for each open `office:annotation`,
+/// `text:note` or `office:change-info`, the elements that hold metadata
+/// alongside a nested paragraph rather than only holding one. Character
+/// data is inline, appended straight into the running text, only when the
+/// innermost open container is a paragraph; otherwise it is a standalone
+/// chunk, bounded by newlines through [`push_chunk`]. Position rather than
+/// name is also why `text:date` and `text:creator`, `ODF`'s inline fields,
+/// no longer need special handling: nested inside an ordinary paragraph,
+/// they inherit that paragraph's own inline treatment without being pushed
+/// onto the stack at all.
+///
+/// A `text:p` nested inside a `text:p`, which `ODF` does for annotations and
+/// footnotes anchored mid-paragraph, is why the paragraph state is a stack
+/// rather than a flag: a flag would clear on the inner close and drop the
+/// rest of the outer paragraph.
 fn extract(xml: &str) -> Result<String> {
     let mut reader = Reader::from_str(xml);
     let mut text = String::new();
-    let mut depth = 0usize;
+    let mut stack: Vec<Container> = Vec::new();
 
     loop {
         match reader.read_event()? {
             Event::Start(tag) => match local_name(tag.name().as_ref()) {
-                b"p" | b"h" => depth += 1,
-                b"annotation" | b"note" | b"creator" | b"date" | b"note-citation" => {
-                    text.push('\n');
-                }
+                b"p" | b"h" => stack.push(Container::Paragraph),
+                b"annotation" | b"note" | b"change-info" => stack.push(Container::Region),
                 b"tab" => text.push('\t'),
                 b"line-break" => text.push('\n'),
                 _ => {}
@@ -118,19 +139,30 @@ fn extract(xml: &str) -> Result<String> {
             },
             Event::End(tag) => match local_name(tag.name().as_ref()) {
                 b"p" | b"h" => {
-                    depth = depth.saturating_sub(1);
+                    stack.pop();
                     text.push('\n');
                 }
-                b"annotation" | b"note" | b"creator" | b"date" | b"note-citation" => {
-                    text.push('\n');
+                b"annotation" | b"note" | b"change-info" => {
+                    stack.pop();
                 }
                 _ => {}
             },
-            Event::Text(chunk) if depth > 0 => text.push_str(&chunk.decode()?),
-            Event::CData(chunk) if depth > 0 => text.push_str(&chunk.decode()?),
-            Event::GeneralRef(reference) if depth > 0 => match reference.resolve_char_ref()? {
-                Some(character) => text.push(character),
-                None => text.push_str(named_entity(reference.as_ref())?),
+            Event::Text(chunk) => {
+                push_chunk(&mut text, &chunk.decode()?, inline(&stack));
+            }
+            Event::CData(chunk) => {
+                push_chunk(&mut text, &chunk.decode()?, inline(&stack));
+            }
+            Event::GeneralRef(reference) => match reference.resolve_char_ref()? {
+                Some(character) => {
+                    let mut buffer = [0u8; 4];
+                    push_chunk(
+                        &mut text,
+                        character.encode_utf8(&mut buffer),
+                        inline(&stack),
+                    );
+                }
+                None => push_chunk(&mut text, named_entity(reference.as_ref())?, inline(&stack)),
             },
             Event::Eof => break,
             _ => {}
@@ -138,6 +170,37 @@ fn extract(xml: &str) -> Result<String> {
     }
 
     Ok(text)
+}
+
+/// Whether the innermost open container is a paragraph, so character data
+/// here belongs to its running text rather than to a standalone chunk.
+///
+/// An empty stack, character data before the first paragraph or after the
+/// last, is not inline: there is no paragraph for it to run into.
+fn inline(stack: &[Container]) -> bool {
+    matches!(stack.last(), Some(Container::Paragraph))
+}
+
+/// Appends a piece of character data: straight into the running text when
+/// `inline`, otherwise as a standalone chunk bounded by newlines.
+///
+/// A chunk that is only whitespace is dropped when not inline. Capture is no
+/// longer gated on paragraph depth, so the insignificant whitespace a
+/// producer writes between elements, for indentation, would otherwise
+/// become noise in the output.
+fn push_chunk(text: &mut String, chunk: &str, inline: bool) {
+    if inline {
+        text.push_str(chunk);
+        return;
+    }
+    if chunk.trim().is_empty() {
+        return;
+    }
+    if !text.ends_with('\n') {
+        text.push('\n');
+    }
+    text.push_str(chunk);
+    text.push('\n');
 }
 
 /// How many spaces a `text:s` stands for.
@@ -241,6 +304,63 @@ mod tests {
         assert!(
             !text.contains("par1"),
             "the citation glued onto the host paragraph:\n{text}"
+        );
+    }
+
+    /// `meta:date-string` is a spec-defined child of `office:annotation`
+    /// (`ODF` 1.2/1.3 Part 1 section 14.3), the localised rendering of
+    /// `dc:date`, and is character data with no `text:p` of its own, the
+    /// same shape as `dc:creator` and `dc:date`. Enumerating names cannot
+    /// close this class, since a producer may write metadata this reader has
+    /// never heard of; only position closes it.
+    #[test]
+    fn an_annotations_date_string_does_not_glue_to_its_nested_paragraph() {
+        let xml = content(
+            "<text:p>Signe par<office:annotation><dc:creator>Jean Dupont</dc:creator><dc:date>2026-07-30T08:15:29</dc:date><meta:date-string>30/07/2026 08:15</meta:date-string><text:p>Jean Dupont doit rappeler</text:p></office:annotation> suite</text:p>",
+        );
+        let text = extract(&xml).expect("parsing");
+        assert!(
+            !text.contains("08:15Jean Dupont doit rappeler"),
+            "the date-string glued onto the nested paragraph:\n{text}"
+        );
+    }
+
+    /// Matching a boundary on local name alone, rather than on position,
+    /// also caught `ODF`'s inline fields `text:date` and `text:creator`,
+    /// which sit inside an ordinary paragraph rather than beside a nested
+    /// one. That is a fidelity loss, not a leak: a signature line reads as
+    /// five lines instead of one.
+    #[test]
+    fn inline_date_and_creator_fields_stay_on_one_line() {
+        let xml = content(
+            "<text:p>Fait a Lille le <text:date>30/07/2026</text:date> par <text:creator>Jean Dupont</text:creator>, tel 06 12 34 56 78</text:p>",
+        );
+        let text = extract(&xml).expect("parsing");
+        assert_eq!(
+            text,
+            "Fait a Lille le 30/07/2026 par Jean Dupont, tel 06 12 34 56 78\n"
+        );
+    }
+
+    /// Gating capture on paragraph depth drops character data that sits
+    /// outside any paragraph entirely, with nothing reported: an annotation
+    /// anchored directly on a table cell, and an `office:change-info` inside
+    /// `text:tracked-changes`, both real shapes a producer writes. Losing
+    /// this silently breaks the rule in `src/convert/mod.rs` that a
+    /// conversion produces the document's real text or fails.
+    #[test]
+    fn character_data_outside_any_paragraph_is_still_read() {
+        let xml = content(
+            "<table:table-cell><office:annotation><dc:creator>Jean Dupont</dc:creator><dc:date>2026-07-30T08:15:29</dc:date></office:annotation></table:table-cell><text:tracked-changes><text:changed-region><text:insertion><office:change-info><dc:creator>Marie Martin</dc:creator><dc:date>2026-07-30T08:20:00</dc:date></office:change-info></text:insertion></text:changed-region></text:tracked-changes>",
+        );
+        let text = extract(&xml).expect("parsing");
+        assert!(
+            text.contains("Jean Dupont"),
+            "the annotation's creator, anchored on a table cell with no paragraph, was dropped:\n{text}"
+        );
+        assert!(
+            text.contains("Marie Martin"),
+            "the tracked change's creator was dropped:\n{text}"
         );
     }
 

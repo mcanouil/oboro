@@ -16,7 +16,7 @@ passes ISO 13616 mod-97, and the card number is the well-known test value.
 | `clients.tsv` | Tab-separated values, passed through as text |
 | `invoice.pdf` | PDF with embedded text |
 | `slides.pptx` | PowerPoint extraction: slides, speaker notes and a table |
-| `contract.odt` | OpenDocument extraction: body, a `text:span`, header, footer and an annotation carrying a `dc:creator` and `dc:date` |
+| `contract.odt` | OpenDocument extraction: body, a `text:span`, header, footer and an annotation carrying a `dc:creator`, `dc:date` and `meta:date-string` |
 | `letterhead.docx` | Text living in header and footer parts, not the body |
 | `sparse.pdf` | A short but genuine document, which must still be read |
 | `scanned.pdf` | A PDF with a page but no text, which must be refused |
@@ -53,11 +53,16 @@ It carries no `ppt/media` and its author field is invented, so nothing has to
 be scrubbed after generation.
 
 `contract.odt` is written by hand, since it needs no document tooling to
-produce a minimal `.odt`. The annotation deliberately carries a `dc:creator`
-and a `dc:date` before its `text:p`, and the first paragraph wraps its text
-in a `text:span`, because a fixture without either shape does not resemble
-what LibreOffice actually writes and would not exercise the reader's
-handling of them. Regenerate it from the repository root with:
+produce a minimal `.odt`. The annotation deliberately carries a `dc:creator`,
+a `dc:date` and a `meta:date-string` before its `text:p`, and the first
+paragraph wraps its text in a `text:span`, because a fixture without any of
+these shapes does not resemble what LibreOffice actually writes and would
+not exercise the reader's handling of them. `meta:date-string` is the
+localised rendering of `dc:date` (`ODF` 1.2/1.3 Part 1 section 14.3); it is
+what defeated an earlier reader that told metadata apart from running text
+by enumerating element names rather than by position, since it is a shape
+that enumeration had not been told about. Regenerate it from the repository
+root with:
 
 ```sh
 work=$(mktemp -d)
@@ -73,13 +78,13 @@ cat > "$work/META-INF/manifest.xml" <<'XML'
 XML
 cat > "$work/content.xml" <<'XML'
 <?xml version="1.0" encoding="UTF-8"?>
-<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:dc="http://purl.org/dc/elements/1.1/">
+<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:meta="urn:oasis:names:tc:opendocument:xmlns:meta:1.0">
  <office:body><office:text>
   <text:h>Acme Consulting SARL</text:h>
   <text:p><text:span>Jean Dupont</text:span></text:p>
   <text:p>jean.dupont@acme-consulting.example</text:p>
   <text:p>06 12 34 56 78</text:p>
-  <text:p>12 bis rue de la Paix<office:annotation><dc:creator>Jean Dupont</dc:creator><dc:date>2026-07-30T08:15:29</dc:date><text:p>marie.martin@globex.example</text:p></office:annotation>, 75002 Paris</text:p>
+  <text:p>12 bis rue de la Paix<office:annotation><dc:creator>Jean Dupont</dc:creator><dc:date>2026-07-30T08:15:29</dc:date><meta:date-string>30/07/2026 08:15</meta:date-string><text:p>marie.martin@globex.example</text:p></office:annotation>, 75002 Paris</text:p>
   <text:p>IBAN<text:s text:c="3"/>FR14 2004 1010 0505 0001 3M02 606</text:p>
   <text:p>Soci&#233;t&#233; &amp; Fils</text:p>
  </office:text></office:body>
