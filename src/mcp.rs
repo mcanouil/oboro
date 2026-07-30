@@ -208,6 +208,60 @@ fn call(name: &str, arguments: &Value, state: &mut State<'_>) -> Value {
     }
 }
 
+/// Why `path` cannot be read, when that can be established without reading it.
+///
+/// Both cases are settled before `convert::read` runs, so neither has to
+/// recover anything from an error chain.
+fn unreadable(path: &Path) -> Option<String> {
+    if convert::format_of(path).is_none() {
+        return Some(format!(
+            "{} is not a file type Oboro reads; this build reads: {}",
+            path.display(),
+            convert::supported().join(", ")
+        ));
+    }
+    match std::fs::metadata(path) {
+        Ok(metadata) if metadata.is_dir() => Some(format!(
+            "{} is a directory; name a single file",
+            path.display()
+        )),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Some(format!("{} does not exist", path.display()))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => Some(format!(
+            "{} cannot be read: permission denied",
+            path.display()
+        )),
+        // A readable file, or a `metadata` failure this cannot name. Both fall
+        // through to `convert::read`, which is better placed to say what went
+        // wrong than a guess made before the file was opened.
+        Ok(_) | Err(_) => None,
+    }
+}
+
+/// Whether `error` is a text encoding fault rather than anything else.
+///
+/// Gated on the format because the zip layer raises `InvalidData` on a corrupt
+/// archive too, and calling that an encoding problem would send the model
+/// confidently after the wrong thing.
+///
+/// The chain is walked and downcast rather than matched on its message: the
+/// message is the thing that cannot be trusted, since readers quote fragments
+/// of the document into it.
+fn is_encoding_fault(error: &anyhow::Error, format: convert::Format) -> bool {
+    if !matches!(
+        format,
+        convert::Format::Text | convert::Format::Csv | convert::Format::Tsv
+    ) {
+        return false;
+    }
+    error.chain().any(|cause| {
+        cause
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|io| io.kind() == std::io::ErrorKind::InvalidData)
+    })
+}
+
 /// Reads a file and returns its cleaned text, one content block per part.
 ///
 /// A workbook yields one part per sheet, so a heading keeps them apart for the
@@ -215,11 +269,26 @@ fn call(name: &str, arguments: &Value, state: &mut State<'_>) -> Value {
 fn clean(path: &str, state: &mut State<'_>) -> Value {
     let path = Path::new(path);
 
+    if let Some(reason) = unreadable(path) {
+        return failed(&reason);
+    }
+    // `unreadable` has already established that the extension is one Oboro
+    // reads, so this cannot be `None`.
+    let format = convert::format_of(path).expect("the format was checked");
+
     let parts = match convert::read(path, &state.config.ocr_languages) {
         Ok(conversion) => conversion.into_parts(),
         Err(error) => {
             crate::note!("oboro mcp: reading {} failed: {error:#}", path.display());
-            return failed("the file could not be read; the reason is in the server's log");
+            return failed(&if is_encoding_fault(&error, format) {
+                format!("{} is not valid UTF-8 text", path.display())
+            } else {
+                format!(
+                    "{} could not be read as {format:?}; it may hold no extractable text, \
+                     or it may be damaged. The reason is on the server's standard error.",
+                    path.display()
+                )
+            });
         }
     };
 
@@ -620,6 +689,87 @@ mod tests {
         let clean = &value["result"]["tools"][0];
         assert_eq!(clean["inputSchema"]["required"][0], "path");
         assert_eq!(clean["inputSchema"]["properties"]["path"]["type"], "string");
+    }
+
+    /// An `anyhow` chain carrying an `InvalidData` io error, which is the shape
+    /// the text reader produces on a file that is not valid UTF-8.
+    fn invalid_data_chain() -> anyhow::Error {
+        anyhow::Error::new(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "stream did not contain valid UTF-8",
+        ))
+        .context("reading a file")
+    }
+
+    #[test]
+    fn an_invalid_data_error_on_a_text_format_is_an_encoding_fault() {
+        for format in [
+            convert::Format::Text,
+            convert::Format::Csv,
+            convert::Format::Tsv,
+        ] {
+            assert!(
+                is_encoding_fault(&invalid_data_chain(), format),
+                "{format:?} should have been recognised"
+            );
+        }
+    }
+
+    /// The gate, tested directly. It cannot be reached end to end, because no
+    /// reader in this build surfaces `InvalidData` from an archive: every one
+    /// of them fails with a `ZipError` or a `Utf8Error`, neither of which is an
+    /// `std::io::Error`. It is kept because the classification is only sound
+    /// while that stays true, and it is a decompressor away from not being.
+    #[test]
+    fn the_same_error_on_an_archive_format_is_not_an_encoding_fault() {
+        for format in [
+            convert::Format::Docx,
+            convert::Format::Odt,
+            convert::Format::Pptx,
+            convert::Format::Xlsx,
+            convert::Format::Pdf,
+            convert::Format::Image,
+        ] {
+            assert!(
+                !is_encoding_fault(&invalid_data_chain(), format),
+                "{format:?} was mislabelled an encoding problem"
+            );
+        }
+    }
+
+    #[test]
+    fn an_error_with_no_io_cause_is_not_an_encoding_fault() {
+        let error = anyhow::anyhow!("the document uses an entity this reader cannot expand");
+        assert!(!is_encoding_fault(&error, convert::Format::Text));
+    }
+
+    #[test]
+    fn an_unsupported_extension_is_refused_before_the_file_is_read() {
+        // No file is created: the extension settles it, so a path that does not
+        // exist must still be refused for its type rather than its absence.
+        let reason = unreadable(std::path::Path::new("/nowhere/archive.tar.gz"))
+            .expect("an unsupported extension must be refused");
+        assert!(
+            reason.contains("docx"),
+            "the supported set is missing: {reason}"
+        );
+    }
+
+    #[test]
+    fn a_directory_is_told_apart_from_a_file() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let path = dir.path().join("notes.txt");
+        std::fs::create_dir(&path).expect("creating the directory");
+        let reason = unreadable(&path).expect("a directory must be refused");
+        assert!(reason.contains("directory"), "{reason}");
+    }
+
+    #[test]
+    fn a_readable_file_has_no_reason_to_refuse_it() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let path = dir.path().join("notes.txt");
+        std::fs::write(&path, "text").expect("writing the note");
+        assert!(unreadable(&path).is_none());
     }
 
     #[test]

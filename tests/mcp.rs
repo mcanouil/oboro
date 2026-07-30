@@ -302,6 +302,118 @@ fn a_sheet_named_after_a_person_is_headed_with_a_placeholder() {
     );
 }
 
+/// A `.docx` whose only text run holds a bare entity reference, which
+/// `src/convert/xml.rs` refuses by quoting the fragment it could not expand.
+///
+/// The entity must sit inside `<w:t>`: the reader's general-reference arm is
+/// depth-guarded, so an entity outside a run is ignored and the call would
+/// succeed instead. That makes this fixture self-checking, since a mistake in
+/// its construction shows up as an unexpected success.
+fn write_docx_with_a_bare_entity(path: &std::path::Path) {
+    let document = r#"<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+<w:body><w:p><w:r><w:t>Marie &secretfragment; Dupont</w:t></w:r></w:p></w:body>
+</w:document>"#;
+    let file = std::fs::File::create(path).expect("creating the archive");
+    let mut zip = zip::ZipWriter::new(file);
+    let options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+    zip.start_file("word/document.xml", options)
+        .expect("starting the part");
+    std::io::Write::write_all(&mut zip, document.as_bytes()).expect("writing the part");
+    zip.finish().expect("finishing the archive");
+}
+
+#[test]
+fn a_reader_error_never_carries_a_fragment_of_the_document() {
+    let workspace = Workspace::new();
+    let file = workspace.path().join("broken.docx");
+    write_docx_with_a_bare_entity(&file);
+
+    let replies = session(
+        &workspace,
+        &[&call(
+            "clean",
+            &format!(r#"{{"path":"{}"}}"#, file.display()),
+        )],
+    );
+
+    assert_eq!(
+        replies[0]["result"]["isError"], true,
+        "the reader should have refused this document: {:?}",
+        replies[0]
+    );
+    let message = text_of(&replies[0]);
+    assert!(
+        !message.contains("secretfragment"),
+        "a fragment of the document reached the model:\n{message}"
+    );
+}
+
+#[test]
+fn an_unsupported_extension_names_what_can_be_read() {
+    let workspace = Workspace::new();
+    let file = workspace.path().join("archive.tar.gz");
+    std::fs::write(&file, b"not a document").expect("writing the file");
+
+    let replies = session(
+        &workspace,
+        &[&call(
+            "clean",
+            &format!(r#"{{"path":"{}"}}"#, file.display()),
+        )],
+    );
+
+    let message = text_of(&replies[0]);
+    assert_eq!(replies[0]["result"]["isError"], true);
+    assert!(
+        message.contains("docx"),
+        "the supported set should be named:\n{message}"
+    );
+}
+
+#[test]
+fn a_missing_path_says_so_rather_than_saying_nothing() {
+    let workspace = Workspace::new();
+    let missing = workspace.path().join("nowhere.txt");
+
+    let replies = session(
+        &workspace,
+        &[&call(
+            "clean",
+            &format!(r#"{{"path":"{}"}}"#, missing.display()),
+        )],
+    );
+
+    let message = text_of(&replies[0]);
+    assert!(
+        message.contains("does not exist"),
+        "the model cannot act on a vague message:\n{message}"
+    );
+}
+
+#[test]
+fn a_corrupt_archive_is_not_called_an_encoding_problem() {
+    let workspace = Workspace::new();
+    let file = workspace.path().join("corrupt.docx");
+    std::fs::write(&file, b"this is not a zip archive at all").expect("writing the file");
+
+    let replies = session(
+        &workspace,
+        &[&call(
+            "clean",
+            &format!(r#"{{"path":"{}"}}"#, file.display()),
+        )],
+    );
+
+    let message = text_of(&replies[0]);
+    assert_eq!(replies[0]["result"]["isError"], true);
+    assert!(
+        !message.contains("UTF-8"),
+        "a corrupt archive is not an encoding fault:\n{message}"
+    );
+}
+
 #[test]
 fn a_placeholder_issued_by_clean_is_listed_by_map_list() {
     let workspace = Workspace::new();
