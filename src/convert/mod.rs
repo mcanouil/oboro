@@ -361,14 +361,19 @@ mod tests {
         assert_eq!(read_document(&path).expect("reading"), "");
     }
 
-    /// Quarto splits text one run per word, so a value only survives if the
-    /// runs are concatenated with nothing between them.
+    /// The fixture plants "Jean Dupont" with inline emphasis, which forces
+    /// Pandoc to split it across two runs in one paragraph, so this only
+    /// passes if the runs are concatenated with nothing between them.
     #[test]
     fn a_presentation_is_read_including_notes_and_tables() {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("testdata")
             .join("slides.pptx");
         let text = read_document(&path).expect("reading");
+        assert!(
+            text.contains("Jean Dupont"),
+            "the runs of a value split by inline emphasis were not concatenated:\n{text}"
+        );
         assert!(
             text.contains("jean.dupont@acme-consulting.example"),
             "slide text dropped:\n{text}"

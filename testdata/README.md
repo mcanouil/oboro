@@ -30,17 +30,26 @@ deliberately minimal: enough structure for a reader to parse, and nothing
 else.
 
 `slides.pptx` is generated from `slides.qmd` rather than written by hand,
-because Quarto splits text one run per word and emits runs holding a single
-space, which is what exercises run concatenation. Regenerate it with:
+since building a valid `.pptx` archive by hand is impractical. Regenerate
+it with:
 
 ```sh
 quarto render testdata/slides.qmd --to pptx
 ```
 
+Plain declarative text collapses to one run per paragraph, so a fixture of
+ordinary prose would not exercise run concatenation at all. The "Contact"
+slide plants `Jean Dupont` with inline emphasis (`Jean **Dupont**`), which
+forces Pandoc to split it across two `a:t` runs in the same paragraph; that
+value only survives reading if the reader concatenates them with nothing
+between them. A regeneration that stopped producing that split would still
+render correctly but would silently drop this coverage, so check with
+`unzip -p testdata/slides.pptx "ppt/slides/slide*.xml" | grep -c '<a:t>Jean '`
+after regenerating and confirm it still finds a run holding `Jean` on its
+own, separate from `Dupont`.
+
 It carries no `ppt/media` and its author field is invented, so nothing has to
-be scrubbed after generation. PowerPoint merges those runs into roughly one
-per paragraph, so a deck resaved in PowerPoint exercises the reader less, not
-more.
+be scrubbed after generation.
 
 The three `scan` fixtures are the exception: they carry a real image of
 rendered text, which is the only way to exercise recognition end to end.

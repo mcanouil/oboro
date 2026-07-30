@@ -10,7 +10,7 @@ Acme Consulting SARL
 
 ## Contact
 
-Jean Dupont
+Jean **Dupont**
 
 ## Electronic mail
 
