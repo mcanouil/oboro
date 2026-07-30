@@ -223,6 +223,20 @@ impl<'a> Rules<'a> {
 }
 
 /// Pushes every regex match that clears `validate` onto `spans`.
+///
+/// A match the validator rejects is not discarded: the value inside it is
+/// looked for on shorter spans first. A pattern spanning a range of lengths
+/// absorbs whatever follows it, so `06 12 34 56 78 12 bis rue de la Paix`
+/// matches as far as the house number, fails `libphonenumber` as a whole, and
+/// used to take the real number down with it. The same happens to a card
+/// number trailed by stray digits.
+///
+/// The scan resumes at the end of what was claimed rather than at the end of
+/// the match, which is why this drives the search itself instead of using
+/// `find_iter`. A pattern spans a bounded number of digits, so two numbers
+/// written side by side are matched as one candidate that runs out of pattern
+/// part way through the second; resuming past the whole candidate would step
+/// over the rest of that second number and leak it.
 fn push_matches(
     spans: &mut Vec<Span>,
     text: &str,
@@ -230,12 +244,95 @@ fn push_matches(
     kind: &EntityKind,
     validate: impl Fn(&str) -> bool,
 ) {
-    for m in regex.find_iter(text) {
+    let mut cursor = 0;
+    while let Some(m) = regex.find_at(text, cursor) {
         let matched = m.as_str();
         if validate(matched) {
             spans.push(Span::new(m.start(), m.end(), kind.clone(), matched));
+            cursor = m.end();
+        } else {
+            let claimed = push_valid_parts(spans, m.start(), matched, kind, &validate);
+            cursor = claimed.unwrap_or(m.end());
+        }
+        // A pattern matching nothing at all would otherwise spin here.
+        if cursor <= m.start() {
+            cursor = m.end().max(m.start() + 1);
+        }
+        if cursor >= text.len() {
+            break;
         }
     }
+}
+
+/// Looks for the values inside a candidate its validator rejected.
+///
+/// Spans are tried leftmost first and longest first, which is the rule the
+/// regex engine itself follows, so a candidate that validates whole is
+/// unaffected and one that does not gives up as little as it can. Only the
+/// span that validated is claimed: the rest stays as text, which is how the
+/// address is still found in the example above.
+///
+/// The search resumes after each span it takes rather than stopping at the
+/// first, because two values written side by side merge into one candidate
+/// that validates as neither, and recovering only the first would leak the
+/// second.
+///
+/// Returns where the last span it claimed ends, in the coordinates of the
+/// whole text, so the caller can resume there rather than past the candidate.
+fn push_valid_parts(
+    spans: &mut Vec<Span>,
+    offset: usize,
+    candidate: &str,
+    kind: &EntityKind,
+    validate: impl Fn(&str) -> bool,
+) -> Option<usize> {
+    let mut claimed = None;
+    let groups = groups_of(candidate);
+    let mut first = 0;
+    while first < groups.len() {
+        let (start, _) = groups[first];
+        let taken = (first..groups.len()).rev().find(|last| {
+            let (_, end) = groups[*last];
+            validate(&candidate[start..end])
+        });
+        match taken {
+            Some(last) => {
+                let (_, end) = groups[last];
+                spans.push(Span::new(
+                    offset + start,
+                    offset + end,
+                    kind.clone(),
+                    &candidate[start..end],
+                ));
+                claimed = Some(offset + end);
+                first = last + 1;
+            }
+            None => first += 1,
+        }
+    }
+    claimed
+}
+
+/// The byte ranges of the groups a candidate is written in.
+///
+/// A group is a run of characters that are not separators, and a separator is
+/// anything the patterns allow between groups: a space, a dot, a hyphen, a
+/// bracket. Trimming only at these boundaries is what keeps a recovered span
+/// a whole value rather than the tail of one.
+fn groups_of(candidate: &str) -> Vec<(usize, usize)> {
+    let mut found = Vec::new();
+    let mut start = None;
+    for (index, character) in candidate.char_indices() {
+        if character.is_alphanumeric() {
+            start.get_or_insert(index);
+        } else if let Some(begin) = start.take() {
+            found.push((begin, index));
+        }
+    }
+    if let Some(begin) = start {
+        found.push((begin, candidate.len()));
+    }
+    found
 }
 
 /// Keeps only ASCII digits, discarding the separators humans write.
@@ -415,6 +512,46 @@ mod tests {
     fn a_phone_number_is_found_even_when_the_next_line_starts_with_a_digit() {
         let found = kinds_of("06 12 34 56 78\n12 bis rue de la Paix", &EntityKind::Phone);
         assert_eq!(found, ["06 12 34 56 78"]);
+    }
+
+    /// The newline case above is one spelling of a wider failure: a candidate
+    /// that absorbs the text after it fails validation and used to be
+    /// discarded whole, taking the real number inside it down with it. An
+    /// ordinary space is a legitimate separator inside a French number, so
+    /// this spelling cannot be fixed by narrowing the separator class.
+    #[test]
+    fn a_phone_number_is_found_even_when_an_address_follows_it_on_one_line() {
+        let found = kinds_of("06 12 34 56 78 12 bis rue de la Paix", &EntityKind::Phone);
+        assert_eq!(found, ["06 12 34 56 78"]);
+    }
+
+    /// Redacting only the span that validated leaves the house number in the
+    /// text, so the address recogniser still sees the address it belongs to.
+    /// Swallowing the whole candidate instead would hide it.
+    #[test]
+    fn the_address_after_a_phone_number_is_still_found() {
+        let found = kinds_of("06 12 34 56 78 12 bis rue de la Paix", &EntityKind::Address);
+        assert!(
+            found.iter().any(|f| f.contains("12 bis rue de la Paix")),
+            "got {found:?}"
+        );
+    }
+
+    /// Two numbers written side by side merge into one candidate that
+    /// validates as neither, so recovering only the first would leak the
+    /// second.
+    #[test]
+    fn two_phone_numbers_separated_by_a_space_are_both_found() {
+        let found = kinds_of("06 12 34 56 78 06 98 76 54 32", &EntityKind::Phone);
+        assert_eq!(found, ["06 12 34 56 78", "06 98 76 54 32"]);
+    }
+
+    /// The same mechanism, on a different recogniser: a card number trailed by
+    /// stray digits fails Luhn as a whole and used to be discarded entirely.
+    #[test]
+    fn a_card_number_is_found_even_when_digits_follow_it() {
+        let found = kinds_of("Carte 4242 4242 4242 4242 22 fin", &EntityKind::CreditCard);
+        assert_eq!(found, ["4242 4242 4242 4242"]);
     }
 
     /// French typography separates the groups of a phone number with a
