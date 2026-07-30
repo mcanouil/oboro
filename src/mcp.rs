@@ -208,12 +208,29 @@ fn call(name: &str, arguments: &Value, state: &mut State<'_>) -> Value {
     }
 }
 
+/// Whether this build can read `path`'s file type.
+///
+/// [`convert::supported`] rather than [`convert::format_of`] alone: `format_of`
+/// maps an image extension to [`convert::Format::Image`] whatever the build,
+/// while `supported` drops images unless the `ocr` feature is compiled in, and
+/// it is off by default. Going by `format_of` on a default build would let a
+/// `.png` through to `convert::read` and answer with the generic message, when
+/// the message here names the real reason.
+fn reads(path: &Path) -> bool {
+    path.extension()
+        .and_then(std::ffi::OsStr::to_str)
+        .map(str::to_ascii_lowercase)
+        .is_some_and(|extension| convert::supported().iter().any(|known| *known == extension))
+}
+
 /// Why `path` cannot be read, when that can be established without reading it.
 ///
-/// Both cases are settled before `convert::read` runs, so neither has to
-/// recover anything from an error chain.
+/// The three cases here, an unreadable file type, a directory, and a path that
+/// is missing or sits behind an unsearchable parent, are all settled before
+/// `convert::read` runs, so none of them has to recover anything from an error
+/// chain.
 fn unreadable(path: &Path) -> Option<String> {
-    if convert::format_of(path).is_none() {
+    if !reads(path) {
         return Some(format!(
             "{} is not a file type Oboro reads; this build reads: {}",
             path.display(),
@@ -239,27 +256,33 @@ fn unreadable(path: &Path) -> Option<String> {
     }
 }
 
-/// Whether `error` is a text encoding fault rather than anything else.
-///
-/// Gated on the format because the zip layer raises `InvalidData` on a corrupt
-/// archive too, and calling that an encoding problem would send the model
-/// confidently after the wrong thing.
+/// Whether any cause in `error` is an [`std::io::Error`] of `kind`.
 ///
 /// The chain is walked and downcast rather than matched on its message: the
 /// message is the thing that cannot be trusted, since readers quote fragments
-/// of the document into it.
-fn is_encoding_fault(error: &anyhow::Error, format: convert::Format) -> bool {
-    if !matches!(
-        format,
-        convert::Format::Text | convert::Format::Csv | convert::Format::Tsv
-    ) {
-        return false;
-    }
+/// of the document into it, and such a fragment is precisely what must not
+/// reach a reply.
+fn has_io_kind(error: &anyhow::Error, kind: std::io::ErrorKind) -> bool {
     error.chain().any(|cause| {
         cause
             .downcast_ref::<std::io::Error>()
-            .is_some_and(|io| io.kind() == std::io::ErrorKind::InvalidData)
+            .is_some_and(|io| io.kind() == kind)
     })
+}
+
+/// Whether `error` is a text encoding fault rather than anything else.
+///
+/// Gated on the format because `Text`, `Csv` and `Tsv` are exactly the formats
+/// [`convert::read`] sends through `read_utf8`, so they are the only ones for
+/// which "is not valid UTF-8 text" says anything true. Telling a model that
+/// about a `.pdf` would be meaningless whatever error arrived, and the gate
+/// keeps the predicate sound should a reader ever surface `InvalidData` from a
+/// decompressor.
+fn is_encoding_fault(error: &anyhow::Error, format: convert::Format) -> bool {
+    matches!(
+        format,
+        convert::Format::Text | convert::Format::Csv | convert::Format::Tsv
+    ) && has_io_kind(error, std::io::ErrorKind::InvalidData)
 }
 
 /// Reads a file and returns its cleaned text, one content block per part.
@@ -280,15 +303,24 @@ fn clean(path: &str, state: &mut State<'_>) -> Value {
         Ok(conversion) => conversion.into_parts(),
         Err(error) => {
             crate::note!("oboro mcp: reading {} failed: {error:#}", path.display());
-            return failed(&if is_encoding_fault(&error, format) {
-                format!("{} is not valid UTF-8 text", path.display())
-            } else {
-                format!(
-                    "{} could not be read as {format:?}; it may hold no extractable text, \
+            // Permission first, and ungated by format: `std::fs::metadata`
+            // needs no read permission on the file itself, only a searchable
+            // parent, so a file the server may not read passes the pre-flight
+            // and only fails here. Asked before the encoding case because a
+            // file that could not be opened says nothing about its encoding.
+            return failed(
+                &if has_io_kind(&error, std::io::ErrorKind::PermissionDenied) {
+                    format!("{} cannot be read: permission denied", path.display())
+                } else if is_encoding_fault(&error, format) {
+                    format!("{} is not valid UTF-8 text", path.display())
+                } else {
+                    format!(
+                        "{} could not be read as {format:?}; it may hold no extractable text, \
                      or it may be damaged. The reason is on the server's standard error.",
-                    path.display()
-                )
-            });
+                        path.display()
+                    )
+                },
+            );
         }
     };
 
@@ -305,7 +337,7 @@ fn clean(path: &str, state: &mut State<'_>) -> Value {
                 crate::note!("oboro mcp: building the detector failed: {error:#}");
                 return failed(
                     "the detection stack could not be built, so nothing was cleaned; \
-                     the reason is in the server's log",
+                     the reason is on the server's standard error",
                 );
             }
         }
@@ -324,7 +356,7 @@ fn clean(path: &str, state: &mut State<'_>) -> Value {
                     Err(error) => {
                         crate::note!("oboro mcp: cleaning a sheet name failed: {error:#}");
                         return failed(
-                            "the file could not be cleaned; the reason is in the server's log",
+                            "the file could not be cleaned; the reason is on the server's standard error",
                         );
                     }
                 }
@@ -339,7 +371,9 @@ fn clean(path: &str, state: &mut State<'_>) -> Value {
             }),
             Err(error) => {
                 crate::note!("oboro mcp: cleaning {} failed: {error:#}", path.display());
-                return failed("the file could not be cleaned; the reason is in the server's log");
+                return failed(
+                    "the file could not be cleaned; the reason is on the server's standard error",
+                );
             }
         }
     }
@@ -363,7 +397,7 @@ fn map_list(vault: &Vault) -> Value {
         }
         Err(error) => {
             crate::note!("oboro mcp: listing the vault failed: {error:#}");
-            failed("the vault could not be read; the reason is in the server's log")
+            failed("the vault could not be read; the reason is on the server's standard error")
         }
     }
 }
@@ -715,11 +749,12 @@ mod tests {
         }
     }
 
-    /// The gate, tested directly. It cannot be reached end to end, because no
-    /// reader in this build surfaces `InvalidData` from an archive: every one
-    /// of them fails with a `ZipError` or a `Utf8Error`, neither of which is an
-    /// `std::io::Error`. It is kept because the classification is only sound
-    /// while that stays true, and it is a decompressor away from not being.
+    /// The gate, tested directly, because it cannot be reached end to end: no
+    /// reader in this build surfaces `InvalidData` from an archive, since every
+    /// one of them fails with a `ZipError` or a `Utf8Error` and neither is an
+    /// `std::io::Error`. The gate is kept regardless, because "is not valid
+    /// UTF-8 text" is only a true thing to say about the formats read through
+    /// `read_utf8`, whatever error happens to arrive for the others.
     #[test]
     fn the_same_error_on_an_archive_format_is_not_an_encoding_fault() {
         for format in [
@@ -770,6 +805,50 @@ mod tests {
         let path = dir.path().join("notes.txt");
         std::fs::write(&path, "text").expect("writing the note");
         assert!(unreadable(&path).is_none());
+    }
+
+    /// `format_of` maps an image extension to a format on every build, but
+    /// `supported` only lists images when the `ocr` feature is compiled in.
+    /// Going by the former would let a `.png` reach `convert::read` on a
+    /// default build and answer with the generic message, when the model can be
+    /// told plainly that this build does not read it.
+    #[test]
+    fn an_image_is_refused_unless_this_build_can_recognise_text_in_one() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let path = dir.path().join("photo.png");
+        std::fs::write(&path, b"not really a png").expect("writing the file");
+
+        assert_eq!(
+            reads(&path),
+            convert::ocr_available(),
+            "`reads` must follow `supported`, which follows the `ocr` feature"
+        );
+        assert_eq!(unreadable(&path).is_some(), !convert::ocr_available());
+    }
+
+    #[test]
+    fn an_extension_is_matched_whatever_its_case() {
+        assert!(reads(std::path::Path::new("/tmp/REPORT.DOCX")));
+        assert!(!reads(std::path::Path::new("/tmp/archive.tar.gz")));
+        assert!(!reads(std::path::Path::new("/tmp/no_extension")));
+    }
+
+    /// `std::fs::metadata` needs no read permission on the file itself, so a
+    /// file the server may not read passes the pre-flight and can only be
+    /// recognised from the chain afterwards.
+    #[test]
+    fn a_permission_denied_cause_is_found_in_the_chain() {
+        let error = anyhow::Error::new(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "permission denied",
+        ))
+        .context("opening a file");
+        assert!(has_io_kind(&error, std::io::ErrorKind::PermissionDenied));
+        assert!(!has_io_kind(&error, std::io::ErrorKind::InvalidData));
+        assert!(
+            !is_encoding_fault(&error, convert::Format::Text),
+            "a file that could not be opened says nothing about its encoding"
+        );
     }
 
     #[test]

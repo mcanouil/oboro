@@ -392,6 +392,32 @@ fn a_missing_path_says_so_rather_than_saying_nothing() {
     );
 }
 
+/// The positive half of the encoding classification, end to end. Without this
+/// only the negative is covered, and a branch that never fires would pass every
+/// other test in this file.
+#[test]
+fn a_text_file_that_is_not_utf8_is_named_as_such() {
+    let workspace = Workspace::new();
+    let file = workspace.path().join("latin1.txt");
+    // `caf` then 0xe9, which is Latin-1 for the acute e and never valid UTF-8.
+    std::fs::write(&file, b"caf\xe9").expect("writing the file");
+
+    let replies = session(
+        &workspace,
+        &[&call(
+            "clean",
+            &format!(r#"{{"path":"{}"}}"#, file.display()),
+        )],
+    );
+
+    let message = text_of(&replies[0]);
+    assert_eq!(replies[0]["result"]["isError"], true);
+    assert!(
+        message.contains("not valid UTF-8"),
+        "the encoding branch never fired:\n{message}"
+    );
+}
+
 #[test]
 fn a_corrupt_archive_is_not_called_an_encoding_problem() {
     let workspace = Workspace::new();
