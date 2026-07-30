@@ -287,6 +287,46 @@ If `.claude`, `skills`, `oboro` or `SKILL.md` is a link, the install stops and n
 
 :::
 
+## `mcp`
+
+Serves the Model Context Protocol on standard input and output, so an agent in a client with no hook system can ask for a cleaned file rather than reading the file itself.
+
+```bash
+oboro mcp [--config FILE]
+```
+
+| Option | Effect |
+| --- | --- |
+| `--config <FILE>` | Use this configuration instead of the nearest `oboro.toml`. Also read from `OBORO_CONFIG`. |
+
+Messages are JSON-RPC 2.0, one to a line.
+The `2025-11-25` revision is implemented, and a client asking for `2026-07-28` is answered with `2025-11-25` rather than agreed with: that revision removes the `initialize` handshake and `ping` and requires a `server/discover` method, none of which this server does, so claiming it would leave the client expecting a server this is not.
+
+Two tools are offered.
+
+`clean` takes a `path` and answers with that file's text, cleaned the way [`clean`](#clean) cleans it, one content block per part.
+A workbook comes back as one block per sheet, each under a `## <sheet name>` heading, so a client that flattens the blocks into a single string still keeps the sheets apart.
+Every format this build reads is read here, so a `.pdf`, `.docx`, `.xlsx`, `.pptx` or `.odt` reaches the model as text, which a plain file read cannot manage at all.
+
+`map_list` takes no arguments and lists the placeholders the vault has issued.
+The real values are never returned, and neither are the times the placeholders were created, which [`map list`](#map) does print: a timestamp for each entry is a record of your working hours rather than anything a model can reason with.
+
+Setting `--config`, or `OBORO_CONFIG` in the client's environment, is worth the trouble.
+A client launches this server itself and chooses the working directory it runs in, so the nearest `oboro.toml` is unlikely to be your project's, and without one the server runs on the defaults: no denylist and no custom patterns.
+
+Two lines go to standard error at startup, naming the configuration that was resolved and which detectors are configured and installed.
+Most clients keep a server's standard error in a log, and it is worth reading once after wiring the server up, since a server that found no configuration says so there and nowhere else.
+
+::: {.callout-important}
+
+## Why restoring is not offered
+
+Over this protocol the caller is the model.
+A model that can write a file of placeholders and read it back afterwards could use a restore tool to obtain every value the vault holds, which is the thing the vault exists to prevent.
+So restoring stays a command-line action: see [`restore`](#restore).
+
+:::
+
 ## `models`
 
 Fetches and inspects the recognition model.
