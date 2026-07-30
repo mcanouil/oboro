@@ -20,6 +20,16 @@ use quick_xml::events::Event;
 
 use super::xml::{local_name, named_entity};
 
+/// The largest run of spaces a `text:s` will expand to.
+///
+/// `text:c` is a document-supplied count with no upper bound of its own, and
+/// nothing stops it naming billions of spaces from a handful of bytes. Real
+/// documents use `text:s` for indentation and alignment, not for megabytes of
+/// whitespace, so a few thousand is ample; a count above this is treated as
+/// malformed rather than honoured.
+#[allow(dead_code)]
+const SPACE_RUN_LIMIT: usize = 4096;
+
 /// The archive member holding the body. Also the marker for a readable file.
 #[allow(dead_code)]
 const CONTENT: &str = "content.xml";
@@ -121,6 +131,9 @@ fn extract(xml: &str) -> Result<String> {
 /// The `text:c` attribute is optional and defaults to one. A malformed count
 /// is treated as one rather than failing: it costs a space in the layout the
 /// detectors see, where failing would refuse an otherwise readable document.
+/// A count above [`SPACE_RUN_LIMIT`] is treated the same way, as malformed,
+/// rather than clamped to the ceiling: clamping would still honour an
+/// obviously bogus value by inventing layout the document never had.
 #[allow(dead_code)]
 fn space_count(tag: &quick_xml::events::BytesStart<'_>) -> Result<usize> {
     for attribute in tag.attributes() {
@@ -128,7 +141,8 @@ fn space_count(tag: &quick_xml::events::BytesStart<'_>) -> Result<usize> {
         if local_name(attribute.key.as_ref()) == b"c" {
             let count = std::str::from_utf8(&attribute.value)
                 .ok()
-                .and_then(|value| value.parse().ok())
+                .and_then(|value| value.parse::<usize>().ok())
+                .filter(|count| *count <= SPACE_RUN_LIMIT)
                 .unwrap_or(1);
             return Ok(count);
         }
@@ -189,6 +203,16 @@ mod tests {
     #[test]
     fn a_space_element_without_a_count_is_one_space() {
         let xml = content("<text:p>a<text:s/>b</text:p>");
+        assert_eq!(extract(&xml).expect("parsing"), "a b\n");
+    }
+
+    /// A `text:c` far past what any real document needs must not be honoured
+    /// verbatim: doing so would let a handful of bytes expand to gigabytes of
+    /// spaces. Without the ceiling this hangs rather than fails, so this test
+    /// completing at all is the coverage.
+    #[test]
+    fn a_space_count_far_above_the_ceiling_is_treated_as_malformed() {
+        let xml = content("<text:p>a<text:s text:c=\"9999999999\"/>b</text:p>");
         assert_eq!(extract(&xml).expect("parsing"), "a b\n");
     }
 
