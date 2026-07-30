@@ -16,7 +16,6 @@ passes ISO 13616 mod-97, and the card number is the well-known test value.
 | `clients.tsv` | Tab-separated values, passed through as text |
 | `invoice.pdf` | PDF with embedded text |
 | `slides.pptx` | PowerPoint extraction: slides, speaker notes and a table |
-| `contract.odt` | OpenDocument extraction: body, a `text:span`, header, footer and an annotation carrying a `dc:creator`, `dc:date` and `meta:date-string` |
 | `letterhead.docx` | Text living in header and footer parts, not the body |
 | `sparse.pdf` | A short but genuine document, which must still be read |
 | `scanned.pdf` | A PDF with a page but no text, which must be refused |
@@ -51,65 +50,6 @@ own, separate from `Dupont`.
 
 It carries no `ppt/media` and its author field is invented, so nothing has to
 be scrubbed after generation.
-
-`contract.odt` is written by hand, since it needs no document tooling to
-produce a minimal `.odt`. The annotation deliberately carries a `dc:creator`,
-a `dc:date` and a `meta:date-string` before its `text:p`, and the first
-paragraph wraps its text in a `text:span`, because a fixture without any of
-these shapes does not resemble what LibreOffice actually writes and would
-not exercise the reader's handling of them. `meta:date-string` is the
-localised rendering of `dc:date` (`ODF` 1.2/1.3 Part 1 section 14.3); it is
-what defeated an earlier reader that told metadata apart from running text
-by enumerating element names rather than by position, since it is a shape
-that enumeration had not been told about. Regenerate it from the repository
-root with:
-
-```sh
-work=$(mktemp -d)
-mkdir -p "$work/META-INF"
-printf '%s' 'application/vnd.oasis.opendocument.text' > "$work/mimetype"
-cat > "$work/META-INF/manifest.xml" <<'XML'
-<?xml version="1.0" encoding="UTF-8"?>
-<manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.3">
- <manifest:file-entry manifest:full-path="/" manifest:media-type="application/vnd.oasis.opendocument.text"/>
- <manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/>
- <manifest:file-entry manifest:full-path="styles.xml" manifest:media-type="text/xml"/>
-</manifest:manifest>
-XML
-cat > "$work/content.xml" <<'XML'
-<?xml version="1.0" encoding="UTF-8"?>
-<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:meta="urn:oasis:names:tc:opendocument:xmlns:meta:1.0">
- <office:body><office:text>
-  <text:h>Acme Consulting SARL</text:h>
-  <text:p><text:span>Jean Dupont</text:span></text:p>
-  <text:p>jean.dupont@acme-consulting.example</text:p>
-  <text:p>06 12 34 56 78</text:p>
-  <text:p>12 bis rue de la Paix<office:annotation><dc:creator>Jean Dupont</dc:creator><dc:date>2026-07-30T08:15:29</dc:date><meta:date-string>30/07/2026 08:15</meta:date-string><text:p>marie.martin@globex.example</text:p></office:annotation>, 75002 Paris</text:p>
-  <text:p>IBAN<text:s text:c="3"/>FR14 2004 1010 0505 0001 3M02 606</text:p>
-  <text:p>Soci&#233;t&#233; &amp; Fils</text:p>
- </office:text></office:body>
-</office:document-content>
-XML
-cat > "$work/styles.xml" <<'XML'
-<?xml version="1.0" encoding="UTF-8"?>
-<office:document-styles xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0">
- <office:master-styles><style:master-page style:name="Standard">
-  <style:header><text:p>Globex Industries</text:p></style:header>
-  <style:footer><text:p>+33 1 42 68 53 00</text:p></style:footer>
- </style:master-page></office:master-styles>
-</office:document-styles>
-XML
-cd "$work"
-zip -q -X -0 contract.odt mimetype
-zip -q -X -r contract.odt META-INF content.xml styles.xml
-cd - > /dev/null
-cp "$work/contract.odt" testdata/contract.odt
-rm -rf "$work"
-unzip -l testdata/contract.odt
-```
-
-The `mimetype` member is stored uncompressed and first, which is what the
-OpenDocument packaging rules require.
 
 The three `scan` fixtures are the exception: they carry a real image of
 rendered text, which is the only way to exercise recognition end to end.
