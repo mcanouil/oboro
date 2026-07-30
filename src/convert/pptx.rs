@@ -13,16 +13,19 @@
 //!
 //! Nothing calls [`to_text`] yet: the dispatch that reaches it belongs to a
 //! later step of the pptx/odt reader work, which is why the module is
-//! otherwise complete but unreachable and needs the lint below.
-#![allow(dead_code)]
+//! otherwise complete but unreachable. Each item below carries its own
+//! `#[allow(dead_code)]` for that reason, to come out once that dispatch
+//! arm lands.
 
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 
 /// Where the slides live. Also the marker for a readable presentation.
+#[allow(dead_code)]
 const SLIDES: &str = "ppt/slides/";
 /// Speaker notes, read because they are text the author wrote.
+#[allow(dead_code)]
 const NOTES: &str = "ppt/notesSlides/";
 
 /// The parts that carry readable text, in reading order.
@@ -30,6 +33,7 @@ const NOTES: &str = "ppt/notesSlides/";
 /// Slide layouts and masters are excluded. Their text is template prompt
 /// material such as "Click to edit Master title style", which would be
 /// injected into every cleaned presentation.
+#[allow(dead_code)]
 fn selected<S: AsRef<str>>(names: &[S]) -> Vec<String> {
     let pick = |prefix: &str| -> Vec<String> {
         let mut found: Vec<String> = names
@@ -48,6 +52,7 @@ fn selected<S: AsRef<str>>(names: &[S]) -> Vec<String> {
 }
 
 /// Whether `name` is an XML part directly inside `prefix`.
+#[allow(dead_code)]
 fn is_part_of(name: &str, prefix: &str) -> bool {
     let Some(rest) = name.strip_prefix(prefix) else {
         return false;
@@ -59,6 +64,7 @@ fn is_part_of(name: &str, prefix: &str) -> bool {
 ///
 /// A part with no number sorts first, and ties fall back to the name, so the
 /// order is total rather than dependent on the archive's listing.
+#[allow(dead_code)]
 fn index_of(name: &str) -> u32 {
     let digits: String = name
         .trim_end_matches(|character: char| !character.is_ascii_digit())
@@ -80,6 +86,7 @@ fn index_of(name: &str) -> u32 {
 ///
 /// Returns an error if the file is not a readable archive, if it holds no
 /// slide part, if a part cannot be read or parsed, or if it yields no text.
+#[allow(dead_code)]
 pub fn to_text(path: &Path) -> Result<String> {
     let file = std::fs::File::open(path).with_context(|| format!("opening {}", path.display()))?;
     let mut archive = zip::ZipArchive::new(file)
