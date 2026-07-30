@@ -1,16 +1,10 @@
 //! `OpenDocument` text extraction.
 //!
 //! An `.odt` is a zip archive whose `content.xml` holds the body and whose
-//! `styles.xml` holds headers and footers. Unlike OOXML, ODF puts character
+//! `styles.xml` holds headers and footers. Unlike OOXML, `ODF` puts character
 //! data directly inside `text:p` and `text:h` rather than wrapping it in a run
 //! element, so this needs its own element rules rather than the shared run
 //! reader.
-//!
-//! Nothing calls [`to_text`] yet: the dispatch that reaches it belongs to a
-//! later step of the pptx/odt reader work, which is why the module is
-//! otherwise complete but unreachable. Each item below carries its own
-//! `#[allow(dead_code)]` for that reason; remove all six once a later step
-//! adds the `Format::Odt` dispatch arm that calls [`to_text`].
 
 use std::path::Path;
 
@@ -27,15 +21,12 @@ use super::xml::{local_name, named_entity};
 /// documents use `text:s` for indentation and alignment, not for megabytes of
 /// whitespace, so a few thousand is ample; a count above this is treated as
 /// malformed rather than honoured.
-#[allow(dead_code)]
 const SPACE_RUN_LIMIT: usize = 4096;
 
 /// The archive member holding the body. Also the marker for a readable file.
-#[allow(dead_code)]
 const CONTENT: &str = "content.xml";
 /// Headers and footers live here, not in the body, so a letterhead or a
 /// contact line would be missing from a document read without it.
-#[allow(dead_code)]
 const STYLES: &str = "styles.xml";
 
 /// Reads the body and the styles, in that order.
@@ -44,7 +35,6 @@ const STYLES: &str = "styles.xml";
 ///
 /// Returns an error if the file is not a readable archive, if it holds no
 /// `content.xml`, if a part cannot be read or parsed, or if it yields no text.
-#[allow(dead_code)]
 pub fn to_text(path: &Path) -> Result<String> {
     let file = std::fs::File::open(path).with_context(|| format!("opening {}", path.display()))?;
     let mut archive = zip::ZipArchive::new(file)
@@ -78,12 +68,12 @@ pub fn to_text(path: &Path) -> Result<String> {
     Ok(text)
 }
 
-/// Pulls the text out of an ODF part.
+/// Pulls the text out of an `ODF` part.
 ///
-/// Paragraph tracking is a depth counter rather than a flag because ODF nests
-/// a `text:p` inside a `text:p` for annotations and footnotes, and a flag
-/// would clear on the inner close and drop the rest of the outer paragraph.
-#[allow(dead_code)]
+/// Paragraph tracking is a depth counter rather than a flag because `ODF`
+/// nests a `text:p` inside a `text:p` for annotations and footnotes, and a
+/// flag would clear on the inner close and drop the rest of the outer
+/// paragraph.
 fn extract(xml: &str) -> Result<String> {
     let mut reader = Reader::from_str(xml);
     let mut text = String::new();
@@ -134,7 +124,6 @@ fn extract(xml: &str) -> Result<String> {
 /// A count above [`SPACE_RUN_LIMIT`] is treated the same way, as malformed,
 /// rather than clamped to the ceiling: clamping would still honour an
 /// obviously bogus value by inventing layout the document never had.
-#[allow(dead_code)]
 fn space_count(tag: &quick_xml::events::BytesStart<'_>) -> Result<usize> {
     for attribute in tag.attributes() {
         let attribute = attribute?;
@@ -235,5 +224,48 @@ mod tests {
         std::fs::write(&path, "this is not a zip").expect("writing");
         let error = to_text(&path).expect_err("must reject");
         assert!(format!("{error:#}").contains("readable .odt"));
+    }
+
+    /// An archive holding `styles.xml` but no `content.xml` is not a readable
+    /// `.odt`, and the message must name the missing part rather than claim
+    /// the whole archive is empty.
+    #[test]
+    fn a_missing_content_part_is_refused_by_name() {
+        use std::io::Write as _;
+
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let path = dir.path().join("no-content.odt");
+        let file = std::fs::File::create(&path).expect("creating");
+        let mut writer = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default();
+        writer.start_file(STYLES, options).expect("starting entry");
+        writer
+            .write_all(content("<text:p>a</text:p>").as_bytes())
+            .expect("writing entry");
+        writer.finish().expect("finishing archive");
+
+        let error = to_text(&path).expect_err("must reject");
+        assert!(format!("{error:#}").contains(CONTENT));
+    }
+
+    /// Not every producer writes `styles.xml`; its absence is tolerated
+    /// rather than refused, so the body must still come back.
+    #[test]
+    fn a_missing_styles_part_is_tolerated() {
+        use std::io::Write as _;
+
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let path = dir.path().join("no-styles.odt");
+        let file = std::fs::File::create(&path).expect("creating");
+        let mut writer = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default();
+        writer.start_file(CONTENT, options).expect("starting entry");
+        writer
+            .write_all(content("<text:p>Jean Dupont</text:p>").as_bytes())
+            .expect("writing entry");
+        writer.finish().expect("finishing archive");
+
+        let text = to_text(&path).expect("reading");
+        assert!(text.contains("Jean Dupont"), "body dropped:\n{text}");
     }
 }

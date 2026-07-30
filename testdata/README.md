@@ -16,6 +16,7 @@ passes ISO 13616 mod-97, and the card number is the well-known test value.
 | `clients.tsv` | Tab-separated values, passed through as text |
 | `invoice.pdf` | PDF with embedded text |
 | `slides.pptx` | PowerPoint extraction: slides, speaker notes and a table |
+| `contract.odt` | OpenDocument extraction: body, header, footer and an annotation |
 | `letterhead.docx` | Text living in header and footer parts, not the body |
 | `sparse.pdf` | A short but genuine document, which must still be read |
 | `scanned.pdf` | A PDF with a page but no text, which must be refused |

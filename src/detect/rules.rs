@@ -30,8 +30,13 @@ static EMAIL: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 /// Candidate digit runs that `libphonenumber` then accepts or rejects.
+///
+/// The separator class is `[ \t.\-]`, not `\s`: `\s` also matches a newline,
+/// which would let a valid number on one line merge with a leading digit on
+/// the next into an invalid candidate, discarding the whole match rather than
+/// falling back to the number actually written.
 static PHONE_CANDIDATE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?:\+\d{1,3}[\s.\-]?)?(?:\(\d{1,4}\)[\s.\-]?)?\d(?:[\s.\-]?\d){6,14}")
+    Regex::new(r"(?:\+\d{1,3}[ \t.\-]?)?(?:\(\d{1,4}\)[ \t.\-]?)?\d(?:[ \t.\-]?\d){6,14}")
         .expect("phone pattern is valid")
 });
 
@@ -397,6 +402,15 @@ mod tests {
     fn ignores_numbers_that_are_not_valid_phones() {
         let found = kinds_of("Reference 0000000 and 1234567.", &EntityKind::Phone);
         assert!(found.is_empty(), "unexpected phone matches: {found:?}");
+    }
+
+    /// A phone number on its own line, immediately followed by a line that
+    /// starts with a digit, must not merge across the newline into an
+    /// invalid candidate that then gets discarded whole.
+    #[test]
+    fn a_phone_number_is_found_even_when_the_next_line_starts_with_a_digit() {
+        let found = kinds_of("06 12 34 56 78\n12 bis rue de la Paix", &EntityKind::Phone);
+        assert_eq!(found, ["06 12 34 56 78"]);
     }
 
     #[test]

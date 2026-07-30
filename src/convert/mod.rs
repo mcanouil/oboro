@@ -30,6 +30,7 @@ pub enum Format {
     Tsv,
     Docx,
     Pptx,
+    Odt,
     Xlsx,
     Pdf,
     Image,
@@ -49,6 +50,7 @@ const FORMATS: &[(&str, Format)] = &[
     ("tsv", Format::Tsv),
     ("docx", Format::Docx),
     ("pptx", Format::Pptx),
+    ("odt", Format::Odt),
     ("xlsx", Format::Xlsx),
     ("xlsm", Format::Xlsx),
     ("pdf", Format::Pdf),
@@ -202,6 +204,7 @@ pub fn read(path: &Path, ocr_languages: &[String]) -> Result<Conversion> {
         Format::Csv | Format::Tsv => read_utf8(path).map(Conversion::Document),
         Format::Docx => docx::to_text(path).map(Conversion::Document),
         Format::Pptx => pptx::to_text(path).map(Conversion::Document),
+        Format::Odt => odt::to_text(path).map(Conversion::Document),
         Format::Xlsx => xlsx::to_sheets(path).map(Conversion::Sheets),
         Format::Pdf => pdf::to_text(path, ocr_languages).map(Conversion::Document),
         Format::Image => image_to_text(path, ocr_languages).map(Conversion::Document),
@@ -389,6 +392,34 @@ mod tests {
         );
     }
 
+    /// Headers and footers live in `styles.xml`, so a document read from
+    /// `content.xml` alone would be missing exactly the details worth
+    /// redacting.
+    #[test]
+    fn an_opendocument_is_read_including_styles_and_annotations() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("testdata")
+            .join("contract.odt");
+        let text = read_document(&path).expect("reading");
+        assert!(text.contains("Jean Dupont"), "body dropped:\n{text}");
+        assert!(
+            text.contains("75002 Paris"),
+            "text after an annotation dropped:\n{text}"
+        );
+        assert!(
+            text.contains("marie.martin@globex.example"),
+            "annotation dropped:\n{text}"
+        );
+        assert!(
+            text.contains("Globex Industries"),
+            "header dropped:\n{text}"
+        );
+        assert!(
+            text.contains("+33 1 42 68 53 00"),
+            "footer dropped:\n{text}"
+        );
+    }
+
     #[test]
     fn a_spreadsheet_reads_as_sheets() {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -455,6 +486,7 @@ mod tests {
             Some(Format::Tsv),
             Some(Format::Docx),
             Some(Format::Pptx),
+            Some(Format::Odt),
             Some(Format::Xlsx),
             Some(Format::Pdf),
             Some(Format::Image),

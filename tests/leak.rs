@@ -44,6 +44,7 @@ const DOCUMENTS: &[&str] = &[
     "clients.tsv",
     "invoice.pdf",
     "slides.pptx",
+    "contract.odt",
 ];
 
 /// The fixtures that only a build with the `ocr` feature can read: an image,
