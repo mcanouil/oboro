@@ -95,6 +95,14 @@ enum Command {
         #[command(subcommand)]
         action: SkillAction,
     },
+    /// Serve the Model Context Protocol on standard input and output
+    ///
+    /// Exposes two tools, `clean` and `map_list`, to an agent in a client with
+    /// no hook system. Restoring is deliberately not offered: over this
+    /// protocol the caller is the model, and a model that can write a file and
+    /// read it back could use a restore tool to obtain every value the vault
+    /// holds.
+    Mcp,
     /// Report the tool's configuration and environment
     Doctor,
 }
@@ -285,6 +293,7 @@ fn run() -> Result<()> {
             } => skill_install(chosen_scope(project, user), dry_run, force, with_hooks),
             SkillAction::Show => print_stdout(oboro::skill::SKILL),
         },
+        Command::Mcp => mcp(store),
         Command::Doctor => doctor(store),
     }
 }
@@ -1099,6 +1108,14 @@ fn describe_regions(config: &Config) -> String {
         }
         (RegionSource::Unknown, _) => codes.join(", "),
     }
+}
+
+/// Serves the Model Context Protocol on standard input and output.
+fn mcp(store: &StoreArgs) -> Result<()> {
+    let (config, vault) = prepare(store, None, None)?;
+    let stdin = std::io::stdin();
+    let stdout = std::io::stdout();
+    oboro::mcp::serve(stdin.lock(), stdout.lock(), &config, vault)
 }
 
 fn doctor(store: &StoreArgs) -> Result<()> {
