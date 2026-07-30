@@ -103,6 +103,15 @@ Older `.doc`, `.xls` and `.ppt` are not read at all, nor are the OpenDocument
 spreadsheet and presentation formats, `.ods` and `.odp`.
 Neither is anything embedded inside a document: a spreadsheet pasted into a Word file is not reached.
 
+Inside a `.pptx`, a footer set through PowerPoint's Header and Footer dialog
+is written into the slide master and the layouts rather than the slides
+themselves, so it is not read; a client name or a confidentiality line set
+there once is missed.
+A chart's cached category labels, under `ppt/charts/`, are visible on the
+slide and are not read either.
+`SmartArt` is read, because the `mc:Fallback` inside the slide carries its
+shapes and their runs.
+
 ## Recognition accuracy on real scans is not guaranteed
 
 The tests read rendered text at a generous size, for a plain image and for both PDF codecs, and check that none of the planted values survive cleaning and that the provider name restores.
