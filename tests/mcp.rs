@@ -149,3 +149,170 @@ fn tools_call_without_params_is_an_invalid_params_error() {
     );
     assert_eq!(replies[0]["error"]["code"], -32602);
 }
+
+#[test]
+fn clean_replaces_values_with_placeholders() {
+    let workspace = Workspace::new();
+    let file = workspace.path().join("note.txt");
+    std::fs::write(&file, "Call Marie on 06 12 34 56 78.").expect("writing the note");
+
+    let replies = session(
+        &workspace,
+        &[&call(
+            "clean",
+            &format!(r#"{{"path":"{}"}}"#, file.display()),
+        )],
+    );
+
+    let cleaned = text_of(&replies[0]);
+    assert!(
+        !cleaned.contains("06 12 34 56 78"),
+        "the value reached the model:\n{cleaned}"
+    );
+    assert!(
+        cleaned.contains("[[PHONE_1]]"),
+        "the placeholder is missing:\n{cleaned}"
+    );
+    assert_eq!(replies[0]["result"]["isError"], false);
+}
+
+#[test]
+fn each_sheet_of_a_workbook_becomes_its_own_block() {
+    let workspace = Workspace::new();
+    let book = workspace.path().join("book.xlsx");
+    support::write_xlsx(
+        &book,
+        &[
+            ("First", &[&["one"], &["06 12 34 56 78"]]),
+            ("Second", &[&["two"]]),
+        ],
+    );
+
+    let replies = session(
+        &workspace,
+        &[&call(
+            "clean",
+            &format!(r#"{{"path":"{}"}}"#, book.display()),
+        )],
+    );
+
+    let blocks = replies[0]["result"]["content"]
+        .as_array()
+        .expect("a content array");
+    assert_eq!(blocks.len(), 2, "one block per sheet: {blocks:?}");
+    assert!(
+        blocks[0]["text"]
+            .as_str()
+            .expect("text")
+            .contains("## First")
+    );
+    assert!(
+        blocks[1]["text"]
+            .as_str()
+            .expect("text")
+            .contains("## Second")
+    );
+}
+
+#[test]
+fn a_missing_path_is_a_tool_error_and_the_loop_survives_it() {
+    let workspace = Workspace::new();
+    let missing = workspace.path().join("nowhere.txt");
+
+    let replies = session(
+        &workspace,
+        &[
+            &call("clean", &format!(r#"{{"path":"{}"}}"#, missing.display())),
+            r#"{"jsonrpc":"2.0","id":2,"method":"ping"}"#,
+        ],
+    );
+
+    assert_eq!(replies[0]["result"]["isError"], true);
+    assert!(
+        replies[1]["result"].is_object(),
+        "a tool failure must not end the loop: {:?}",
+        replies[1]
+    );
+}
+
+#[test]
+fn a_failed_call_does_not_poison_the_server() {
+    let workspace = Workspace::new();
+    let missing = workspace.path().join("nowhere.txt");
+    let file = workspace.path().join("note.txt");
+    std::fs::write(&file, "Call Marie on 06 12 34 56 78.").expect("writing the note");
+
+    let replies = session(
+        &workspace,
+        &[
+            &call("clean", &format!(r#"{{"path":"{}"}}"#, missing.display())),
+            &call("clean", &format!(r#"{{"path":"{}"}}"#, file.display())),
+        ],
+    );
+
+    assert_eq!(replies[0]["result"]["isError"], true);
+    assert_eq!(
+        replies[1]["result"]["isError"], false,
+        "a failed call must not cache a poison detector: {:?}",
+        replies[1]
+    );
+}
+
+#[test]
+fn clean_without_a_path_is_a_tool_error() {
+    let workspace = Workspace::new();
+    let replies = session(&workspace, &[&call("clean", "{}")]);
+    assert_eq!(replies[0]["result"]["isError"], true);
+}
+
+#[test]
+fn a_sheet_named_after_a_person_is_headed_with_a_placeholder() {
+    // `redact_filenames` defaults to true, so no configuration file is needed
+    // to exercise this.
+    let workspace = Workspace::new();
+    let book = workspace.path().join("book.xlsx");
+    support::write_xlsx(&book, &[("06 12 34 56 78", &[&["a value"]])]);
+
+    let replies = session(
+        &workspace,
+        &[&call(
+            "clean",
+            &format!(r#"{{"path":"{}"}}"#, book.display()),
+        )],
+    );
+
+    let heading = text_of(&replies[0]);
+    assert!(
+        !heading.contains("06 12 34 56 78"),
+        "the sheet name leaked in the heading:\n{heading}"
+    );
+    assert!(
+        heading.contains("## [[PHONE_1]]"),
+        "the heading should carry the placeholder:\n{heading}"
+    );
+}
+
+#[test]
+fn a_placeholder_issued_by_clean_is_listed_by_map_list() {
+    let workspace = Workspace::new();
+    let file = workspace.path().join("note.txt");
+    std::fs::write(&file, "Call Marie on 06 12 34 56 78.").expect("writing the note");
+
+    let replies = session(
+        &workspace,
+        &[
+            &call("clean", &format!(r#"{{"path":"{}"}}"#, file.display())),
+            &call("map_list", "{}"),
+        ],
+    );
+
+    let listing = text_of(&replies[1]);
+    assert!(
+        listing.contains("[[PHONE_1]]"),
+        "the placeholder clean issued is missing:\n{listing}"
+    );
+    assert!(
+        !listing.contains("06 12 34 56 78"),
+        "the value reached the model:\n{listing}"
+    );
+}

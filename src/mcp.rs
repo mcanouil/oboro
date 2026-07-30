@@ -11,6 +11,7 @@
 //! that has none.
 
 use std::io::{BufRead, Write};
+use std::path::Path;
 
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
@@ -18,6 +19,7 @@ use serde_json::{Value, json};
 use crate::config::Config;
 use crate::detect::Detector;
 use crate::vault::{Entry, Vault};
+use crate::{convert, pipeline};
 
 /// What the server carries between messages.
 ///
@@ -193,16 +195,82 @@ fn failed(message: &str) -> Value {
 
 /// Runs one tool.
 fn call(name: &str, arguments: &Value, state: &mut State<'_>) -> Value {
-    // `arguments` and the lazily built detector are both consumed by `clean`,
-    // which lands in the next task.
-    let _ = (arguments, &state.config, &state.detector);
     match name {
+        "clean" => match arguments.get("path").and_then(Value::as_str) {
+            Some(path) => clean(path, state),
+            None => failed("clean needs a `path` argument naming the file to read"),
+        },
         "map_list" => map_list(&state.vault),
         // `restore` lands here deliberately. See `descriptors`.
         other => failed(&format!(
             "there is no tool named {other:?}; this server offers clean and map_list"
         )),
     }
+}
+
+/// Reads a file and returns its cleaned text, one content block per part.
+///
+/// A workbook yields one part per sheet, so a heading keeps them apart for the
+/// clients that flatten the content array into one string.
+fn clean(path: &str, state: &mut State<'_>) -> Value {
+    let path = Path::new(path);
+
+    let parts = match convert::read(path, &state.config.ocr_languages) {
+        Ok(conversion) => conversion.into_parts(),
+        Err(error) => {
+            crate::note!("oboro mcp: reading {} failed: {error:#}", path.display());
+            return failed("the file could not be read; the reason is in the server's log");
+        }
+    };
+
+    // Built here rather than at startup, and rebuilt after a failure rather
+    // than cached as a poison value.
+    if state.detector.is_none() {
+        match Detector::new(state.config) {
+            Ok(detector) => state.detector = Some(detector),
+            Err(error) => {
+                crate::note!("oboro mcp: building the detector failed: {error:#}");
+                return failed(
+                    "the detection stack could not be built, so nothing was cleaned; \
+                     the reason is in the server's log",
+                );
+            }
+        }
+    }
+    let detector = state
+        .detector
+        .as_ref()
+        .expect("the detector was just built");
+
+    let mut blocks = Vec::with_capacity(parts.len());
+    for (sheet, text) in parts {
+        let heading = match sheet {
+            Some((_, name)) if state.config.redact_filenames => {
+                match pipeline::clean(&name, detector, &mut state.vault) {
+                    Ok(report) => Some(report.text),
+                    Err(error) => {
+                        crate::note!("oboro mcp: cleaning a sheet name failed: {error:#}");
+                        return failed(
+                            "the file could not be cleaned; the reason is in the server's log",
+                        );
+                    }
+                }
+            }
+            Some((_, name)) => Some(name),
+            None => None,
+        };
+        match pipeline::clean(&text, detector, &mut state.vault) {
+            Ok(report) => blocks.push(match heading {
+                Some(heading) => format!("## {heading}\n\n{}", report.text),
+                None => report.text,
+            }),
+            Err(error) => {
+                crate::note!("oboro mcp: cleaning {} failed: {error:#}", path.display());
+                return failed("the file could not be cleaned; the reason is in the server's log");
+            }
+        }
+    }
+    text_result(blocks)
 }
 
 /// Lists the placeholders the vault has issued.
