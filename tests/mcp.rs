@@ -30,6 +30,33 @@ fn session(workspace: &Workspace, messages: &[&str]) -> Vec<serde_json::Value> {
         .collect()
 }
 
+/// Runs a session with extra arguments after `mcp`.
+///
+/// `--config` is a flag on the `mcp` subcommand itself, matching `clean`'s
+/// `--config`, rather than a global one, so it must follow `mcp` on the
+/// command line rather than precede it.
+fn session_with(workspace: &Workspace, args: &[&str], messages: &[&str]) -> Vec<serde_json::Value> {
+    let mut command = workspace.command();
+    command.arg("mcp");
+    for arg in args {
+        command.arg(arg);
+    }
+    let output = command
+        .write_stdin(format!("{}\n", messages.join("\n")))
+        .output()
+        .expect("running oboro mcp");
+    assert!(
+        output.status.success(),
+        "the server failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout)
+        .expect("output must be UTF-8")
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("each line is one JSON message"))
+        .collect()
+}
+
 /// A `tools/call` message for `name` with `arguments`.
 fn call(name: &str, arguments: &str) -> String {
     format!(
@@ -462,5 +489,44 @@ fn a_placeholder_issued_by_clean_is_listed_by_map_list() {
     assert!(
         !listing.contains("06 12 34 56 78"),
         "the value reached the model:\n{listing}"
+    );
+}
+
+#[test]
+fn a_named_configuration_is_honoured_and_its_absence_is_not_silent() {
+    let workspace = Workspace::new();
+    // Written into `home()`, not `path()`: the command runs with `path()` as
+    // its working directory, and `discover_from_cwd` walks upward from there,
+    // so a config placed in `path()` would be found with or without
+    // `--config` and the second half of this test would prove nothing.
+    let config = workspace.home().join("oboro.toml");
+    // An array of tables, not a list of strings. See `testdata/oboro.toml`.
+    std::fs::write(
+        &config,
+        "[[denylist]]\nterm = \"Globex\"\nkind = \"company\"\n",
+    )
+    .expect("writing the configuration");
+    let file = workspace.path().join("note.txt");
+    std::fs::write(&file, "The client is Globex.").expect("writing the note");
+    let message = call("clean", &format!(r#"{{"path":"{}"}}"#, file.display()));
+
+    let with = session_with(
+        &workspace,
+        &["--config", config.to_str().expect("a UTF-8 path")],
+        &[&message],
+    );
+    assert!(
+        !text_of(&with[0]).contains("Globex"),
+        "the denylisted term survived --config:\n{}",
+        text_of(&with[0])
+    );
+
+    // The same server without it finds no configuration, because the working
+    // directory an MCP client chooses is not the user's project. This is the
+    // regression --config exists to prevent, and it is silent without a test.
+    let without = session(&workspace, &[&message]);
+    assert!(
+        text_of(&without[0]).contains("Globex"),
+        "this test no longer proves anything: the term was redacted without --config"
     );
 }
