@@ -80,7 +80,7 @@ fn index_of(name: &str) -> u32 {
         .unwrap_or(0)
 }
 
-/// Reads every slide, note and comment in reading order.
+/// Reads every slide and note in reading order.
 ///
 /// # Errors
 ///
