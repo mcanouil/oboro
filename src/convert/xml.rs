@@ -44,23 +44,50 @@ pub(super) fn named_entity(name: &[u8]) -> Result<&'static str> {
     }
 }
 
+/// The most a single archive part may decompress to.
+///
+/// These parts are read as the archive is opened, before any of the size
+/// checks that run once a document is assembled into text apply. Deflate
+/// reaches roughly 1000:1 on a repeated byte, and a run of `A` is valid
+/// UTF-8, so a small, malicious `.docx`, `.pptx` or `.odt` could otherwise
+/// inflate one part to gigabytes before this code has even started parsing
+/// it, and `odt.rs` and `pptx.rs` then accumulate every part into one more
+/// string on top of that. A single XML part is much smaller than a whole
+/// document, so this sits well under the PDF reader's 256 MiB ceiling on a
+/// whole decompressed cross-reference stream; 64 MiB is comfortably past the
+/// largest part a real document has been seen to carry.
+pub(super) const MAX_PART_BYTES: usize = 64 * 1024 * 1024;
+
 /// Reads one archive member into a string.
 ///
 /// The part name comes from the archive, so it is the document's to choose and
 /// is bounded by [`super::quoted`] before it reaches a message.
+///
+/// The read is capped at [`MAX_PART_BYTES`] plus one byte: `take` alone would
+/// silently truncate an oversized part and hand back half a document, which
+/// is exactly what this reader must never do, so the extra byte is checked
+/// and the part refused by name rather than read short.
 pub(super) fn read_part<R: std::io::Read + std::io::Seek>(
     archive: &mut zip::ZipArchive<R>,
     part: &str,
     document: &Path,
 ) -> Result<String> {
     let named = super::quoted(part);
-    let mut xml = String::new();
+    let mut bytes = Vec::new();
     archive
         .by_name(part)
         .with_context(|| format!("opening {named} of {}", document.display()))?
-        .read_to_string(&mut xml)
+        .take(MAX_PART_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)
         .with_context(|| format!("reading {named} of {}", document.display()))?;
-    Ok(xml)
+    if bytes.len() > MAX_PART_BYTES {
+        bail!(
+            "{named} of {} decompresses past {MAX_PART_BYTES} bytes; refusing to read it",
+            document.display()
+        );
+    }
+    String::from_utf8(bytes)
+        .with_context(|| format!("{named} of {} is not valid UTF-8", document.display()))
 }
 
 /// Pulls the text runs out of an OOXML part.
@@ -152,6 +179,38 @@ mod tests {
         assert!(
             !text.contains("750020612345678"),
             "a break with run properties must not merge its neighbours"
+        );
+    }
+
+    /// A part that decompresses past the ceiling is refused by name rather
+    /// than read into an unbounded string. `deflate` reaches roughly 1000:1
+    /// on repeated bytes, and a run of `A` is valid UTF-8, so an innocuous
+    /// looking archive could otherwise inflate one part to gigabytes before
+    /// this code even starts parsing it.
+    #[test]
+    fn a_part_past_the_decompression_ceiling_is_refused_by_name() {
+        use std::io::Write as _;
+
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let path = dir.path().join("bomb.odt");
+        let file = std::fs::File::create(&path).expect("creating");
+        let mut writer = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+        writer
+            .start_file("content.xml", options)
+            .expect("starting entry");
+        let oversized = vec![b'A'; MAX_PART_BYTES + 1];
+        writer.write_all(&oversized).expect("writing entry");
+        writer.finish().expect("finishing archive");
+
+        let file = std::fs::File::open(&path).expect("opening");
+        let mut archive = zip::ZipArchive::new(file).expect("reading archive");
+        let error =
+            read_part(&mut archive, "content.xml", &path).expect_err("must refuse the part");
+        assert!(
+            format!("{error:#}").contains("content.xml"),
+            "the error must name the offending part"
         );
     }
 }
