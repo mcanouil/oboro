@@ -82,6 +82,23 @@ fn handle(line: &str) -> Option<String> {
     let id = message.get("id")?;
 
     let reply = match method {
+        "initialize" => match message.get("params") {
+            Some(Value::Object(params)) => {
+                let requested = params.get("protocolVersion").and_then(Value::as_str);
+                success(
+                    id,
+                    &json!({
+                        "protocolVersion": negotiated(requested),
+                        "capabilities": {"tools": {}},
+                        "serverInfo": {
+                            "name": "oboro",
+                            "version": env!("CARGO_PKG_VERSION"),
+                        },
+                    }),
+                )
+            }
+            _ => error(Some(id), -32602, "initialize needs a params object"),
+        },
         "ping" => success(id, &json!({})),
         _ => error(Some(id), -32601, &format!("unknown method {method:?}")),
     };
@@ -105,6 +122,31 @@ fn error(id: Option<&Value>, code: i64, message: &str) -> Value {
         reply["id"] = id.clone();
     }
     reply
+}
+
+/// The revision this server implements.
+///
+/// Not `2026-07-28`, which removes the `initialize` handshake and `ping` and
+/// requires a `server/discover` method: a server built like this one does not
+/// implement it, and saying otherwise would leave the client expecting a
+/// stateless server.
+const LATEST: &str = "2025-11-25";
+
+/// The revisions this server answers to as themselves.
+///
+/// The floor is `2025-06-18` rather than `2024-11-05` because `2025-03-26` and
+/// earlier permit JSON-RPC batching, which this server refuses.
+const SUPPORTED: [&str; 2] = ["2025-06-18", "2025-11-25"];
+
+/// The version to answer an `initialize` asking for `requested`.
+///
+/// The rule of record: "Otherwise, the server MUST respond with another
+/// protocol version it supports. This SHOULD be the latest version supported
+/// by the server."
+fn negotiated(requested: Option<&str>) -> &'static str {
+    requested
+        .and_then(|asked| SUPPORTED.iter().find(|known| **known == asked).copied())
+        .unwrap_or(LATEST)
 }
 
 /// Renders a reply as one line.
@@ -184,5 +226,60 @@ mod tests {
     fn a_reply_never_contains_a_newline() {
         let reply = handle(r#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#).expect("a reply");
         assert!(!reply.contains('\n'), "framing would break: {reply}");
+    }
+
+    #[test]
+    fn the_latest_supported_version_is_offered_by_default() {
+        assert_eq!(negotiated(None), "2025-11-25");
+    }
+
+    #[test]
+    fn a_supported_version_is_echoed() {
+        assert_eq!(negotiated(Some("2025-06-18")), "2025-06-18");
+        assert_eq!(negotiated(Some("2025-11-25")), "2025-11-25");
+    }
+
+    #[test]
+    fn a_newer_version_is_answered_with_the_one_this_server_implements() {
+        // 2026-07-28 removes the handshake and `ping` and requires
+        // `server/discover`, so echoing it would claim support that does not exist.
+        assert_eq!(negotiated(Some("2026-07-28")), "2025-11-25");
+    }
+
+    #[test]
+    fn a_version_below_the_floor_is_answered_with_the_latest() {
+        // The floor is 2025-06-18 because 2025-03-26 permits batching.
+        assert_eq!(negotiated(Some("2025-03-26")), "2025-11-25");
+        assert_eq!(negotiated(Some("2024-11-05")), "2025-11-25");
+    }
+
+    #[test]
+    fn initialize_advertises_tools_and_names_the_server() {
+        let reply =
+            handle(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}"#)
+                .expect("a reply");
+        let value: Value = serde_json::from_str(&reply).expect("valid JSON");
+        assert_eq!(value["result"]["protocolVersion"], "2025-11-25");
+        assert!(value["result"]["capabilities"]["tools"].is_object());
+        assert_eq!(value["result"]["serverInfo"]["name"], "oboro");
+        assert_eq!(
+            value["result"]["serverInfo"]["version"],
+            env!("CARGO_PKG_VERSION")
+        );
+    }
+
+    #[test]
+    fn initialize_without_params_is_an_invalid_params_error() {
+        let reply = handle(r#"{"jsonrpc":"2.0","id":1,"method":"initialize"}"#).expect("a reply");
+        let value: Value = serde_json::from_str(&reply).expect("valid JSON");
+        assert_eq!(value["error"]["code"], -32602);
+    }
+
+    #[test]
+    fn ping_takes_no_params_and_does_not_demand_them() {
+        let reply = handle(r#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#).expect("a reply");
+        let value: Value = serde_json::from_str(&reply).expect("valid JSON");
+        assert!(value["result"].is_object());
+        assert!(value.get("error").is_none());
     }
 }
