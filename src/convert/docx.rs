@@ -5,12 +5,9 @@
 //! a document model: less code, no heavyweight dependency, and nothing to go
 //! wrong in the parts that are not text.
 
-use std::io::Read;
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
-use quick_xml::Reader;
-use quick_xml::events::Event;
 
 /// The archive member holding the document body.
 const BODY: &str = "word/document.xml";
@@ -30,17 +27,9 @@ pub fn to_text(path: &Path) -> Result<String> {
 
     let mut text = String::new();
     for part in parts {
-        let mut xml = String::new();
-        // The part name comes from the archive, so it is the document's to
-        // choose and is bounded before it reaches a message.
-        let named = super::quoted(&part);
-        archive
-            .by_name(&part)
-            .with_context(|| format!("opening {named} of {}", path.display()))?
-            .read_to_string(&mut xml)
-            .with_context(|| format!("reading {named} of {}", path.display()))?;
-        let extracted =
-            extract(&xml).with_context(|| format!("parsing {named} of {}", path.display()))?;
+        let xml = super::xml::read_part(&mut archive, &part, path)?;
+        let extracted = super::xml::runs(&xml, &[b"t"])
+            .with_context(|| format!("parsing {} of {}", super::quoted(&part), path.display()))?;
         text.push_str(&extracted);
     }
 
@@ -97,79 +86,6 @@ fn text_parts<R: std::io::Read + std::io::Seek>(archive: &zip::ZipArchive<R>) ->
     headers.into_iter().chain(body).chain(rest).collect()
 }
 
-/// Pulls the text runs out of a `document.xml` body.
-///
-/// Paragraphs and line breaks become newlines and tabs become tabs, so the
-/// layout the detectors see resembles the document a reader sees. Without
-/// that, adjacent paragraphs would run together and invent entities that
-/// span a boundary.
-fn extract(xml: &str) -> Result<String> {
-    let mut reader = Reader::from_str(xml);
-    let mut text = String::new();
-    let mut in_run = false;
-
-    loop {
-        match reader.read_event()? {
-            Event::Start(tag) => match local_name(tag.name().as_ref()) {
-                b"t" => in_run = true,
-                b"tab" => text.push('\t'),
-                _ => {}
-            },
-            Event::Empty(tag) => match local_name(tag.name().as_ref()) {
-                b"br" | b"cr" => text.push('\n'),
-                b"tab" => text.push('\t'),
-                _ => {}
-            },
-            Event::End(tag) => match local_name(tag.name().as_ref()) {
-                b"t" => in_run = false,
-                b"p" => text.push('\n'),
-                _ => {}
-            },
-            Event::Text(chunk) if in_run => {
-                text.push_str(&chunk.decode()?);
-            }
-            // Entity references arrive as their own events, so ignoring them
-            // would quietly drop every accent: "Société" would reach the
-            // detectors as "Socit" and no longer match a denylisted name.
-            Event::GeneralRef(reference) if in_run => match reference.resolve_char_ref()? {
-                Some(character) => text.push(character),
-                None => text.push_str(named_entity(reference.as_ref())?),
-            },
-            Event::Eof => break,
-            _ => {}
-        }
-    }
-
-    Ok(text)
-}
-
-/// Expands the five entities XML predefines.
-///
-/// Anything else is a document-defined entity this reader does not carry a
-/// declaration for; failing is better than dropping characters from a
-/// document the user is about to share.
-fn named_entity(name: &[u8]) -> Result<&'static str> {
-    match name {
-        b"amp" => Ok("&"),
-        b"lt" => Ok("<"),
-        b"gt" => Ok(">"),
-        b"quot" => Ok("\""),
-        b"apos" => Ok("'"),
-        other => bail!(
-            "the document uses an entity '&{};' this reader cannot expand",
-            super::quoted(&String::from_utf8_lossy(other))
-        ),
-    }
-}
-
-/// Strips the namespace prefix, so `w:t` and a bare `t` both match.
-fn local_name(name: &[u8]) -> &[u8] {
-    match name.iter().position(|byte| *byte == b':') {
-        Some(colon) => &name[colon + 1..],
-        None => name,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -185,7 +101,10 @@ mod tests {
     #[test]
     fn joins_runs_within_a_paragraph() {
         let xml = body("<w:p><w:r><w:t>Jean </w:t></w:r><w:r><w:t>Dupont</w:t></w:r></w:p>");
-        assert_eq!(extract(&xml).expect("parsing"), "Jean Dupont\n");
+        assert_eq!(
+            super::super::xml::runs(&xml, &[b"t"]).expect("parsing"),
+            "Jean Dupont\n"
+        );
     }
 
     #[test]
@@ -193,7 +112,7 @@ mod tests {
         let xml = body(
             "<w:p><w:r><w:t>0612345678</w:t></w:r></w:p><w:p><w:r><w:t>9876</w:t></w:r></w:p>",
         );
-        let text = extract(&xml).expect("parsing");
+        let text = super::super::xml::runs(&xml, &[b"t"]).expect("parsing");
         assert_eq!(text, "0612345678\n9876\n");
         assert!(
             !text.contains("06123456789876"),
@@ -204,7 +123,10 @@ mod tests {
     #[test]
     fn keeps_breaks_and_tabs() {
         let xml = body("<w:p><w:r><w:t>a</w:t><w:br/><w:t>b</w:t><w:tab/><w:t>c</w:t></w:r></w:p>");
-        assert_eq!(extract(&xml).expect("parsing"), "a\nb\tc\n");
+        assert_eq!(
+            super::super::xml::runs(&xml, &[b"t"]).expect("parsing"),
+            "a\nb\tc\n"
+        );
     }
 
     #[test]
@@ -212,13 +134,19 @@ mod tests {
         let xml = body(
             "<w:p><w:pPr><w:pStyle w:val=\"Heading1\"/></w:pPr><w:r><w:t>Title</w:t></w:r></w:p>",
         );
-        assert_eq!(extract(&xml).expect("parsing"), "Title\n");
+        assert_eq!(
+            super::super::xml::runs(&xml, &[b"t"]).expect("parsing"),
+            "Title\n"
+        );
     }
 
     #[test]
     fn decodes_entities_and_accents() {
         let xml = body("<w:p><w:r><w:t>Soci&#233;t&#233; &amp; Fils</w:t></w:r></w:p>");
-        assert_eq!(extract(&xml).expect("parsing"), "Société & Fils\n");
+        assert_eq!(
+            super::super::xml::runs(&xml, &[b"t"]).expect("parsing"),
+            "Société & Fils\n"
+        );
     }
 
     /// A letterhead lives in a header part. Reading only the body would
@@ -246,14 +174,15 @@ mod tests {
 
     #[test]
     fn the_five_predefined_entities_expand() {
-        assert_eq!(named_entity(b"amp").expect("amp"), "&");
-        assert_eq!(named_entity(b"lt").expect("lt"), "<");
-        assert_eq!(named_entity(b"apos").expect("apos"), "'");
+        assert_eq!(super::super::xml::named_entity(b"amp").expect("amp"), "&");
+        assert_eq!(super::super::xml::named_entity(b"lt").expect("lt"), "<");
+        assert_eq!(super::super::xml::named_entity(b"apos").expect("apos"), "'");
     }
 
     #[test]
     fn an_unknown_entity_fails_rather_than_dropping_characters() {
-        let error = named_entity(b"nbsp").expect_err("an undeclared entity must fail");
+        let error =
+            super::super::xml::named_entity(b"nbsp").expect_err("an undeclared entity must fail");
         assert!(
             format!("{error:#}").contains("nbsp"),
             "the error must name the offending entity"
@@ -266,7 +195,8 @@ mod tests {
     fn a_hostile_entity_name_is_not_echoed_wholesale() {
         let mut hostile = b"\x1b[2J\n".to_vec();
         hostile.extend(std::iter::repeat_n(b'A', 10_000));
-        let error = named_entity(&hostile).expect_err("an undeclared entity must fail");
+        let error =
+            super::super::xml::named_entity(&hostile).expect_err("an undeclared entity must fail");
         let rendered = format!("{error:#}");
 
         assert!(

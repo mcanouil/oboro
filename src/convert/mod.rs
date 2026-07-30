@@ -8,6 +8,7 @@
 mod docx;
 mod pdf;
 mod xlsx;
+mod xml;
 
 #[cfg(feature = "ocr")]
 mod ocr;
