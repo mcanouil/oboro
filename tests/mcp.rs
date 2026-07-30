@@ -235,8 +235,18 @@ fn a_missing_path_is_a_tool_error_and_the_loop_survives_it() {
     );
 }
 
+/// The first call names a file that does not exist, so `clean` returns before
+/// it ever reaches the detector. This proves a read failure leaves the session
+/// able to serve the next call, and nothing more.
+///
+/// The neighbouring claim, that a failed `Detector::new` is retried rather than
+/// cached as a poison value, is verified by inspection rather than by test: the
+/// error arm in `clean` returns without assigning `state.detector`, which
+/// therefore stays `None` for the next call. It cannot be tested here because
+/// `Detector::new` is fallible only under `--features ner` with the recognition
+/// model installed, and no CI job has that model.
 #[test]
-fn a_failed_call_does_not_poison_the_server() {
+fn a_read_failure_does_not_end_the_session() {
     let workspace = Workspace::new();
     let missing = workspace.path().join("nowhere.txt");
     let file = workspace.path().join("note.txt");
@@ -253,7 +263,7 @@ fn a_failed_call_does_not_poison_the_server() {
     assert_eq!(replies[0]["result"]["isError"], true);
     assert_eq!(
         replies[1]["result"]["isError"], false,
-        "a failed call must not cache a poison detector: {:?}",
+        "a failed read must not stop the next call from being served: {:?}",
         replies[1]
     );
 }

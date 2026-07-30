@@ -228,6 +228,10 @@ fn clean(path: &str, state: &mut State<'_>) -> Value {
     if state.detector.is_none() {
         match Detector::new(state.config) {
             Ok(detector) => state.detector = Some(detector),
+            // Returning without assigning `state.detector` is the whole of the
+            // retry: it stays `None`, so the next call builds again rather than
+            // inheriting a poisoned value. Caching the failure here would
+            // answer every later call with this message.
             Err(error) => {
                 crate::note!("oboro mcp: building the detector failed: {error:#}");
                 return failed(
