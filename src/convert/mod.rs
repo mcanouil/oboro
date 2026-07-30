@@ -6,6 +6,7 @@
 //! sanitised without ever having been read.
 
 mod docx;
+mod odt;
 mod pdf;
 mod pptx;
 mod xlsx;
@@ -28,6 +29,7 @@ pub enum Format {
     /// Tab-separated values, read as-is; the output keeps the extension.
     Tsv,
     Docx,
+    Odt,
     Pptx,
     Xlsx,
     Pdf,
@@ -47,6 +49,7 @@ const FORMATS: &[(&str, Format)] = &[
     ("csv", Format::Csv),
     ("tsv", Format::Tsv),
     ("docx", Format::Docx),
+    ("odt", Format::Odt),
     ("pptx", Format::Pptx),
     ("xlsx", Format::Xlsx),
     ("xlsm", Format::Xlsx),
@@ -200,6 +203,7 @@ pub fn read(path: &Path, ocr_languages: &[String]) -> Result<Conversion> {
         Format::Text => read_utf8(path).map(|text| Conversion::Document(tidy(&text))),
         Format::Csv | Format::Tsv => read_utf8(path).map(Conversion::Document),
         Format::Docx => docx::to_text(path).map(Conversion::Document),
+        Format::Odt => odt::to_text(path).map(Conversion::Document),
         Format::Pptx => pptx::to_text(path).map(Conversion::Document),
         Format::Xlsx => xlsx::to_sheets(path).map(Conversion::Sheets),
         Format::Pdf => pdf::to_text(path, ocr_languages).map(Conversion::Document),

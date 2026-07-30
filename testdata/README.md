@@ -16,6 +16,7 @@ passes ISO 13616 mod-97, and the card number is the well-known test value.
 | `clients.tsv` | Tab-separated values, passed through as text |
 | `invoice.pdf` | PDF with embedded text |
 | `slides.pptx` | PowerPoint extraction: slides, speaker notes and a table |
+| `contract.odt` | OpenDocument extraction, and every shape that leaked from it |
 | `letterhead.docx` | Text living in header and footer parts, not the body |
 | `sparse.pdf` | A short but genuine document, which must still be read |
 | `scanned.pdf` | A PDF with a page but no text, which must be refused |
@@ -50,6 +51,26 @@ own, separate from `Dupont`.
 
 It carries no `ppt/media` and its author field is invented, so nothing has to
 be scrubbed after generation.
+
+`contract.odt` is written by `build-contract-odt.py`, in this directory, since
+no OpenDocument tooling is available here. Regenerate it with:
+
+```sh
+python3 testdata/build-contract-odt.py
+```
+
+Each part is written as a single line, the way a real producer writes one, so
+the reader's handling of a producer's indentation is not what the fixture
+happens to exercise. Its content is chosen from the shapes that actually leaked
+past three earlier versions of the reader, each of which had closed the shape in
+front of it: an annotation carrying `dc:creator`, `dc:date` and
+`meta:date-string` as bare character data; `svg:title` and `svg:desc` on a
+`draw:frame`, which is LibreOffice's alt text on an image; a footnote whose
+marker sits directly inside `text:note`; entity and character references inside
+that bare character data, which used to shatter a name across lines; and
+base64 under `office:binary-data`, which must not reach the detectors at all.
+A regeneration that dropped any of those would still read correctly and would
+silently drop the coverage that matters most.
 
 The three `scan` fixtures are the exception: they carry a real image of
 rendered text, which is the only way to exercise recognition end to end.

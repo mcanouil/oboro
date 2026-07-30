@@ -213,6 +213,7 @@ a name in different subfolders do not collide.
 | `.csv`, `.tsv`         | Read byte for byte; the output keeps the tabular extension        |
 | `.docx`                | Text runs from the body, headers, footers, footnotes and comments |
 | `.pptx`                | Text from slides, speaker notes and comments                      |
+| `.odt`                 | Body, headers and footers, annotations, footnotes, image alt text |
 | `.xlsx`, `.xlsm`       | One TSV file per sheet, named `book.<sheet>.clean.tsv`            |
 | `.pdf`                 | Embedded text; a scan needs a build compiled `--features ocr`     |
 | `.png`, `.jpg`, `.tif` | Tesseract, with a build compiled `--features ocr`                 |
@@ -359,7 +360,7 @@ Read them before trusting the output with anything that matters.
   them.
 - Recognition is tested on rendered text, not on real photographs. Treat text
   recovered from an image as less reliable than text read directly.
-- Older `.doc`, `.xls` and `.ppt` are not read at all, nor are `.odt`, `.ods` and `.odp`.
+- Older `.doc`, `.xls` and `.ppt` are not read at all, nor are `.ods` and `.odp`.
 - Detection favours redacting too much over too little. Use the allowlist
   when it goes too far.
 - **Read the sanitised output before you share it.** No tool of this kind
