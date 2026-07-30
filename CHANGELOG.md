@@ -6,7 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 
-- feat: Read `.odt` documents, taking the body from `content.xml` and the headers and footers `ODF` keeps in `styles.xml`, along with annotations, footnotes and the alt text set on an image. Whether a piece of text belongs to a paragraph is decided by namespace and position rather than by naming the elements that hold metadata: text is running text only when the element holding it is in `ODF`'s text namespace and a paragraph is the innermost thing open around it, and everything else is placed on a line of its own. That way round, an element nobody thought of costs a line break instead of letting a name concatenate onto the word beside it and escape detection. An image's bytes and a document's macros are skipped rather than run through the detectors.
+- feat: Read `.odt` documents, taking the body from `content.xml` and the headers and footers `ODF` keeps in `styles.xml`, along with annotations, footnotes and the alt text set on an image. Whether a piece of text belongs to a paragraph is decided by namespace and position rather than by naming the elements that hold metadata: text is running text only when the element holding it is in `ODF`'s text namespace and a paragraph is the innermost thing open around it, and everything else is placed on a line of its own. That way round, an element nobody thought of costs a line break instead of letting a name concatenate onto the word beside it and escape detection. An image's bytes and a document's macros are skipped rather than run through the detectors. (#88)
 
 ## 0.5.0 (2026-07-30)
 
