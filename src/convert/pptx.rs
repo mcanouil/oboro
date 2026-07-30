@@ -14,7 +14,7 @@
 //! Nothing calls [`to_text`] yet: the dispatch that reaches it belongs to a
 //! later step of the pptx/odt reader work, which is why the module is
 //! otherwise complete but unreachable. Each item below carries its own
-//! `#[allow(dead_code)]` for that reason; remove all six once a later step
+//! `#[allow(dead_code)]` for that reason; remove all eight once a later step
 //! adds the `Format::Pptx` dispatch arm that calls [`to_text`].
 
 use std::path::Path;
@@ -27,6 +27,21 @@ const SLIDES: &str = "ppt/slides/";
 /// Speaker notes, read because they are text the author wrote.
 #[allow(dead_code)]
 const NOTES: &str = "ppt/notesSlides/";
+/// Comments, read because they are author-written and carry personal data,
+/// the same reason `docx.rs` reads `word/comments.xml`.
+///
+/// Matched by directory rather than by filename prefix: a real deck names the
+/// part `modernComment_100_0.xml`, which no `comment*` prefix matches.
+#[allow(dead_code)]
+const COMMENTS: &str = "ppt/comments/";
+/// The local elements holding comment text.
+///
+/// The modern format uses `DrawingML` runs, so `t` covers it. The legacy format
+/// puts its text directly in `p:text`, which would otherwise read as empty.
+/// Scoped to comments rather than added to the shared reader, so no element
+/// named `text` becomes text-bearing across every part of every format.
+#[allow(dead_code)]
+const COMMENT_TEXT: &[&[u8]] = &[b"t", b"text"];
 
 /// The parts that carry readable text, in reading order.
 ///
@@ -48,6 +63,7 @@ fn selected<S: AsRef<str>>(names: &[S]) -> Vec<String> {
 
     let mut parts = pick(SLIDES);
     parts.extend(pick(NOTES));
+    parts.extend(pick(COMMENTS));
     parts
 }
 
@@ -80,7 +96,7 @@ fn index_of(name: &str) -> u32 {
         .unwrap_or(0)
 }
 
-/// Reads every slide and note in reading order.
+/// Reads every slide, speaker note and comment in reading order.
 ///
 /// # Errors
 ///
@@ -104,7 +120,12 @@ pub fn to_text(path: &Path) -> Result<String> {
     let mut text = String::new();
     for part in parts {
         let xml = super::xml::read_part(&mut archive, &part, path)?;
-        let extracted = super::xml::runs(&xml, &[b"t"])
+        let elements: &[&[u8]] = if part.starts_with(COMMENTS) {
+            COMMENT_TEXT
+        } else {
+            &[b"t"]
+        };
+        let extracted = super::xml::runs(&xml, elements)
             .with_context(|| format!("parsing {} of {}", super::quoted(&part), path.display()))?;
         text.push_str(&extracted);
     }
@@ -169,5 +190,57 @@ mod tests {
         std::fs::write(&path, "this is not a zip").expect("writing");
         let error = to_text(&path).expect_err("must reject");
         assert!(format!("{error:#}").contains("readable .pptx"));
+    }
+
+    /// A real commented deck names the part `modernComment_100_0.xml`, which a
+    /// `comment*.xml` glob does not match, so matching on the prefix would
+    /// read no comments at all while appearing to work.
+    #[test]
+    fn a_modern_comment_part_is_selected_despite_its_name() {
+        let names = [
+            "ppt/slides/slide1.xml",
+            "ppt/comments/modernComment_100_0.xml",
+        ];
+        assert_eq!(
+            selected(&names),
+            vec![
+                "ppt/slides/slide1.xml",
+                "ppt/comments/modernComment_100_0.xml"
+            ]
+        );
+    }
+
+    /// The modern format wraps ordinary `DrawingML` in `p188:txBody`, so the
+    /// shared run reader handles it with no special rule.
+    #[test]
+    fn modern_comment_text_is_extracted() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p188:cmLst xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p188="http://schemas.microsoft.com/office/powerpoint/2018/8/main"><p188:cm id="{325EE183}" authorId="{FCDEFDF0}" created="2026-07-30T08:15:29.717"><p188:pos x="9028020" y="381907"/><p188:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="en-FR"/><a:t>jean.dupont@acme-consulting.example</a:t></a:r></a:p></p188:txBody></p188:cm></p188:cmLst>"#;
+        let text = super::super::xml::runs(xml, COMMENT_TEXT).expect("parsing");
+        assert!(
+            text.contains("jean.dupont@acme-consulting.example"),
+            "comment text dropped:\n{text}"
+        );
+    }
+
+    /// The legacy format puts comment text directly in `p:text` rather than in
+    /// a run, so a reader keyed only on `t` would read the part as empty.
+    #[test]
+    fn legacy_comment_text_is_extracted() {
+        let xml = r#"<?xml version="1.0"?>
+<p:cmLst xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:cm authorId="1" idx="1"><p:pos x="1" y="1"/><p:text>06 12 34 56 78</p:text></p:cm></p:cmLst>"#;
+        let text = super::super::xml::runs(xml, COMMENT_TEXT).expect("parsing");
+        assert!(
+            text.contains("06 12 34 56 78"),
+            "legacy comment text dropped:\n{text}"
+        );
+    }
+
+    /// `ppt/authors.xml` holds the commenter's name, but in attributes rather
+    /// than character data, so it is never extracted and cannot reach output.
+    #[test]
+    fn the_author_list_is_not_read() {
+        let names = ["ppt/slides/slide1.xml", "ppt/authors.xml"];
+        assert_eq!(selected(&names), vec!["ppt/slides/slide1.xml"]);
     }
 }
