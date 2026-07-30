@@ -99,7 +99,8 @@ This is the one place where output can be short of the input without an error, s
 
 ## Formats it does not read
 
-Older `.doc`, `.xls` and `.ppt`, along with `.pptx`, are not read at all.
+Older `.doc`, `.xls` and `.ppt` are not read at all, nor are the OpenDocument
+spreadsheet and presentation formats, `.ods` and `.odp`.
 Neither is anything embedded inside a document: a spreadsheet pasted into a Word file is not reached.
 
 ## Recognition accuracy on real scans is not guaranteed
