@@ -7,6 +7,7 @@
 
 mod docx;
 mod pdf;
+mod pptx;
 mod xlsx;
 mod xml;
 
