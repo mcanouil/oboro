@@ -32,6 +32,16 @@ const COMMENTS: &str = "ppt/comments/";
 /// Scoped to comments rather than added to the shared reader, so no element
 /// named `text` becomes text-bearing across every part of every format.
 const COMMENT_TEXT: &[&[u8]] = &[b"t", b"text"];
+/// The local elements whose close ends a line, for a comments part.
+///
+/// The legacy format puts an entire comment's text directly in `p:text`, with
+/// no paragraph wrapping it at all, so ending a line there too is what keeps
+/// two consecutive comments in the same part apart; without it they run
+/// together with nothing to tell where one ends and the next begins. `p`
+/// still ends a line here too, for the modern format's `DrawingML`
+/// paragraphs; `text` never appears in that format, so adding it here has no
+/// effect on modern comments.
+const COMMENT_LINE_TERMINATORS: &[&[u8]] = &[b"p", b"text"];
 
 /// The parts that carry readable text, in reading order.
 ///
@@ -106,12 +116,12 @@ pub fn to_text(path: &Path) -> Result<String> {
     let mut text = String::new();
     for part in parts {
         let xml = super::xml::read_part(&mut archive, &part, path)?;
-        let elements: &[&[u8]] = if part.starts_with(COMMENTS) {
-            COMMENT_TEXT
+        let (elements, terminators): (&[&[u8]], &[&[u8]]) = if part.starts_with(COMMENTS) {
+            (COMMENT_TEXT, COMMENT_LINE_TERMINATORS)
         } else {
-            &[b"t"]
+            (&[b"t"], &[b"p"])
         };
-        let extracted = super::xml::runs(&xml, elements)
+        let extracted = super::xml::runs(&xml, elements, terminators)
             .with_context(|| format!("parsing {} of {}", super::quoted(&part), path.display()))?;
         text.push_str(&extracted);
     }
@@ -228,7 +238,8 @@ mod tests {
     fn modern_comment_text_is_extracted() {
         let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <p188:cmLst xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p188="http://schemas.microsoft.com/office/powerpoint/2018/8/main"><p188:cm id="{325EE183}" authorId="{FCDEFDF0}" created="2026-07-30T08:15:29.717"><p188:pos x="9028020" y="381907"/><p188:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="en-FR"/><a:t>jean.dupont@acme-consulting.example</a:t></a:r></a:p></p188:txBody></p188:cm></p188:cmLst>"#;
-        let text = super::super::xml::runs(xml, COMMENT_TEXT).expect("parsing");
+        let text =
+            super::super::xml::runs(xml, COMMENT_TEXT, COMMENT_LINE_TERMINATORS).expect("parsing");
         assert!(
             text.contains("jean.dupont@acme-consulting.example"),
             "comment text dropped:\n{text}"
@@ -241,10 +252,35 @@ mod tests {
     fn legacy_comment_text_is_extracted() {
         let xml = r#"<?xml version="1.0"?>
 <p:cmLst xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:cm authorId="1" idx="1"><p:pos x="1" y="1"/><p:text>06 12 34 56 78</p:text></p:cm></p:cmLst>"#;
-        let text = super::super::xml::runs(xml, COMMENT_TEXT).expect("parsing");
+        let text =
+            super::super::xml::runs(xml, COMMENT_TEXT, COMMENT_LINE_TERMINATORS).expect("parsing");
         assert!(
             text.contains("06 12 34 56 78"),
             "legacy comment text dropped:\n{text}"
+        );
+    }
+
+    /// `p:text` holds a whole legacy comment with no paragraph wrapping it, so
+    /// a `ppt/comments/comment1.xml` holding two comments must not run them
+    /// together: a phone number ending one comment and the start of the next
+    /// merging is exactly how a value reaches output undetected.
+    #[test]
+    fn two_consecutive_legacy_comments_do_not_merge() {
+        let xml = r#"<?xml version="1.0"?>
+<p:cmLst xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:cm authorId="1" idx="1"><p:pos x="1" y="1"/><p:text>06 12 34 56 78</p:text></p:cm><p:cm authorId="1" idx="2"><p:pos x="1" y="1"/><p:text>12 bis rue de la Paix</p:text></p:cm></p:cmLst>"#;
+        let text =
+            super::super::xml::runs(xml, COMMENT_TEXT, COMMENT_LINE_TERMINATORS).expect("parsing");
+        assert!(
+            text.contains("06 12 34 56 78"),
+            "the first comment was lost:\n{text}"
+        );
+        assert!(
+            text.contains("12 bis rue de la Paix"),
+            "the second comment was lost:\n{text}"
+        );
+        assert!(
+            !text.contains("06 12 34 56 7812 bis"),
+            "the two comments merged into one candidate:\n{text}"
         );
     }
 

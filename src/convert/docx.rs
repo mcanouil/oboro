@@ -28,7 +28,7 @@ pub fn to_text(path: &Path) -> Result<String> {
     let mut text = String::new();
     for part in parts {
         let xml = super::xml::read_part(&mut archive, &part, path)?;
-        let extracted = super::xml::runs(&xml, &[b"t"])
+        let extracted = super::xml::runs(&xml, &[b"t"], &[b"p"])
             .with_context(|| format!("parsing {} of {}", super::quoted(&part), path.display()))?;
         text.push_str(&extracted);
     }
@@ -102,7 +102,7 @@ mod tests {
     fn joins_runs_within_a_paragraph() {
         let xml = body("<w:p><w:r><w:t>Jean </w:t></w:r><w:r><w:t>Dupont</w:t></w:r></w:p>");
         assert_eq!(
-            super::super::xml::runs(&xml, &[b"t"]).expect("parsing"),
+            super::super::xml::runs(&xml, &[b"t"], &[b"p"]).expect("parsing"),
             "Jean Dupont\n"
         );
     }
@@ -112,7 +112,7 @@ mod tests {
         let xml = body(
             "<w:p><w:r><w:t>0612345678</w:t></w:r></w:p><w:p><w:r><w:t>9876</w:t></w:r></w:p>",
         );
-        let text = super::super::xml::runs(&xml, &[b"t"]).expect("parsing");
+        let text = super::super::xml::runs(&xml, &[b"t"], &[b"p"]).expect("parsing");
         assert_eq!(text, "0612345678\n9876\n");
         assert!(
             !text.contains("06123456789876"),
@@ -124,7 +124,7 @@ mod tests {
     fn keeps_breaks_and_tabs() {
         let xml = body("<w:p><w:r><w:t>a</w:t><w:br/><w:t>b</w:t><w:tab/><w:t>c</w:t></w:r></w:p>");
         assert_eq!(
-            super::super::xml::runs(&xml, &[b"t"]).expect("parsing"),
+            super::super::xml::runs(&xml, &[b"t"], &[b"p"]).expect("parsing"),
             "a\nb\tc\n"
         );
     }
@@ -135,7 +135,20 @@ mod tests {
             "<w:p><w:pPr><w:pStyle w:val=\"Heading1\"/></w:pPr><w:r><w:t>Title</w:t></w:r></w:p>",
         );
         assert_eq!(
-            super::super::xml::runs(&xml, &[b"t"]).expect("parsing"),
+            super::super::xml::runs(&xml, &[b"t"], &[b"p"]).expect("parsing"),
+            "Title\n"
+        );
+    }
+
+    /// A `w:tabs`/`w:tab` block inside `w:pPr` defines tab *stops*; it carries
+    /// no character data of its own, so it must not read as a leading tab.
+    #[test]
+    fn a_tab_stop_definition_is_not_read_as_a_tab_character() {
+        let xml = body(
+            "<w:p><w:pPr><w:tabs><w:tab w:val=\"left\" w:pos=\"720\"/></w:tabs></w:pPr><w:r><w:t>Title</w:t></w:r></w:p>",
+        );
+        assert_eq!(
+            super::super::xml::runs(&xml, &[b"t"], &[b"p"]).expect("parsing"),
             "Title\n"
         );
     }
@@ -144,7 +157,7 @@ mod tests {
     fn decodes_entities_and_accents() {
         let xml = body("<w:p><w:r><w:t>Soci&#233;t&#233; &amp; Fils</w:t></w:r></w:p>");
         assert_eq!(
-            super::super::xml::runs(&xml, &[b"t"]).expect("parsing"),
+            super::super::xml::runs(&xml, &[b"t"], &[b"p"]).expect("parsing"),
             "Société & Fils\n"
         );
     }

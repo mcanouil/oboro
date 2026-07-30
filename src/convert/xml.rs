@@ -103,13 +103,32 @@ pub(super) fn read_part<R: std::io::Read + std::io::Seek>(
 /// rule for every part of every format would make any element named `text`
 /// text-bearing.
 ///
+/// `line_terminators` names the local elements whose *close* ends a line.
+/// It is a separate parameter, rather than folded into `text_elements`,
+/// because the two roles do not always land on the same element: an ordinary
+/// paragraph both holds text and ends a line, but the legacy comment format's
+/// `p:text` holds an entire comment with no paragraph wrapping it at all, so
+/// closing it has to end a line too or two consecutive comments in the same
+/// part run together with nothing to tell where one ends and the next
+/// begins.
+///
 /// `br` is matched as both `Start` and `Empty`. `WordprocessingML`'s break is
 /// childless and so always self-closing, but `DrawingML`'s takes an optional
 /// `a:rPr` child, and a dropped break merges the runs either side.
-pub(super) fn runs(xml: &str, text_elements: &[&[u8]]) -> Result<String> {
+///
+/// A `tab` inside a `tabs` or `tabLst` container is not a tab in the text: it
+/// is a tab-stop *definition*, part of paragraph formatting rather than
+/// character data, and would otherwise inject a stray leading tab into the
+/// paragraph that follows.
+pub(super) fn runs(
+    xml: &str,
+    text_elements: &[&[u8]],
+    line_terminators: &[&[u8]],
+) -> Result<String> {
     let mut reader = Reader::from_str(xml);
     let mut text = String::new();
     let mut depth = 0usize;
+    let mut tab_definitions = 0usize;
 
     loop {
         match reader.read_event()? {
@@ -118,7 +137,9 @@ pub(super) fn runs(xml: &str, text_elements: &[&[u8]]) -> Result<String> {
                 let name = local_name(raw.as_ref());
                 if text_elements.contains(&name) {
                     depth += 1;
-                } else if name == b"tab" {
+                } else if name == b"tabs" || name == b"tabLst" {
+                    tab_definitions += 1;
+                } else if name == b"tab" && tab_definitions == 0 {
                     text.push('\t');
                 } else if name == b"br" || name == b"cr" {
                     text.push('\n');
@@ -126,7 +147,7 @@ pub(super) fn runs(xml: &str, text_elements: &[&[u8]]) -> Result<String> {
             }
             Event::Empty(tag) => match local_name(tag.name().as_ref()) {
                 b"br" | b"cr" => text.push('\n'),
-                b"tab" => text.push('\t'),
+                b"tab" if tab_definitions == 0 => text.push('\t'),
                 _ => {}
             },
             Event::End(tag) => {
@@ -134,11 +155,18 @@ pub(super) fn runs(xml: &str, text_elements: &[&[u8]]) -> Result<String> {
                 let name = local_name(raw.as_ref());
                 if text_elements.contains(&name) {
                     depth = depth.saturating_sub(1);
-                } else if name == b"p" {
+                }
+                if line_terminators.contains(&name) {
                     text.push('\n');
+                }
+                if name == b"tabs" || name == b"tabLst" {
+                    tab_definitions = tab_definitions.saturating_sub(1);
                 }
             }
             Event::Text(chunk) if depth > 0 => {
+                text.push_str(&chunk.decode()?);
+            }
+            Event::CData(chunk) if depth > 0 => {
                 text.push_str(&chunk.decode()?);
             }
             // Entity references arrive as their own events, so ignoring them
@@ -174,12 +202,32 @@ mod tests {
         let xml = wrap(
             "<a:p><a:r><a:t>75002</a:t></a:r><a:br><a:rPr/></a:br><a:r><a:t>0612345678</a:t></a:r></a:p>",
         );
-        let text = runs(&xml, &[b"t"]).expect("parsing");
+        let text = runs(&xml, &[b"t"], &[b"p"]).expect("parsing");
         assert_eq!(text, "75002\n0612345678\n");
         assert!(
             !text.contains("750020612345678"),
             "a break with run properties must not merge its neighbours"
         );
+    }
+
+    /// A `w:tabs`/`w:tab` block defines tab *stops* inside `w:pPr`; it carries
+    /// no character data of its own and must not inject a tab into the text.
+    #[test]
+    fn a_tab_stop_definition_is_not_read_as_a_tab_character() {
+        let xml = wrap(
+            "<a:p><a:pPr><a:tabLst><a:tab a:pos=\"720\"/></a:tabLst></a:pPr><a:r><a:t>Title</a:t></a:r></a:p>",
+        );
+        let text = runs(&xml, &[b"t"], &[b"p"]).expect("parsing");
+        assert_eq!(text, "Title\n");
+    }
+
+    /// Character data in a `CDATA` section must reach the output the same as
+    /// ordinary text, rather than being silently dropped.
+    #[test]
+    fn cdata_inside_a_run_is_kept() {
+        let xml = wrap("<a:p><a:r><a:t><![CDATA[Jean Dupont]]></a:t></a:r></a:p>");
+        let text = runs(&xml, &[b"t"], &[b"p"]).expect("parsing");
+        assert_eq!(text, "Jean Dupont\n");
     }
 
     /// A part that decompresses past the ceiling is refused by name rather
