@@ -58,7 +58,7 @@ The same value always becomes the same placeholder, so a model can still tell th
 | `.pptx` | Text from slides, speaker notes and comments. |
 | `.odt` | Text from the body, headers, footers and annotations. |
 | `.xlsx`, `.xlsm` | One TSV file per sheet, named `book.<sheet>.clean.tsv`. |
-| `.pdf` | Embedded text. Scanned PDFs are refused rather than half-read. |
+| `.pdf` | Embedded text; a scan needs a build compiled `--features ocr`. |
 | `.png`, `.jpg`, `.tif` | Tesseract, in a build compiled with `--features ocr`. |
 
 ## What it finds
