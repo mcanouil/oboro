@@ -114,8 +114,8 @@ shapes and their runs.
 
 ## Recognition accuracy on real scans is not guaranteed
 
-The tests read rendered text at a generous size, for a plain image and for both PDF codecs, and check that none of the planted values survive cleaning and that the provider name restores.
-That covers the path end to end, not the conditions a real scan arrives in, and it does not measure how much of a page was recognised.
+The tests read rendered text at a generous size, for a plain image and for both PDF codecs, and check three things: that none of the planted values survive cleaning, that two of the six rendered lines come back from recognition rather than being lost on the way in, and that the provider name restores.
+That covers the path end to end, not the conditions a real scan arrives in, and two lines out of six is a long way from measuring how much of a page was recognised.
 
 A photograph taken at an angle, a low resolution fax or a handwritten note is another matter.
 Treat text recovered from images as less reliable than text read directly, and check the output before sharing it.
