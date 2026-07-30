@@ -83,6 +83,21 @@ fn no_planted_value_survives_cleaning() {
     }
 }
 
+/// `contract.odt`'s annotation carries a `dc:creator` with no `text:p` of its
+/// own, glued onto the paragraph it anchors to unless the reader treats the
+/// annotation, and the metadata inside it, as boundaries. Left unfixed, the
+/// author's name concatenates with its neighbours, fails a whole-word
+/// denylist match and reaches the cleaned output unredacted.
+#[test]
+fn an_annotations_author_name_does_not_survive_cleaning() {
+    let workspace = Workspace::new();
+    let cleaned = workspace.clean_fixture("contract.odt");
+    assert!(
+        !cleaned.contains("Jean Dupont"),
+        "the annotation's author name reached the output:\n{cleaned}"
+    );
+}
+
 /// Piped text is held to the same standard as a file: an agent hook cleans
 /// standard input, so a value that survives that path leaks just as surely as
 /// one that survives a document.
