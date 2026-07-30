@@ -289,6 +289,14 @@ fn is_encoding_fault(error: &anyhow::Error, format: convert::Format) -> bool {
 ///
 /// A workbook yields one part per sheet, so a heading keeps them apart for the
 /// clients that flatten the content array into one string.
+///
+/// That heading is cleaned whatever `redact_filenames` says, unlike the command
+/// line, which honours the setting. The setting is documented as a filesystem
+/// concern: it decides whether a raw sheet name becomes part of an output
+/// filename on the user's own disk, where the user can see it and chose it.
+/// Here the destination is the model's context instead, and a sheet name may
+/// hold PII, so letting a flag about filenames put a raw name in front of a
+/// model would defeat the one thing this server exists to do.
 fn clean(path: &str, state: &mut State<'_>) -> Value {
     let path = Path::new(path);
 
@@ -350,18 +358,15 @@ fn clean(path: &str, state: &mut State<'_>) -> Value {
     let mut blocks = Vec::with_capacity(parts.len());
     for (sheet, text) in parts {
         let heading = match sheet {
-            Some((_, name)) if state.config.redact_filenames => {
-                match pipeline::clean(&name, detector, &mut state.vault) {
-                    Ok(report) => Some(report.text),
-                    Err(error) => {
-                        crate::note!("oboro mcp: cleaning a sheet name failed: {error:#}");
-                        return failed(
-                            "the file could not be cleaned; the reason is on the server's standard error",
-                        );
-                    }
+            Some((_, name)) => match pipeline::clean(&name, detector, &mut state.vault) {
+                Ok(report) => Some(report.text),
+                Err(error) => {
+                    crate::note!("oboro mcp: cleaning a sheet name failed: {error:#}");
+                    return failed(
+                        "the file could not be cleaned; the reason is on the server's standard error",
+                    );
                 }
-            }
-            Some((_, name)) => Some(name),
+            },
             None => None,
         };
         match pipeline::clean(&text, detector, &mut state.vault) {

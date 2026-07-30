@@ -12,22 +12,7 @@ use support::Workspace;
 /// Runs a session, writing every line in `messages` to the server and
 /// returning the replies it wrote back.
 fn session(workspace: &Workspace, messages: &[&str]) -> Vec<serde_json::Value> {
-    let output = workspace
-        .command()
-        .arg("mcp")
-        .write_stdin(format!("{}\n", messages.join("\n")))
-        .output()
-        .expect("running oboro mcp");
-    assert!(
-        output.status.success(),
-        "the server failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    String::from_utf8(output.stdout)
-        .expect("output must be UTF-8")
-        .lines()
-        .map(|line| serde_json::from_str(line).expect("each line is one JSON message"))
-        .collect()
+    session_with(workspace, &[], messages)
 }
 
 /// Runs a session with extra arguments after `mcp`.
@@ -127,20 +112,10 @@ fn map_list_reports_placeholders_without_values_or_timestamps() {
 
     let replies = session(&workspace, &[&call("map_list", "{}")]);
 
-    let listing = text_of(&replies[0]);
-    assert!(
-        listing.contains("[[PHONE_1]]"),
-        "the placeholder is missing:\n{listing}"
-    );
-    assert!(
-        !listing.contains("06 12 34 56 78"),
-        "the value reached the model:\n{listing}"
-    );
-    // `oboro map list` prints a created_at column; this deliberately does not.
-    assert!(
-        !listing.contains("20"),
-        "a timestamp reached the model:\n{listing}"
-    );
+    // `oboro map list` prints a created_at column beside each placeholder; this
+    // deliberately prints the placeholders and nothing else, so the listing is
+    // compared whole rather than searched for anything a timestamp looks like.
+    assert_eq!(text_of(&replies[0]), "[[PHONE_1]]");
 }
 
 #[test]
@@ -227,17 +202,23 @@ fn each_sheet_of_a_workbook_becomes_its_own_block() {
         .as_array()
         .expect("a content array");
     assert_eq!(blocks.len(), 2, "one block per sheet: {blocks:?}");
-    assert!(
-        blocks[0]["text"]
-            .as_str()
-            .expect("text")
-            .contains("## First")
-    );
+    let first = blocks[0]["text"].as_str().expect("text");
+    assert!(first.contains("## First"));
     assert!(
         blocks[1]["text"]
             .as_str()
             .expect("text")
             .contains("## Second")
+    );
+    // The heading is not the only thing cleaned: the cells under it are the
+    // reason the tool exists.
+    assert!(
+        !first.contains("06 12 34 56 78"),
+        "a value in the body reached the model:\n{first}"
+    );
+    assert!(
+        first.contains("[[PHONE_1]]"),
+        "the body was not cleaned:\n{first}"
     );
 }
 
@@ -325,6 +306,46 @@ fn a_sheet_named_after_a_person_is_headed_with_a_placeholder() {
     );
     assert!(
         heading.contains("## [[PHONE_1]]"),
+        "the heading should carry the placeholder:\n{heading}"
+    );
+}
+
+/// `redact_filenames` is a filesystem setting: on the command line it decides
+/// whether a raw sheet name becomes part of an output filename on the user's
+/// own disk. Over MCP the heading goes into the model's context instead, so the
+/// setting must not reach it. Without this the coupling comes back unnoticed.
+#[test]
+fn a_sheet_heading_is_cleaned_even_when_filename_redaction_is_off() {
+    let workspace = Workspace::new();
+    // Written into `home()`, not `path()`: `path()` is the command's working
+    // directory, so a configuration there is found by discovery with or without
+    // `--config` and this would prove nothing about the flag.
+    let config = workspace.home().join("oboro.toml");
+    // An array of tables, not a list of strings. See `testdata/oboro.toml`.
+    std::fs::write(
+        &config,
+        "redact_filenames = false\n\n[[denylist]]\nterm = \"Globex\"\nkind = \"company\"\n",
+    )
+    .expect("writing the configuration");
+    let book = workspace.path().join("book.xlsx");
+    support::write_xlsx(&book, &[("Globex", &[&["a value"]])]);
+
+    let replies = session_with(
+        &workspace,
+        &["--config", config.to_str().expect("a UTF-8 path")],
+        &[&call(
+            "clean",
+            &format!(r#"{{"path":"{}"}}"#, book.display()),
+        )],
+    );
+
+    let heading = text_of(&replies[0]);
+    assert!(
+        !heading.contains("Globex"),
+        "the sheet name reached the model with filename redaction off:\n{heading}"
+    );
+    assert!(
+        heading.contains("## [[ORG_1]]"),
         "the heading should carry the placeholder:\n{heading}"
     );
 }
