@@ -95,6 +95,23 @@ enum Command {
         #[command(subcommand)]
         action: SkillAction,
     },
+    /// Serve the Model Context Protocol on standard input and output
+    ///
+    /// Exposes two tools, `clean` and `map_list`, to an agent in a client with
+    /// no hook system. Restoring is deliberately not offered: over this
+    /// protocol the caller is the model, and a model that can write a file and
+    /// read it back could use a restore tool to obtain every value the vault
+    /// holds.
+    Mcp {
+        /// Configuration file (defaults to the nearest oboro.toml)
+        ///
+        /// Worth setting. A client launches this server with a working
+        /// directory of its own choosing, so without it the nearest
+        /// `oboro.toml` is unlikely to be the project's, and the server runs
+        /// on the defaults with no denylist and no custom patterns.
+        #[arg(long, value_name = "FILE", env = "OBORO_CONFIG")]
+        config: Option<PathBuf>,
+    },
     /// Report the tool's configuration and environment
     Doctor,
 }
@@ -285,6 +302,7 @@ fn run() -> Result<()> {
             } => skill_install(chosen_scope(project, user), dry_run, force, with_hooks),
             SkillAction::Show => print_stdout(oboro::skill::SKILL),
         },
+        Command::Mcp { config } => mcp(config.as_deref(), store),
         Command::Doctor => doctor(store),
     }
 }
@@ -1098,6 +1116,63 @@ fn describe_regions(config: &Config) -> String {
             format!("{} (from ${variable})", codes.join(", "))
         }
         (RegionSource::Unknown, _) => codes.join(", "),
+    }
+}
+
+/// Serves the Model Context Protocol on standard input and output.
+///
+/// The configuration is resolved here rather than inside the server so the
+/// startup line can name the file it came from. A silent default is the thing
+/// that line guards against, so it has to be written where the path is still
+/// in hand.
+fn mcp(config_path: Option<&Path>, store: &StoreArgs) -> Result<()> {
+    let resolved = match config_path {
+        Some(path) => Some(path.to_path_buf()),
+        None => Config::discover_from_cwd(),
+    };
+    match &resolved {
+        Some(path) => oboro::note!("oboro mcp: configuration {}", path.display()),
+        None => oboro::note!(
+            "oboro mcp: no oboro.toml found from {}; running on the defaults, \
+             with no denylist and no custom patterns. Pass --config or set OBORO_CONFIG.",
+            std::env::current_dir().map_or_else(
+                |_| "the working directory".to_owned(),
+                |dir| dir.display().to_string()
+            )
+        ),
+    }
+
+    let config = Config::load(resolved.as_deref())?;
+    oboro::note!("oboro mcp: detectors {}", describe_detectors(&config));
+
+    let vault = store.open()?;
+    let stdin = std::io::stdin();
+    let stdout = std::io::stdout();
+    oboro::mcp::serve(stdin.lock(), stdout.lock(), &config, vault)
+}
+
+/// Which detectors are configured and installed.
+///
+/// Configured and installed, not loaded: the recognition model is built on the
+/// first call rather than at startup, and its outcome is per-call, so whether
+/// it loads is not knowable here.
+fn describe_detectors(config: &Config) -> String {
+    #[cfg(feature = "ner")]
+    {
+        if config.ner_enabled && oboro::models::is_installed().unwrap_or(false) {
+            return "rules and the recognition model".to_owned();
+        }
+        if config.ner_enabled {
+            return "rules only; the recognition model is enabled but not installed, \
+                    so names are matched from the denylist alone"
+                .to_owned();
+        }
+        "rules only; the recognition model is disabled in the configuration".to_owned()
+    }
+    #[cfg(not(feature = "ner"))]
+    {
+        let _ = config;
+        "rules only; this build has no recognition model compiled in".to_owned()
     }
 }
 
