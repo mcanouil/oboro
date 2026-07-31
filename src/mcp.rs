@@ -11,15 +11,182 @@
 //! that has none.
 
 use std::io::{BufRead, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 
 use crate::config::Config;
 use crate::detect::Detector;
 use crate::vault::{Entry, Vault};
 use crate::{convert, pipeline};
+
+/// Which files `clean` will open.
+///
+/// Naming roots is the default and reading anywhere has to be asked for, the
+/// other way round from the command line. The caller here is a model rather
+/// than the person at the keyboard, and a client that offers "always allow" on
+/// a tool call turns one careless approval into a standing licence to read the
+/// whole disk. Documenting that was not enough.
+pub enum Roots {
+    /// Read any file the user running the server can read.
+    Unconfined,
+    /// Read only within these directories, already canonicalised.
+    Within(Vec<PathBuf>),
+}
+
+impl Roots {
+    /// Confines reading to `roots`.
+    ///
+    /// They are canonicalised once, here, so that a link or a `..` cannot walk
+    /// out of one later, and so a root that does not exist is reported while
+    /// there is still a person watching rather than as a refusal to every call.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a root does not exist or is not a directory.
+    pub fn within(roots: &[PathBuf]) -> Result<Self> {
+        let mut canonical = Vec::with_capacity(roots.len());
+        for root in roots {
+            let resolved = root
+                .canonicalize()
+                .with_context(|| format!("reading the root {}", root.display()))?;
+            if !resolved.is_dir() {
+                bail!("the root {} is not a directory", root.display());
+            }
+            canonical.push(resolved);
+        }
+        Ok(Self::Within(canonical))
+    }
+
+    /// Why the file at `resolved` may not be read, or `None` when it may.
+    ///
+    /// `shown` is the path as the model wrote it and appears in the message;
+    /// `resolved` is what [`resolved`] made of it and is the only thing the
+    /// decision rests on. They are separate arguments because the caller must
+    /// go on to read `resolved` rather than `shown`: reading what the model
+    /// wrote would let the kernel answer questions this refusal will not.
+    ///
+    /// The wording never says whether the path exists. A model that could tell
+    /// a refusal for a real file from one for an imagined file could map the
+    /// disk outside the roots by asking, which is most of what the roots are
+    /// for.
+    fn refusal(&self, shown: &Path, resolved: &Path) -> Option<String> {
+        let Self::Within(roots) = self else {
+            return None;
+        };
+        // `starts_with` compares whole components, so the root `/tmp/work`
+        // does not admit `/tmp/workshop`.
+        if roots.iter().any(|root| resolved.starts_with(root)) {
+            return None;
+        }
+        Some(format!(
+            "{} is outside the directories this server was given; \
+             it reads only within: {}",
+            shown.display(),
+            roots
+                .iter()
+                .map(|root| root.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))
+    }
+}
+
+/// `path` with `.` and `..` removed, without touching the filesystem.
+///
+/// Folding has to happen before anything is looked up, or which components
+/// exist decides where a `..` lands. It is not a sound substitute for
+/// `canonicalize` in general, since `link/..` is not `.` when `link` is a
+/// symbolic link; what makes that acceptable is set out on [`resolved`].
+///
+/// Unix only, which is what this crate targets. `Component::Prefix` cannot
+/// occur, so pushing components verbatim is right here and would not be on
+/// Windows, where a verbatim or UNC prefix must not be popped past.
+fn folded(path: &Path) -> PathBuf {
+    use std::path::Component;
+
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            // Popping the root leaves the root, so `/..` stays `/`.
+            Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
+
+/// `path` with every link and `..` resolved, as far as it exists.
+///
+/// `canonicalize` fails outright on a path whose last component is missing,
+/// which is the ordinary case for a typo, so the deepest part that does exist
+/// is resolved and the rest re-attached. That gives a path comparable against a
+/// root without first asking whether the file is there, which is what keeps the
+/// containment check ahead of anything that could disclose existence.
+///
+/// Everything is decided from the folded path, never from the path as written.
+/// The invariant that buys is the one the caller depends on: **the path checked
+/// and the path read are the same string, and that string is either fully
+/// canonical or a canonical prefix plus a tail that provably does not exist.**
+/// A tail component can only be a symbolic link if it exists, and had it
+/// existed the canonicalisation below would have resolved it. A dangling link
+/// as the leaf is the one exception, and it is admitted only to fail as a
+/// missing file, with nothing read.
+///
+/// Two earlier versions were wrong, and both are worth recording because each
+/// looked right.
+///
+/// The first walked up the path as written. `Path::file_name` returns `None`
+/// for `..`, so those components were dropped instead of applied, and where a
+/// path landed depended on whether an unrelated directory in the middle
+/// existed. One call per probe told a model whether any directory on the
+/// machine was there.
+///
+/// The second folded, but kept a fast path that canonicalised the path as
+/// written, and the caller had begun reading the resolved path rather than the
+/// written one. A single non-existent component anywhere then defeated the fast
+/// path and left the leaf unresolved, so a symbolic link inside a root pointing
+/// out of it was checked unresolved and read resolved. That is the guarantee
+/// this whole type exists to make, broken by the change meant to strengthen it.
+///
+/// The cost of deciding lexically is that `..` after a symbolic link is folded
+/// rather than followed, so `root/link/../note.txt` is read as `root/note.txt`
+/// where the kernel would mean something else. Both are inside a root, so it is
+/// not a containment question, but the server can serve a file the written path
+/// does not name.
+fn resolved(path: &Path) -> PathBuf {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir().unwrap_or_default().join(path)
+    };
+
+    let folded = folded(&absolute);
+    if let Ok(canonical) = folded.canonicalize() {
+        return canonical;
+    }
+
+    let mut trailing = Vec::new();
+    let mut head = folded.as_path();
+    while let Some(parent) = head.parent() {
+        // Safe now that the fold has removed every `..`, which is the one
+        // component `file_name` cannot name.
+        if let Some(name) = head.file_name() {
+            trailing.push(name.to_os_string());
+        }
+        if let Ok(canonical) = parent.canonicalize() {
+            let mut out = canonical;
+            out.extend(trailing.iter().rev());
+            return out;
+        }
+        head = parent;
+    }
+    folded
+}
 
 /// What the server carries between messages.
 ///
@@ -30,6 +197,7 @@ struct State<'a> {
     config: &'a Config,
     vault: Vault,
     detector: Option<Detector<'a>>,
+    roots: Roots,
 }
 
 /// Serves the protocol until `input` reaches end of file.
@@ -48,11 +216,13 @@ pub fn serve(
     mut output: impl Write,
     config: &Config,
     vault: Vault,
+    roots: Roots,
 ) -> Result<()> {
     let mut state = State {
         config,
         vault,
         detector: None,
+        roots,
     };
     for line in input.lines() {
         let line = line.context("reading a message from standard input")?;
@@ -160,7 +330,10 @@ fn descriptors() -> Value {
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Path to the file to read and clean.",
+                        "description": "Path to the file to read and clean. Any `..` in it \
+                                        is folded before the file is opened rather than \
+                                        followed through symbolic links, so a path mixing \
+                                        the two can name a different file than you expect.",
                     },
                 },
                 "required": ["path"],
@@ -229,25 +402,25 @@ fn reads(path: &Path) -> bool {
 /// is missing or sits behind an unsearchable parent, are all settled before
 /// `convert::read` runs, so none of them has to recover anything from an error
 /// chain.
-fn unreadable(path: &Path) -> Option<String> {
+fn unreadable(shown: &Path, path: &Path) -> Option<String> {
     if !reads(path) {
         return Some(format!(
             "{} is not a file type Oboro reads; this build reads: {}",
-            path.display(),
+            shown.display(),
             convert::supported().join(", ")
         ));
     }
     match std::fs::metadata(path) {
         Ok(metadata) if metadata.is_dir() => Some(format!(
             "{} is a directory; name a single file",
-            path.display()
+            shown.display()
         )),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            Some(format!("{} does not exist", path.display()))
+            Some(format!("{} does not exist", shown.display()))
         }
         Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => Some(format!(
             "{} cannot be read: permission denied",
-            path.display()
+            shown.display()
         )),
         // A readable file, or a `metadata` failure this cannot name. Both fall
         // through to `convert::read`, which is better placed to say what went
@@ -298,9 +471,21 @@ fn is_encoding_fault(error: &anyhow::Error, format: convert::Format) -> bool {
 /// hold PII, so letting a flag about filenames put a raw name in front of a
 /// model would defeat the one thing this server exists to do.
 fn clean(path: &str, state: &mut State<'_>) -> Value {
-    let path = Path::new(path);
+    let shown = Path::new(path);
+    // Resolved once, and everything after this uses it rather than what the
+    // model wrote. Reading the original string would hand the kernel the job
+    // of resolving `..`, and its answer depends on which directories along the
+    // way exist, which is exactly the question the roots refuse to answer.
+    let resolved = resolved(shown);
+    let path = resolved.as_path();
 
-    if let Some(reason) = unreadable(path) {
+    // Before everything else, including the checks that would say whether the
+    // file is there. A refusal for being outside the roots must look the same
+    // whether or not the path exists, or a model could map the disk by asking.
+    if let Some(reason) = state.roots.refusal(shown, path) {
+        return failed(&reason);
+    }
+    if let Some(reason) = unreadable(shown, path) {
         return failed(&reason);
     }
     // `unreadable` has already established that the extension is one Oboro
@@ -318,14 +503,14 @@ fn clean(path: &str, state: &mut State<'_>) -> Value {
             // file that could not be opened says nothing about its encoding.
             return failed(
                 &if has_io_kind(&error, std::io::ErrorKind::PermissionDenied) {
-                    format!("{} cannot be read: permission denied", path.display())
+                    format!("{} cannot be read: permission denied", shown.display())
                 } else if is_encoding_fault(&error, format) {
-                    format!("{} is not valid UTF-8 text", path.display())
+                    format!("{} is not valid UTF-8 text", shown.display())
                 } else {
                     format!(
                         "{} could not be read as {format:?}; it may hold no extractable text, \
                      or it may be damaged. The reason is on the server's standard error.",
-                        path.display()
+                        shown.display()
                     )
                 },
             );
@@ -480,13 +665,141 @@ mod tests {
         (dir, Config::load(None).expect("the default configuration"))
     }
 
-    /// A server state over a vault in `dir`.
+    /// `Roots::refusal` over a path as written, resolving it the way `clean`
+    /// does. The two arguments exist so the caller can read the resolved form;
+    /// the tests only care about the decision.
+    impl Roots {
+        fn refusal_for(&self, path: &Path) -> Option<String> {
+            self.refusal(path, &resolved(path))
+        }
+    }
+
+    /// A server state over a vault in `dir`, reading anywhere.
     fn state<'a>(dir: &std::path::Path, config: &'a Config) -> State<'a> {
         State {
             config,
             vault: Vault::open(&dir.join("vault.db"), &dir.join("key")).expect("a vault"),
             detector: None,
+            roots: Roots::Unconfined,
         }
+    }
+
+    #[test]
+    fn an_unconfined_server_admits_any_path() {
+        assert!(
+            Roots::Unconfined
+                .refusal_for(Path::new("/anywhere/at/all.txt"))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn a_path_inside_a_root_is_admitted() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let roots = Roots::within(&[dir.path().to_path_buf()]).expect("a root");
+        assert!(roots.refusal_for(&dir.path().join("note.txt")).is_none());
+        assert!(
+            roots
+                .refusal_for(&dir.path().join("deeper/note.txt"))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn a_path_outside_every_root_is_refused() {
+        let inside = tempfile::tempdir().expect("temporary directory");
+        let outside = tempfile::tempdir().expect("temporary directory");
+        let roots = Roots::within(&[inside.path().to_path_buf()]).expect("a root");
+        assert!(
+            roots
+                .refusal_for(&outside.path().join("secret.txt"))
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn a_sibling_sharing_a_prefix_is_not_inside_the_root() {
+        // `/tmp/work` must not admit `/tmp/workshop`. A textual prefix test
+        // would; comparing whole components is what stops it.
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let root = dir.path().join("work");
+        std::fs::create_dir(&root).expect("creating the root");
+        std::fs::create_dir(dir.path().join("workshop")).expect("creating the sibling");
+        let roots = Roots::within(&[root]).expect("a root");
+        assert!(
+            roots
+                .refusal_for(&dir.path().join("workshop/secret.txt"))
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn a_traversal_out_of_a_root_is_refused() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let root = dir.path().join("work");
+        std::fs::create_dir(&root).expect("creating the root");
+        let roots = Roots::within(std::slice::from_ref(&root)).expect("a root");
+        assert!(roots.refusal_for(&root.join("../secret.txt")).is_some());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symbolic_link_leading_out_of_a_root_is_refused() {
+        // The reason roots are canonicalised rather than compared as written:
+        // a link inside the root is a path out of it.
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let root = dir.path().join("work");
+        std::fs::create_dir(&root).expect("creating the root");
+        let secret = dir.path().join("secret.txt");
+        std::fs::write(&secret, "value").expect("writing the secret");
+        std::os::unix::fs::symlink(&secret, root.join("link.txt")).expect("linking");
+
+        let roots = Roots::within(std::slice::from_ref(&root)).expect("a root");
+        assert!(roots.refusal_for(&root.join("link.txt")).is_some());
+    }
+
+    #[test]
+    fn a_traversal_lands_in_the_same_place_whatever_exists_around_it() {
+        // The regression that matters. `Path::file_name` returns `None` for
+        // `..`, so an earlier version dropped those components while walking
+        // up, and where a path landed depended on whether an unrelated
+        // directory in the middle of it existed. A model could read that
+        // difference and use it to ask whether any directory on the machine
+        // was there, one call at a time.
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let root = dir.path().join("work");
+        std::fs::create_dir(&root).expect("creating the root");
+        std::fs::create_dir(dir.path().join("present")).expect("creating the probe");
+        let roots = Roots::within(std::slice::from_ref(&root)).expect("a root");
+
+        let through_present = dir.path().join("present/../work/absent.txt");
+        let through_absent = dir.path().join("missing/../work/absent.txt");
+        assert_eq!(
+            resolved(&through_present),
+            resolved(&through_absent),
+            "where a path lands must not depend on what exists around it"
+        );
+        assert!(roots.refusal_for(&through_present).is_none());
+        assert!(
+            roots.refusal_for(&through_absent).is_none(),
+            "the probe directory's absence changed the answer"
+        );
+    }
+
+    #[test]
+    fn folding_removes_dot_and_parent_components() {
+        assert_eq!(folded(Path::new("/a/./b/../c")), Path::new("/a/c"));
+        // Popping the root leaves the root rather than escaping above it.
+        assert_eq!(folded(Path::new("/../../a")), Path::new("/a"));
+    }
+
+    #[test]
+    fn a_root_that_is_not_a_directory_is_refused_at_startup() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let file = dir.path().join("note.txt");
+        std::fs::write(&file, "value").expect("writing the file");
+        assert!(Roots::within(&[file]).is_err());
+        assert!(Roots::within(&[dir.path().join("missing")]).is_err());
     }
 
     #[test]
@@ -787,8 +1100,11 @@ mod tests {
     fn an_unsupported_extension_is_refused_before_the_file_is_read() {
         // No file is created: the extension settles it, so a path that does not
         // exist must still be refused for its type rather than its absence.
-        let reason = unreadable(std::path::Path::new("/nowhere/archive.tar.gz"))
-            .expect("an unsupported extension must be refused");
+        let reason = unreadable(
+            std::path::Path::new("/nowhere/archive.tar.gz"),
+            std::path::Path::new("/nowhere/archive.tar.gz"),
+        )
+        .expect("an unsupported extension must be refused");
         assert!(
             reason.contains("docx"),
             "the supported set is missing: {reason}"
@@ -800,7 +1116,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("temporary directory");
         let path = dir.path().join("notes.txt");
         std::fs::create_dir(&path).expect("creating the directory");
-        let reason = unreadable(&path).expect("a directory must be refused");
+        let reason = unreadable(&path, &path).expect("a directory must be refused");
         assert!(reason.contains("directory"), "{reason}");
     }
 
@@ -809,7 +1125,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("temporary directory");
         let path = dir.path().join("notes.txt");
         std::fs::write(&path, "text").expect("writing the note");
-        assert!(unreadable(&path).is_none());
+        assert!(unreadable(&path, &path).is_none());
     }
 
     /// `format_of` maps an image extension to a format on every build, but
@@ -828,7 +1144,10 @@ mod tests {
             convert::ocr_available(),
             "`reads` must follow `supported`, which follows the `ocr` feature"
         );
-        assert_eq!(unreadable(&path).is_some(), !convert::ocr_available());
+        assert_eq!(
+            unreadable(&path, &path).is_some(),
+            !convert::ocr_available()
+        );
     }
 
     #[test]

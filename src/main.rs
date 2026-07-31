@@ -111,6 +111,20 @@ enum Command {
         /// on the defaults with no denylist and no custom patterns.
         #[arg(long, value_name = "FILE", env = "OBORO_CONFIG")]
         config: Option<PathBuf>,
+        /// Directory the `clean` tool may read within; repeat for more
+        ///
+        /// The caller over this protocol is a model, not you, and a client
+        /// that offers "always allow" on a tool call turns one approval into a
+        /// standing licence. Naming roots is therefore the default and reading
+        /// anywhere has to be asked for with `--unconfined`.
+        #[arg(long, value_name = "DIR", conflicts_with = "unconfined")]
+        root: Vec<PathBuf>,
+        /// Let the `clean` tool read any file you can read
+        ///
+        /// The behaviour of the command line, chosen deliberately rather than
+        /// arrived at by leaving `--root` off.
+        #[arg(long)]
+        unconfined: bool,
     },
     /// Report the tool's configuration and environment
     Doctor,
@@ -302,7 +316,11 @@ fn run() -> Result<()> {
             } => skill_install(chosen_scope(project, user), dry_run, force, with_hooks),
             SkillAction::Show => print_stdout(oboro::skill::SKILL),
         },
-        Command::Mcp { config } => mcp(config.as_deref(), store),
+        Command::Mcp {
+            config,
+            root,
+            unconfined,
+        } => mcp(config.as_deref(), &root, unconfined, store),
         Command::Doctor => doctor(store),
     }
 }
@@ -1125,7 +1143,33 @@ fn describe_regions(config: &Config) -> String {
 /// startup line can name the file it came from. A silent default is the thing
 /// that line guards against, so it has to be written where the path is still
 /// in hand.
-fn mcp(config_path: Option<&Path>, store: &StoreArgs) -> Result<()> {
+fn mcp(
+    config_path: Option<&Path>,
+    roots: &[PathBuf],
+    unconfined: bool,
+    store: &StoreArgs,
+) -> Result<()> {
+    // Settled before anything is opened, so a server that will refuse every
+    // call says so at once rather than on the model's first request.
+    let roots = match (roots.is_empty(), unconfined) {
+        (true, false) => bail!(
+            "name at least one directory the `clean` tool may read within, with --root, \
+             or pass --unconfined to let it read any file you can read. \
+             The caller over this protocol is a model rather than you, so reading the \
+             whole disk is not something to arrive at by leaving a flag off."
+        ),
+        (_, true) => oboro::mcp::Roots::Unconfined,
+        (false, false) => oboro::mcp::Roots::within(roots)?,
+    };
+    // `--root /` parses and confines nothing. Saying so is cheap, and the
+    // alternative is a server that looks bounded and is not.
+    if roots_name_the_whole_filesystem(&roots) {
+        oboro::note!(
+            "oboro mcp: warning: a root of / confines nothing; \
+             name the directories the work actually needs"
+        );
+    }
+
     let resolved = match config_path {
         Some(path) => Some(path.to_path_buf()),
         None => Config::discover_from_cwd(),
@@ -1144,11 +1188,29 @@ fn mcp(config_path: Option<&Path>, store: &StoreArgs) -> Result<()> {
 
     let config = Config::load(resolved.as_deref())?;
     oboro::note!("oboro mcp: detectors {}", describe_detectors(&config));
+    match &roots {
+        oboro::mcp::Roots::Unconfined => oboro::note!(
+            "oboro mcp: reading anywhere you can read, because --unconfined was passed"
+        ),
+        oboro::mcp::Roots::Within(within) => {
+            for root in within {
+                oboro::note!("oboro mcp: root {}", root.display());
+            }
+        }
+    }
 
     let vault = store.open()?;
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
-    oboro::mcp::serve(stdin.lock(), stdout.lock(), &config, vault)
+    oboro::mcp::serve(stdin.lock(), stdout.lock(), &config, vault, roots)
+}
+
+/// Whether any root is the filesystem root, which admits everything.
+fn roots_name_the_whole_filesystem(roots: &oboro::mcp::Roots) -> bool {
+    match roots {
+        oboro::mcp::Roots::Unconfined => false,
+        oboro::mcp::Roots::Within(within) => within.iter().any(|root| root.parent().is_none()),
+    }
 }
 
 /// Which detectors are configured and installed.
