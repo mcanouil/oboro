@@ -1,8 +1,12 @@
 /*-- scss:defaults --*/
 
 // Everything structural comes from the atelier extension stylesheet, which is
-// compiled first: the navbar and footer surfaces, the code and tabset surfaces,
-// the focus ring, the scrollbars, the tooltips, the 404 hero, and `body-mix()`.
+// compiled first: the chrome, meaning the navbar, the page footer and the
+// sidebar drawn from one palette, the code and tabset surfaces, the focus ring,
+// the scrollbars, the tooltips, the 404 hero, and `body-mix()`. The chrome
+// follows the colour scheme, which is why the bars are a pale tint of `mist` in
+// the light scheme and a lifted `nightfall` in the dark one; `$atelier-chrome`
+// would pin them to one palette in both, and is deliberately left alone.
 // This file carries only what is Oboro's own: its typefaces, its serif
 // headings, the moon accent, and the placeholder mark.
 
@@ -123,8 +127,9 @@ h2 {
 // ===========================================================================
 // NAVBAR ACTIVE-PAGE INDICATOR
 // ===========================================================================
-// A slate underline that grows in. Atelier colours the active link but draws no
-// underline, so this is additive.
+// An underline that grows in, in the chrome accent, so it follows the colour
+// scheme with the bar: slate in the light one, haze in the dark. Atelier
+// colours the active link but draws no underline, so this is additive.
 
 .navbar .nav-link {
   position: relative;

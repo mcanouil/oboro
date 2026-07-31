@@ -110,11 +110,10 @@ extensions:
     icon: assets/icons/icon.svg
     apple-touch-icon: assets/icons/apple-touch-icon.png
     manifest: site.webmanifest
-    # The page background per scheme, so the browser UI tint follows the
-    # reader's scheme even though the navbar is dark-pinned in both.
-    theme-color:
-      light: "#f2f4f6"
-      dark: "#10161c"
+    # `theme-color` is deliberately absent: atelier falls back per scheme to the
+    # brand background, which is the colour the page is painted with and so the
+    # tint the browser UI should take. Setting it here would only restate
+    # `mist` and `nightfall` from `_brand.yml`.
   gitlink:
     # Widget only: the platform and repository come from `website.repo-url`,
     # and in-text reference rewriting stays off.
