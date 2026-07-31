@@ -292,12 +292,22 @@ If `.claude`, `skills`, `oboro` or `SKILL.md` is a link, the install stops and n
 Serves the Model Context Protocol on standard input and output, so an agent in a client with no hook system can ask for a cleaned file rather than reading the file itself.
 
 ```bash
-oboro mcp [--config FILE]
+oboro mcp --root ~/work
+oboro mcp --root ~/work --root ~/contracts
+oboro mcp --unconfined
 ```
 
 | Option | Effect |
 | --- | --- |
+| `--root <DIR>` | A directory `clean` may read within. Repeat it for more than one. |
+| `--unconfined` | Let `clean` read any file you can read. |
 | `--config <FILE>` | Use this configuration instead of the nearest `oboro.toml`. Also read from `OBORO_CONFIG`. |
+
+Naming at least one `--root`, or passing `--unconfined`, is required: a server started with neither refuses to start and says so.
+The caller over this protocol is a model rather than you, and a client that offers to remember its approval turns one careless click into a standing licence, so reading the whole disk is not something to arrive at by leaving an argument off.
+
+A root is resolved once at startup, so a symbolic link inside one that points outside it is refused rather than followed, and a root that does not exist stops the server while you are still watching.
+A path outside every root is refused in the same words whether or not it exists, so a model cannot map your disk by asking.
 
 Messages are JSON-RPC 2.0, one to a line.
 The `2025-11-25` revision is implemented, and a client asking for `2026-07-28` is answered with `2025-11-25` rather than agreed with: that revision removes the `initialize` handshake and `ping` and requires a `server/discover` method, none of which this server does, so claiming it would leave the client expecting a server this is not.
@@ -325,7 +335,8 @@ It offers the agent a tool; it does not intercept anything.
 Unlike the [hook](#hook), which fires on every matching tool call, this server relies on the agent choosing `clean` over simply reading the file, and it will not do so reliably.
 Its value is reach into clients that have no hook system.
 
-`clean` reads any file you can read, with no root list and no approval step, and cleaning is not confinement: passwords, API keys and access tokens are not detected kinds and pass through as written.
+`clean` reads within the roots you named, and every file you can read if you passed `--unconfined`.
+Within them, cleaning is not confinement: passwords, API keys and access tokens are not detected kinds and pass through as written, so a root should be as narrow as the work allows.
 
 Restoring is not offered, because over this protocol the caller is the model, and a model that can write a file of placeholders and read it back could use a restore tool to obtain every value the vault holds.
 That absence is not itself protection: in a client with a shell the model can run `oboro restore --stdout` or `oboro map list --reveal` without involving this server.

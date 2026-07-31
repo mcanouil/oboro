@@ -11,8 +11,14 @@ use support::Workspace;
 
 /// Runs a session, writing every line in `messages` to the server and
 /// returning the replies it wrote back.
+/// Runs a session that may read anywhere.
+///
+/// `--unconfined` rather than nothing: naming roots is the default and reading
+/// anywhere has to be asked for, so a bare `oboro mcp` refuses to start. The
+/// tests that predate the roots work are about something else, and passing the
+/// flag keeps them testing what they were written to test.
 fn session(workspace: &Workspace, messages: &[&str]) -> Vec<serde_json::Value> {
-    session_with(workspace, &[], messages)
+    session_with(workspace, &["--unconfined"], messages)
 }
 
 /// Runs a session with extra arguments after `mcp`.
@@ -332,7 +338,11 @@ fn a_sheet_heading_is_cleaned_even_when_filename_redaction_is_off() {
 
     let replies = session_with(
         &workspace,
-        &["--config", config.to_str().expect("a UTF-8 path")],
+        &[
+            "--unconfined",
+            "--config",
+            config.to_str().expect("a UTF-8 path"),
+        ],
         &[&call(
             "clean",
             &format!(r#"{{"path":"{}"}}"#, book.display()),
@@ -533,7 +543,11 @@ fn a_named_configuration_is_honoured_and_its_absence_is_not_silent() {
 
     let with = session_with(
         &workspace,
-        &["--config", config.to_str().expect("a UTF-8 path")],
+        &[
+            "--unconfined",
+            "--config",
+            config.to_str().expect("a UTF-8 path"),
+        ],
         &[&message],
     );
     assert!(
@@ -549,5 +563,116 @@ fn a_named_configuration_is_honoured_and_its_absence_is_not_silent() {
     assert!(
         text_of(&without[0]).contains("Globex"),
         "this test no longer proves anything: the term was redacted without --config"
+    );
+}
+
+/// Runs a session expected to fail before serving anything, returning stderr.
+fn refused_start(workspace: &Workspace, args: &[&str]) -> String {
+    let mut command = workspace.command();
+    command.arg("mcp");
+    for arg in args {
+        command.arg(arg);
+    }
+    let output = command
+        .write_stdin(String::new())
+        .output()
+        .expect("running oboro mcp");
+    assert!(
+        !output.status.success(),
+        "the server started when it should have refused"
+    );
+    String::from_utf8_lossy(&output.stderr).into_owned()
+}
+
+#[test]
+fn a_server_given_neither_roots_nor_unconfined_refuses_to_start() {
+    // The point of the whole flag pair: reading the whole disk is not
+    // something to arrive at by leaving an argument off.
+    let workspace = Workspace::new();
+    let reason = refused_start(&workspace, &[]);
+    assert!(reason.contains("--root"), "{reason}");
+    assert!(reason.contains("--unconfined"), "{reason}");
+}
+
+#[test]
+fn a_root_that_is_not_a_directory_stops_the_server_at_startup() {
+    let workspace = Workspace::new();
+    let file = workspace.path().join("note.txt");
+    std::fs::write(&file, "value").expect("writing the note");
+
+    let reason = refused_start(
+        &workspace,
+        &["--root", file.to_str().expect("a UTF-8 path")],
+    );
+    assert!(reason.contains("not a directory"), "{reason}");
+
+    let missing = workspace.path().join("nowhere");
+    let reason = refused_start(
+        &workspace,
+        &["--root", missing.to_str().expect("a UTF-8 path")],
+    );
+    assert!(reason.contains("root"), "{reason}");
+}
+
+#[test]
+fn a_file_inside_a_root_is_cleaned_and_one_outside_is_refused() {
+    let workspace = Workspace::new();
+    let root = workspace.path().join("work");
+    std::fs::create_dir(&root).expect("creating the root");
+    let inside = root.join("note.txt");
+    std::fs::write(&inside, "Call Marie on 06 12 34 56 78.").expect("writing the note");
+    let outside = workspace.path().join("secret.txt");
+    std::fs::write(&outside, "Call Marie on 06 12 34 56 78.").expect("writing the secret");
+
+    let replies = session_with(
+        &workspace,
+        &["--root", root.to_str().expect("a UTF-8 path")],
+        &[
+            &call("clean", &format!(r#"{{"path":"{}"}}"#, inside.display())),
+            &call("clean", &format!(r#"{{"path":"{}"}}"#, outside.display())),
+        ],
+    );
+
+    assert_eq!(replies[0]["result"]["isError"], false);
+    assert!(text_of(&replies[0]).contains("[[PHONE_1]]"));
+
+    assert_eq!(
+        replies[1]["result"]["isError"], true,
+        "a file outside every root must be refused"
+    );
+    let refusal = text_of(&replies[1]);
+    assert!(refusal.contains("outside"), "{refusal}");
+    assert!(
+        !refusal.contains("06 12 34 56 78"),
+        "the refused file's contents leaked:\n{refusal}"
+    );
+}
+
+#[test]
+fn a_refusal_outside_the_roots_does_not_say_whether_the_file_exists() {
+    // A model that could tell these two apart could map the disk outside the
+    // roots by asking, which is most of what the roots are for.
+    let workspace = Workspace::new();
+    let root = workspace.path().join("work");
+    std::fs::create_dir(&root).expect("creating the root");
+    let real = workspace.path().join("real.txt");
+    std::fs::write(&real, "value").expect("writing the file");
+    let absent = workspace.path().join("absent.txt");
+
+    let replies = session_with(
+        &workspace,
+        &["--root", root.to_str().expect("a UTF-8 path")],
+        &[
+            &call("clean", &format!(r#"{{"path":"{}"}}"#, real.display())),
+            &call("clean", &format!(r#"{{"path":"{}"}}"#, absent.display())),
+        ],
+    );
+
+    assert_eq!(replies[0]["result"]["isError"], true);
+    assert_eq!(replies[1]["result"]["isError"], true);
+    assert_eq!(
+        text_of(&replies[0]).replace("real.txt", "X"),
+        text_of(&replies[1]).replace("absent.txt", "X"),
+        "the two refusals differ, so existence is disclosed"
     );
 }

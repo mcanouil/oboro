@@ -11,15 +11,115 @@
 //! that has none.
 
 use std::io::{BufRead, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 
 use crate::config::Config;
 use crate::detect::Detector;
 use crate::vault::{Entry, Vault};
 use crate::{convert, pipeline};
+
+/// Which files `clean` will open.
+///
+/// Naming roots is the default and reading anywhere has to be asked for, the
+/// other way round from the command line. The caller here is a model rather
+/// than the person at the keyboard, and a client that offers "always allow" on
+/// a tool call turns one careless approval into a standing licence to read the
+/// whole disk. Documenting that was not enough.
+pub enum Roots {
+    /// Read any file the user running the server can read.
+    Unconfined,
+    /// Read only within these directories, already canonicalised.
+    Within(Vec<PathBuf>),
+}
+
+impl Roots {
+    /// Confines reading to `roots`.
+    ///
+    /// They are canonicalised once, here, so that a link or a `..` cannot walk
+    /// out of one later, and so a root that does not exist is reported while
+    /// there is still a person watching rather than as a refusal to every call.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a root does not exist or is not a directory.
+    pub fn within(roots: &[PathBuf]) -> Result<Self> {
+        let mut canonical = Vec::with_capacity(roots.len());
+        for root in roots {
+            let resolved = root
+                .canonicalize()
+                .with_context(|| format!("reading the root {}", root.display()))?;
+            if !resolved.is_dir() {
+                bail!("the root {} is not a directory", root.display());
+            }
+            canonical.push(resolved);
+        }
+        Ok(Self::Within(canonical))
+    }
+
+    /// Why `path` may not be read, or `None` when it may.
+    ///
+    /// The wording never says whether the path exists. A model that could tell
+    /// a refusal for a real file from one for an imagined file could map the
+    /// disk outside the roots by asking, which is most of what the roots are
+    /// for.
+    fn refusal(&self, path: &Path) -> Option<String> {
+        let Self::Within(roots) = self else {
+            return None;
+        };
+        let resolved = resolved(path);
+        // `starts_with` compares whole components, so the root `/tmp/work`
+        // does not admit `/tmp/workshop`.
+        if roots.iter().any(|root| resolved.starts_with(root)) {
+            return None;
+        }
+        Some(format!(
+            "{} is outside the directories this server was given; \
+             it reads only within: {}",
+            path.display(),
+            roots
+                .iter()
+                .map(|root| root.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))
+    }
+}
+
+/// `path` with every link and `..` resolved, as far as it exists.
+///
+/// `canonicalize` fails outright on a path whose last component is missing,
+/// which is the ordinary case for a typo. Resolving the deepest part that does
+/// exist and re-attaching the rest gives a path that can be compared against a
+/// root without first asking whether the file is there, which is what keeps the
+/// containment check ahead of anything that could disclose existence.
+fn resolved(path: &Path) -> PathBuf {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir().unwrap_or_default().join(path)
+    };
+    if let Ok(canonical) = absolute.canonicalize() {
+        return canonical;
+    }
+
+    let mut trailing = Vec::new();
+    let mut head = absolute.as_path();
+    while let Some(parent) = head.parent() {
+        if let Some(name) = head.file_name() {
+            trailing.push(name.to_os_string());
+        }
+        if let Ok(canonical) = parent.canonicalize() {
+            let mut out = canonical;
+            out.extend(trailing.iter().rev());
+            return out;
+        }
+        head = parent;
+    }
+    absolute
+}
 
 /// What the server carries between messages.
 ///
@@ -30,6 +130,7 @@ struct State<'a> {
     config: &'a Config,
     vault: Vault,
     detector: Option<Detector<'a>>,
+    roots: Roots,
 }
 
 /// Serves the protocol until `input` reaches end of file.
@@ -48,11 +149,13 @@ pub fn serve(
     mut output: impl Write,
     config: &Config,
     vault: Vault,
+    roots: Roots,
 ) -> Result<()> {
     let mut state = State {
         config,
         vault,
         detector: None,
+        roots,
     };
     for line in input.lines() {
         let line = line.context("reading a message from standard input")?;
@@ -300,6 +403,12 @@ fn is_encoding_fault(error: &anyhow::Error, format: convert::Format) -> bool {
 fn clean(path: &str, state: &mut State<'_>) -> Value {
     let path = Path::new(path);
 
+    // Before everything else, including the checks that would say whether the
+    // file is there. A refusal for being outside the roots must look the same
+    // whether or not the path exists, or a model could map the disk by asking.
+    if let Some(reason) = state.roots.refusal(path) {
+        return failed(&reason);
+    }
     if let Some(reason) = unreadable(path) {
         return failed(&reason);
     }
@@ -480,13 +589,109 @@ mod tests {
         (dir, Config::load(None).expect("the default configuration"))
     }
 
-    /// A server state over a vault in `dir`.
+    /// A server state over a vault in `dir`, reading anywhere.
     fn state<'a>(dir: &std::path::Path, config: &'a Config) -> State<'a> {
         State {
             config,
             vault: Vault::open(&dir.join("vault.db"), &dir.join("key")).expect("a vault"),
             detector: None,
+            roots: Roots::Unconfined,
         }
+    }
+
+    #[test]
+    fn an_unconfined_server_admits_any_path() {
+        assert!(
+            Roots::Unconfined
+                .refusal(Path::new("/anywhere/at/all.txt"))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn a_path_inside_a_root_is_admitted() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let roots = Roots::within(&[dir.path().to_path_buf()]).expect("a root");
+        assert!(roots.refusal(&dir.path().join("note.txt")).is_none());
+        assert!(roots.refusal(&dir.path().join("deeper/note.txt")).is_none());
+    }
+
+    #[test]
+    fn a_path_outside_every_root_is_refused() {
+        let inside = tempfile::tempdir().expect("temporary directory");
+        let outside = tempfile::tempdir().expect("temporary directory");
+        let roots = Roots::within(&[inside.path().to_path_buf()]).expect("a root");
+        assert!(roots.refusal(&outside.path().join("secret.txt")).is_some());
+    }
+
+    #[test]
+    fn a_sibling_sharing_a_prefix_is_not_inside_the_root() {
+        // `/tmp/work` must not admit `/tmp/workshop`. A textual prefix test
+        // would; comparing whole components is what stops it.
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let root = dir.path().join("work");
+        std::fs::create_dir(&root).expect("creating the root");
+        std::fs::create_dir(dir.path().join("workshop")).expect("creating the sibling");
+        let roots = Roots::within(&[root]).expect("a root");
+        assert!(
+            roots
+                .refusal(&dir.path().join("workshop/secret.txt"))
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn a_traversal_out_of_a_root_is_refused() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let root = dir.path().join("work");
+        std::fs::create_dir(&root).expect("creating the root");
+        let roots = Roots::within(std::slice::from_ref(&root)).expect("a root");
+        assert!(roots.refusal(&root.join("../secret.txt")).is_some());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symbolic_link_leading_out_of_a_root_is_refused() {
+        // The reason roots are canonicalised rather than compared as written:
+        // a link inside the root is a path out of it.
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let root = dir.path().join("work");
+        std::fs::create_dir(&root).expect("creating the root");
+        let secret = dir.path().join("secret.txt");
+        std::fs::write(&secret, "value").expect("writing the secret");
+        std::os::unix::fs::symlink(&secret, root.join("link.txt")).expect("linking");
+
+        let roots = Roots::within(std::slice::from_ref(&root)).expect("a root");
+        assert!(roots.refusal(&root.join("link.txt")).is_some());
+    }
+
+    #[test]
+    fn a_refusal_does_not_disclose_whether_the_path_exists() {
+        let inside = tempfile::tempdir().expect("temporary directory");
+        let outside = tempfile::tempdir().expect("temporary directory");
+        let real = outside.path().join("real.txt");
+        std::fs::write(&real, "value").expect("writing the file");
+        let roots = Roots::within(&[inside.path().to_path_buf()]).expect("a root");
+
+        let for_real = roots.refusal(&real).expect("a refusal");
+        let for_absent = roots
+            .refusal(&outside.path().join("absent.txt"))
+            .expect("a refusal");
+        // Same wording either way: a model must not learn what is on the disk
+        // outside the roots by watching which refusal it gets.
+        assert_eq!(
+            for_real.replace("real.txt", "X"),
+            for_absent.replace("absent.txt", "X")
+        );
+    }
+
+    #[test]
+    fn a_root_that_is_not_a_directory_is_refused_at_startup() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let file = dir.path().join("note.txt");
+        std::fs::write(&file, "value").expect("writing the file");
+        assert!(Roots::within(&[file]).is_err());
+        assert!(Roots::within(&[dir.path().join("missing")]).is_err());
     }
 
     #[test]

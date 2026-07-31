@@ -157,16 +157,17 @@ What the server buys is reach.
 Cursor, Codex and Claude Desktop have no hook system, so without it Oboro cannot reach them at all.
 Use the hook where you can have one, and read `oboro mcp` as a way of offering the agent a better option rather than as a way of removing the worse one.
 
-### `clean` reads any file you can read
+### Cleaning is not confinement
 
-The tool takes a path and reads it.
-There is no root list, no allowlist of directories and no prompt asking you to approve the file.
+`oboro mcp` will not start until you have said what it may read, with `--root` or with `--unconfined`, so the whole disk is never the default.
+Within a root, though, cleaning and confinement are different things.
 
-Cleaning is not confinement.
 The detectors find names, addresses, telephone numbers, email addresses and checksummed identifiers.
 Passwords, API keys, access tokens and private keys are none of those, and they pass through into the model's context exactly as written.
+A `.env` file inside a root is read and handed over with its secrets intact.
 
-For a client with no file access of its own, Claude Desktop being the one that matters, adding this server grants it read capability it did not have, bounded only by which extensions Oboro reads.
+So a root is a boundary on which files can be reached, not a promise about what is in them.
+Keep them as narrow as the work allows, and remember that for a client with no file access of its own, Claude Desktop being the one that matters, this server is the read capability it did not otherwise have.
 
 ### Restoring is not offered, and its absence is not protection
 
