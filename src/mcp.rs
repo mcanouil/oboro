@@ -330,7 +330,10 @@ fn descriptors() -> Value {
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Path to the file to read and clean.",
+                        "description": "Path to the file to read and clean. Any `..` in it \
+                                        is folded before the file is opened rather than \
+                                        followed through symbolic links, so a path mixing \
+                                        the two can name a different file than you expect.",
                     },
                 },
                 "required": ["path"],
@@ -500,14 +503,14 @@ fn clean(path: &str, state: &mut State<'_>) -> Value {
             // file that could not be opened says nothing about its encoding.
             return failed(
                 &if has_io_kind(&error, std::io::ErrorKind::PermissionDenied) {
-                    format!("{} cannot be read: permission denied", path.display())
+                    format!("{} cannot be read: permission denied", shown.display())
                 } else if is_encoding_fault(&error, format) {
-                    format!("{} is not valid UTF-8 text", path.display())
+                    format!("{} is not valid UTF-8 text", shown.display())
                 } else {
                     format!(
                         "{} could not be read as {format:?}; it may hold no extractable text, \
                      or it may be damaged. The reason is on the server's standard error.",
-                        path.display()
+                        shown.display()
                     )
                 },
             );
