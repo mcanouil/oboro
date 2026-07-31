@@ -319,11 +319,19 @@ Most clients keep a server's standard error in a log, and it is worth reading on
 
 ::: {.callout-important}
 
-## Why restoring is not offered
+## What this server does not guarantee
 
-Over this protocol the caller is the model.
-A model that can write a file of placeholders and read it back afterwards could use a restore tool to obtain every value the vault holds, which is the thing the vault exists to prevent.
-So restoring stays a command-line action: see [`restore`](#restore).
+It offers the agent a tool; it does not intercept anything.
+Unlike the [hook](#hook), which fires on every matching tool call, this server relies on the agent choosing `clean` over simply reading the file, and it will not do so reliably.
+Its value is reach into clients that have no hook system.
+
+`clean` reads any file you can read, with no root list and no approval step, and cleaning is not confinement: passwords, API keys and access tokens are not detected kinds and pass through as written.
+
+Restoring is not offered, because over this protocol the caller is the model, and a model that can write a file of placeholders and read it back could use a restore tool to obtain every value the vault holds.
+That absence is not itself protection: in a client with a shell the model can run `oboro restore --stdout` or `oboro map list --reveal` without involving this server.
+Restoring stays a command-line action: see [`restore`](#restore).
+
+[Limitations](limitations.qmd#the-mcp-server-is-reach-not-protection) sets all of this out at length.
 
 :::
 
