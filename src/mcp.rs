@@ -98,8 +98,11 @@ impl Roots {
 /// Folding has to happen before anything is looked up, or which components
 /// exist decides where a `..` lands. It is not a sound substitute for
 /// `canonicalize` in general, since `link/..` is not `.` when `link` is a
-/// symbolic link, and it is only ever used below on a path the kernel has
-/// already refused to resolve.
+/// symbolic link; what makes that acceptable is set out on [`resolved`].
+///
+/// Unix only, which is what this crate targets. `Component::Prefix` cannot
+/// occur, so pushing components verbatim is right here and would not be on
+/// Windows, where a verbatim or UNC prefix must not be popped past.
 fn folded(path: &Path) -> PathBuf {
     use std::path::Component;
 
@@ -125,31 +128,48 @@ fn folded(path: &Path) -> PathBuf {
 /// root without first asking whether the file is there, which is what keeps the
 /// containment check ahead of anything that could disclose existence.
 ///
-/// The fold is what makes that true rather than merely intended. An earlier
-/// version walked up the path as written, and `Path::file_name` returns `None`
-/// for `..`, so those components were dropped instead of applied. Two paths
-/// naming the same file then resolved differently depending on whether an
-/// unrelated directory in the middle existed, and the model could read the
-/// difference: one call per probe told it whether any directory on the machine
-/// existed. Folding first makes containment a function of the string and the
-/// roots alone.
+/// Everything is decided from the folded path, never from the path as written.
+/// The invariant that buys is the one the caller depends on: **the path checked
+/// and the path read are the same string, and that string is either fully
+/// canonical or a canonical prefix plus a tail that provably does not exist.**
+/// A tail component can only be a symbolic link if it exists, and had it
+/// existed the canonicalisation below would have resolved it. A dangling link
+/// as the leaf is the one exception, and it is admitted only to fail as a
+/// missing file, with nothing read.
 ///
-/// The remaining gap is closed by the kernel rather than here. A tail
-/// re-attached after the fold has not had its links resolved, so it can compare
-/// as inside a root while naming something outside one; but this branch is
-/// reached only when `canonicalize` failed, and `realpath` needs strictly less
-/// than `open`, so a path that gets that far cannot be read either.
+/// Two earlier versions were wrong, and both are worth recording because each
+/// looked right.
+///
+/// The first walked up the path as written. `Path::file_name` returns `None`
+/// for `..`, so those components were dropped instead of applied, and where a
+/// path landed depended on whether an unrelated directory in the middle
+/// existed. One call per probe told a model whether any directory on the
+/// machine was there.
+///
+/// The second folded, but kept a fast path that canonicalised the path as
+/// written, and the caller had begun reading the resolved path rather than the
+/// written one. A single non-existent component anywhere then defeated the fast
+/// path and left the leaf unresolved, so a symbolic link inside a root pointing
+/// out of it was checked unresolved and read resolved. That is the guarantee
+/// this whole type exists to make, broken by the change meant to strengthen it.
+///
+/// The cost of deciding lexically is that `..` after a symbolic link is folded
+/// rather than followed, so `root/link/../note.txt` is read as `root/note.txt`
+/// where the kernel would mean something else. Both are inside a root, so it is
+/// not a containment question, but the server can serve a file the written path
+/// does not name.
 fn resolved(path: &Path) -> PathBuf {
     let absolute = if path.is_absolute() {
         path.to_path_buf()
     } else {
         std::env::current_dir().unwrap_or_default().join(path)
     };
-    if let Ok(canonical) = absolute.canonicalize() {
+
+    let folded = folded(&absolute);
+    if let Ok(canonical) = folded.canonicalize() {
         return canonical;
     }
 
-    let folded = folded(&absolute);
     let mut trailing = Vec::new();
     let mut head = folded.as_path();
     while let Some(parent) = head.parent() {
@@ -379,25 +399,25 @@ fn reads(path: &Path) -> bool {
 /// is missing or sits behind an unsearchable parent, are all settled before
 /// `convert::read` runs, so none of them has to recover anything from an error
 /// chain.
-fn unreadable(path: &Path) -> Option<String> {
+fn unreadable(shown: &Path, path: &Path) -> Option<String> {
     if !reads(path) {
         return Some(format!(
             "{} is not a file type Oboro reads; this build reads: {}",
-            path.display(),
+            shown.display(),
             convert::supported().join(", ")
         ));
     }
     match std::fs::metadata(path) {
         Ok(metadata) if metadata.is_dir() => Some(format!(
             "{} is a directory; name a single file",
-            path.display()
+            shown.display()
         )),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            Some(format!("{} does not exist", path.display()))
+            Some(format!("{} does not exist", shown.display()))
         }
         Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => Some(format!(
             "{} cannot be read: permission denied",
-            path.display()
+            shown.display()
         )),
         // A readable file, or a `metadata` failure this cannot name. Both fall
         // through to `convert::read`, which is better placed to say what went
@@ -462,7 +482,7 @@ fn clean(path: &str, state: &mut State<'_>) -> Value {
     if let Some(reason) = state.roots.refusal(shown, path) {
         return failed(&reason);
     }
-    if let Some(reason) = unreadable(path) {
+    if let Some(reason) = unreadable(shown, path) {
         return failed(&reason);
     }
     // `unreadable` has already established that the extension is one Oboro
@@ -1077,8 +1097,11 @@ mod tests {
     fn an_unsupported_extension_is_refused_before_the_file_is_read() {
         // No file is created: the extension settles it, so a path that does not
         // exist must still be refused for its type rather than its absence.
-        let reason = unreadable(std::path::Path::new("/nowhere/archive.tar.gz"))
-            .expect("an unsupported extension must be refused");
+        let reason = unreadable(
+            std::path::Path::new("/nowhere/archive.tar.gz"),
+            std::path::Path::new("/nowhere/archive.tar.gz"),
+        )
+        .expect("an unsupported extension must be refused");
         assert!(
             reason.contains("docx"),
             "the supported set is missing: {reason}"
@@ -1090,7 +1113,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("temporary directory");
         let path = dir.path().join("notes.txt");
         std::fs::create_dir(&path).expect("creating the directory");
-        let reason = unreadable(&path).expect("a directory must be refused");
+        let reason = unreadable(&path, &path).expect("a directory must be refused");
         assert!(reason.contains("directory"), "{reason}");
     }
 
@@ -1099,7 +1122,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("temporary directory");
         let path = dir.path().join("notes.txt");
         std::fs::write(&path, "text").expect("writing the note");
-        assert!(unreadable(&path).is_none());
+        assert!(unreadable(&path, &path).is_none());
     }
 
     /// `format_of` maps an image extension to a format on every build, but
@@ -1118,7 +1141,10 @@ mod tests {
             convert::ocr_available(),
             "`reads` must follow `supported`, which follows the `ocr` feature"
         );
-        assert_eq!(unreadable(&path).is_some(), !convert::ocr_available());
+        assert_eq!(
+            unreadable(&path, &path).is_some(),
+            !convert::ocr_available()
+        );
     }
 
     #[test]

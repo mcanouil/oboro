@@ -716,3 +716,93 @@ fn a_traversal_answers_the_same_whatever_exists_along_it() {
     assert_eq!(replies[0]["result"]["isError"], false);
     assert!(text_of(&replies[0]).contains("[[PHONE_1]]"));
 }
+
+#[cfg(unix)]
+#[test]
+fn a_symbolic_link_out_of_a_root_is_refused_even_through_a_missing_component() {
+    // The breach a hostile review found in the fix for the last one. A single
+    // component that does not exist defeated the fast path, which left the
+    // leaf unresolved; the check then passed on the unresolved name while the
+    // read resolved the link. Nothing in the suite covered a failed fast path
+    // combined with a symbolic link, so every test still passed.
+    let workspace = Workspace::new();
+    let root = workspace.path().join("work");
+    std::fs::create_dir(&root).expect("creating the root");
+    let secret = workspace.path().join("secret.txt");
+    std::fs::write(&secret, "PRIVATE KEY of Marie Dupont").expect("writing the secret");
+    std::os::unix::fs::symlink(&secret, root.join("link.txt")).expect("linking");
+
+    let direct = root.join("link.txt");
+    let through_missing = root.join("q/../link.txt");
+    let replies = session_with(
+        &workspace,
+        &["--root", root.to_str().expect("a UTF-8 path")],
+        &[
+            &call("clean", &format!(r#"{{"path":"{}"}}"#, direct.display())),
+            &call(
+                "clean",
+                &format!(r#"{{"path":"{}"}}"#, through_missing.display()),
+            ),
+        ],
+    );
+
+    for (which, reply) in [("directly", &replies[0]), ("through ..", &replies[1])] {
+        assert_eq!(
+            reply["result"]["isError"], true,
+            "the link was followed {which}"
+        );
+        assert!(
+            !text_of(reply).contains("PRIVATE KEY"),
+            "a file outside the root was read {which}:\n{}",
+            text_of(reply)
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_directory_link_out_of_a_root_answers_the_same_whatever_exists() {
+    // The narrower oracle left by the same cause: whether canonicalisation
+    // succeeded chose between the kernel's `..` and a lexical one, and the two
+    // land in different places once a `..` crosses a symbolic link.
+    let workspace = Workspace::new();
+    let root = workspace.path().join("work");
+    std::fs::create_dir(&root).expect("creating the root");
+    let outside = workspace.path().join("outside");
+    std::fs::create_dir(&outside).expect("creating the target");
+    std::fs::write(outside.join("secret.txt"), "value").expect("writing the secret");
+    std::fs::create_dir(workspace.path().join("present")).expect("creating the probe");
+    std::os::unix::fs::symlink(&outside, root.join("dlink")).expect("linking");
+
+    let replies = session_with(
+        &workspace,
+        &["--root", root.to_str().expect("a UTF-8 path")],
+        &[
+            &call(
+                "clean",
+                &format!(
+                    r#"{{"path":"{}"}}"#,
+                    root.join("dlink/../present/../outside/secret.txt")
+                        .display()
+                ),
+            ),
+            &call(
+                "clean",
+                &format!(
+                    r#"{{"path":"{}"}}"#,
+                    root.join("dlink/../absent/../outside/secret.txt").display()
+                ),
+            ),
+        ],
+    );
+
+    assert_eq!(
+        text_of(&replies[0])
+            .replace("present", "X")
+            .replace("absent", "X"),
+        text_of(&replies[1])
+            .replace("present", "X")
+            .replace("absent", "X"),
+        "an absent directory changed the answer once a `..` crossed a link"
+    );
+}
