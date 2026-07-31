@@ -144,6 +144,47 @@ Your own words are not, in any tool, by any configuration.
 
 Paste a document rather than retyping its contents, and the hook covers it.
 
+## The MCP server is reach, not protection
+
+The hook and `oboro mcp` look like two ways of doing one thing.
+They are not, and the difference is the whole of what each is worth.
+
+A hook fires on every matching tool call and the agent cannot route around it.
+The MCP server cannot make that claim: it offers the agent a tool, and the agent must choose that tool over simply reading the file.
+It will not do so reliably, whatever the tool description says.
+
+What the server buys is reach.
+Cursor, Codex and Claude Desktop have no hook system, so without it Oboro cannot reach them at all.
+Use the hook where you can have one, and read `oboro mcp` as a way of offering the agent a better option rather than as a way of removing the worse one.
+
+### `clean` reads any file you can read
+
+The tool takes a path and reads it.
+There is no root list, no allowlist of directories and no prompt asking you to approve the file.
+
+Cleaning is not confinement.
+The detectors find names, addresses, telephone numbers, email addresses and checksummed identifiers.
+Passwords, API keys, access tokens and private keys are none of those, and they pass through into the model's context exactly as written.
+
+For a client with no file access of its own, Claude Desktop being the one that matters, adding this server grants it read capability it did not have, bounded only by which extensions Oboro reads.
+
+### Restoring is not offered, and its absence is not protection
+
+There is no `restore` tool, deliberately.
+Over this protocol the caller is the model, and a model that can write a file of placeholders and read it back afterwards would use a restore tool to obtain every value the vault holds.
+
+That absence closes the route the server would otherwise have opened.
+It does not close the vault.
+In any client with a shell, which is Cursor, Codex and Claude Code, the model can run `oboro restore --stdout` or `oboro map list --reveal` itself, and no MCP server is involved in that at all.
+Restoring is a command-line action because it should be yours, not because the vault is sealed against a model that can run commands.
+
+### Error detail goes to the client's log
+
+Failures are reported to the model as fixed messages.
+The reason behind them goes to standard error, which the client keeps in a log.
+
+That log is worth knowing about, and it is not a second way out for your data: a model able to read the log could read the document itself, and a log file's extension is not one Oboro reads, so `clean` cannot be pointed at one to fetch it.
+
 ## What redaction does not hide
 
 Replacing a name with `[[PERSON_1]]` removes the name.
