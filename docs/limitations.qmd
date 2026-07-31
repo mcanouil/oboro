@@ -166,6 +166,10 @@ The detectors find names, addresses, telephone numbers, email addresses and chec
 Passwords, API keys, access tokens and private keys are none of those, and they pass through into the model's context exactly as written.
 A `.env` file inside a root is read and handed over with its secrets intact.
 
+A root bounds paths, and a file can have more than one.
+A hard link inside a root to a file outside it is read, because to the filesystem there is no outside: both names are the file.
+A symbolic link is different and is refused, since roots are resolved before they are compared.
+
 So a root is a boundary on which files can be reached, not a promise about what is in them.
 Keep them as narrow as the work allows, and remember that for a client with no file access of its own, Claude Desktop being the one that matters, this server is the read capability it did not otherwise have.
 

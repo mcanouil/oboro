@@ -1161,6 +1161,14 @@ fn mcp(
         (_, true) => oboro::mcp::Roots::Unconfined,
         (false, false) => oboro::mcp::Roots::within(roots)?,
     };
+    // `--root /` parses and confines nothing. Saying so is cheap, and the
+    // alternative is a server that looks bounded and is not.
+    if roots_name_the_whole_filesystem(&roots) {
+        oboro::note!(
+            "oboro mcp: warning: a root of / confines nothing; \
+             name the directories the work actually needs"
+        );
+    }
 
     let resolved = match config_path {
         Some(path) => Some(path.to_path_buf()),
@@ -1195,6 +1203,14 @@ fn mcp(
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
     oboro::mcp::serve(stdin.lock(), stdout.lock(), &config, vault, roots)
+}
+
+/// Whether any root is the filesystem root, which admits everything.
+fn roots_name_the_whole_filesystem(roots: &oboro::mcp::Roots) -> bool {
+    match roots {
+        oboro::mcp::Roots::Unconfined => false,
+        oboro::mcp::Roots::Within(within) => within.iter().any(|root| root.parent().is_none()),
+    }
 }
 
 /// Which detectors are configured and installed.

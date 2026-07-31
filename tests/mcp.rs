@@ -676,3 +676,43 @@ fn a_refusal_outside_the_roots_does_not_say_whether_the_file_exists() {
         "the two refusals differ, so existence is disclosed"
     );
 }
+
+#[test]
+fn a_traversal_answers_the_same_whatever_exists_along_it() {
+    // The regression that a hostile review found. Two paths naming the same
+    // file, differing only in whether a directory in the middle exists, once
+    // got opposite answers, which handed the model an existence oracle for
+    // every directory on the machine.
+    let workspace = Workspace::new();
+    let root = workspace.path().join("work");
+    std::fs::create_dir(&root).expect("creating the root");
+    std::fs::create_dir(workspace.path().join("present")).expect("creating the probe");
+    let note = root.join("note.txt");
+    std::fs::write(&note, "Call Marie on 06 12 34 56 78.").expect("writing the note");
+
+    let through_present = workspace.path().join("present/../work/note.txt");
+    let through_absent = workspace.path().join("missing/../work/note.txt");
+
+    let replies = session_with(
+        &workspace,
+        &["--root", root.to_str().expect("a UTF-8 path")],
+        &[
+            &call(
+                "clean",
+                &format!(r#"{{"path":"{}"}}"#, through_present.display()),
+            ),
+            &call(
+                "clean",
+                &format!(r#"{{"path":"{}"}}"#, through_absent.display()),
+            ),
+        ],
+    );
+
+    assert_eq!(
+        replies[0]["result"]["isError"], replies[1]["result"]["isError"],
+        "an absent directory in the middle of the path changed the answer, \
+         which is an existence oracle for the whole disk"
+    );
+    assert_eq!(replies[0]["result"]["isError"], false);
+    assert!(text_of(&replies[0]).contains("[[PHONE_1]]"));
+}

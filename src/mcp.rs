@@ -59,17 +59,22 @@ impl Roots {
         Ok(Self::Within(canonical))
     }
 
-    /// Why `path` may not be read, or `None` when it may.
+    /// Why the file at `resolved` may not be read, or `None` when it may.
+    ///
+    /// `shown` is the path as the model wrote it and appears in the message;
+    /// `resolved` is what [`resolved`] made of it and is the only thing the
+    /// decision rests on. They are separate arguments because the caller must
+    /// go on to read `resolved` rather than `shown`: reading what the model
+    /// wrote would let the kernel answer questions this refusal will not.
     ///
     /// The wording never says whether the path exists. A model that could tell
     /// a refusal for a real file from one for an imagined file could map the
     /// disk outside the roots by asking, which is most of what the roots are
     /// for.
-    fn refusal(&self, path: &Path) -> Option<String> {
+    fn refusal(&self, shown: &Path, resolved: &Path) -> Option<String> {
         let Self::Within(roots) = self else {
             return None;
         };
-        let resolved = resolved(path);
         // `starts_with` compares whole components, so the root `/tmp/work`
         // does not admit `/tmp/workshop`.
         if roots.iter().any(|root| resolved.starts_with(root)) {
@@ -78,7 +83,7 @@ impl Roots {
         Some(format!(
             "{} is outside the directories this server was given; \
              it reads only within: {}",
-            path.display(),
+            shown.display(),
             roots
                 .iter()
                 .map(|root| root.display().to_string())
@@ -88,13 +93,52 @@ impl Roots {
     }
 }
 
+/// `path` with `.` and `..` removed, without touching the filesystem.
+///
+/// Folding has to happen before anything is looked up, or which components
+/// exist decides where a `..` lands. It is not a sound substitute for
+/// `canonicalize` in general, since `link/..` is not `.` when `link` is a
+/// symbolic link, and it is only ever used below on a path the kernel has
+/// already refused to resolve.
+fn folded(path: &Path) -> PathBuf {
+    use std::path::Component;
+
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            // Popping the root leaves the root, so `/..` stays `/`.
+            Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
+
 /// `path` with every link and `..` resolved, as far as it exists.
 ///
 /// `canonicalize` fails outright on a path whose last component is missing,
-/// which is the ordinary case for a typo. Resolving the deepest part that does
-/// exist and re-attaching the rest gives a path that can be compared against a
+/// which is the ordinary case for a typo, so the deepest part that does exist
+/// is resolved and the rest re-attached. That gives a path comparable against a
 /// root without first asking whether the file is there, which is what keeps the
 /// containment check ahead of anything that could disclose existence.
+///
+/// The fold is what makes that true rather than merely intended. An earlier
+/// version walked up the path as written, and `Path::file_name` returns `None`
+/// for `..`, so those components were dropped instead of applied. Two paths
+/// naming the same file then resolved differently depending on whether an
+/// unrelated directory in the middle existed, and the model could read the
+/// difference: one call per probe told it whether any directory on the machine
+/// existed. Folding first makes containment a function of the string and the
+/// roots alone.
+///
+/// The remaining gap is closed by the kernel rather than here. A tail
+/// re-attached after the fold has not had its links resolved, so it can compare
+/// as inside a root while naming something outside one; but this branch is
+/// reached only when `canonicalize` failed, and `realpath` needs strictly less
+/// than `open`, so a path that gets that far cannot be read either.
 fn resolved(path: &Path) -> PathBuf {
     let absolute = if path.is_absolute() {
         path.to_path_buf()
@@ -105,9 +149,12 @@ fn resolved(path: &Path) -> PathBuf {
         return canonical;
     }
 
+    let folded = folded(&absolute);
     let mut trailing = Vec::new();
-    let mut head = absolute.as_path();
+    let mut head = folded.as_path();
     while let Some(parent) = head.parent() {
+        // Safe now that the fold has removed every `..`, which is the one
+        // component `file_name` cannot name.
         if let Some(name) = head.file_name() {
             trailing.push(name.to_os_string());
         }
@@ -118,7 +165,7 @@ fn resolved(path: &Path) -> PathBuf {
         }
         head = parent;
     }
-    absolute
+    folded
 }
 
 /// What the server carries between messages.
@@ -401,12 +448,18 @@ fn is_encoding_fault(error: &anyhow::Error, format: convert::Format) -> bool {
 /// hold PII, so letting a flag about filenames put a raw name in front of a
 /// model would defeat the one thing this server exists to do.
 fn clean(path: &str, state: &mut State<'_>) -> Value {
-    let path = Path::new(path);
+    let shown = Path::new(path);
+    // Resolved once, and everything after this uses it rather than what the
+    // model wrote. Reading the original string would hand the kernel the job
+    // of resolving `..`, and its answer depends on which directories along the
+    // way exist, which is exactly the question the roots refuse to answer.
+    let resolved = resolved(shown);
+    let path = resolved.as_path();
 
     // Before everything else, including the checks that would say whether the
     // file is there. A refusal for being outside the roots must look the same
     // whether or not the path exists, or a model could map the disk by asking.
-    if let Some(reason) = state.roots.refusal(path) {
+    if let Some(reason) = state.roots.refusal(shown, path) {
         return failed(&reason);
     }
     if let Some(reason) = unreadable(path) {
@@ -589,6 +642,15 @@ mod tests {
         (dir, Config::load(None).expect("the default configuration"))
     }
 
+    /// `Roots::refusal` over a path as written, resolving it the way `clean`
+    /// does. The two arguments exist so the caller can read the resolved form;
+    /// the tests only care about the decision.
+    impl Roots {
+        fn refusal_for(&self, path: &Path) -> Option<String> {
+            self.refusal(path, &resolved(path))
+        }
+    }
+
     /// A server state over a vault in `dir`, reading anywhere.
     fn state<'a>(dir: &std::path::Path, config: &'a Config) -> State<'a> {
         State {
@@ -603,7 +665,7 @@ mod tests {
     fn an_unconfined_server_admits_any_path() {
         assert!(
             Roots::Unconfined
-                .refusal(Path::new("/anywhere/at/all.txt"))
+                .refusal_for(Path::new("/anywhere/at/all.txt"))
                 .is_none()
         );
     }
@@ -612,8 +674,12 @@ mod tests {
     fn a_path_inside_a_root_is_admitted() {
         let dir = tempfile::tempdir().expect("temporary directory");
         let roots = Roots::within(&[dir.path().to_path_buf()]).expect("a root");
-        assert!(roots.refusal(&dir.path().join("note.txt")).is_none());
-        assert!(roots.refusal(&dir.path().join("deeper/note.txt")).is_none());
+        assert!(roots.refusal_for(&dir.path().join("note.txt")).is_none());
+        assert!(
+            roots
+                .refusal_for(&dir.path().join("deeper/note.txt"))
+                .is_none()
+        );
     }
 
     #[test]
@@ -621,7 +687,11 @@ mod tests {
         let inside = tempfile::tempdir().expect("temporary directory");
         let outside = tempfile::tempdir().expect("temporary directory");
         let roots = Roots::within(&[inside.path().to_path_buf()]).expect("a root");
-        assert!(roots.refusal(&outside.path().join("secret.txt")).is_some());
+        assert!(
+            roots
+                .refusal_for(&outside.path().join("secret.txt"))
+                .is_some()
+        );
     }
 
     #[test]
@@ -635,7 +705,7 @@ mod tests {
         let roots = Roots::within(&[root]).expect("a root");
         assert!(
             roots
-                .refusal(&dir.path().join("workshop/secret.txt"))
+                .refusal_for(&dir.path().join("workshop/secret.txt"))
                 .is_some()
         );
     }
@@ -646,7 +716,7 @@ mod tests {
         let root = dir.path().join("work");
         std::fs::create_dir(&root).expect("creating the root");
         let roots = Roots::within(std::slice::from_ref(&root)).expect("a root");
-        assert!(roots.refusal(&root.join("../secret.txt")).is_some());
+        assert!(roots.refusal_for(&root.join("../secret.txt")).is_some());
     }
 
     #[cfg(unix)]
@@ -662,27 +732,42 @@ mod tests {
         std::os::unix::fs::symlink(&secret, root.join("link.txt")).expect("linking");
 
         let roots = Roots::within(std::slice::from_ref(&root)).expect("a root");
-        assert!(roots.refusal(&root.join("link.txt")).is_some());
+        assert!(roots.refusal_for(&root.join("link.txt")).is_some());
     }
 
     #[test]
-    fn a_refusal_does_not_disclose_whether_the_path_exists() {
-        let inside = tempfile::tempdir().expect("temporary directory");
-        let outside = tempfile::tempdir().expect("temporary directory");
-        let real = outside.path().join("real.txt");
-        std::fs::write(&real, "value").expect("writing the file");
-        let roots = Roots::within(&[inside.path().to_path_buf()]).expect("a root");
+    fn a_traversal_lands_in_the_same_place_whatever_exists_around_it() {
+        // The regression that matters. `Path::file_name` returns `None` for
+        // `..`, so an earlier version dropped those components while walking
+        // up, and where a path landed depended on whether an unrelated
+        // directory in the middle of it existed. A model could read that
+        // difference and use it to ask whether any directory on the machine
+        // was there, one call at a time.
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let root = dir.path().join("work");
+        std::fs::create_dir(&root).expect("creating the root");
+        std::fs::create_dir(dir.path().join("present")).expect("creating the probe");
+        let roots = Roots::within(std::slice::from_ref(&root)).expect("a root");
 
-        let for_real = roots.refusal(&real).expect("a refusal");
-        let for_absent = roots
-            .refusal(&outside.path().join("absent.txt"))
-            .expect("a refusal");
-        // Same wording either way: a model must not learn what is on the disk
-        // outside the roots by watching which refusal it gets.
+        let through_present = dir.path().join("present/../work/absent.txt");
+        let through_absent = dir.path().join("missing/../work/absent.txt");
         assert_eq!(
-            for_real.replace("real.txt", "X"),
-            for_absent.replace("absent.txt", "X")
+            resolved(&through_present),
+            resolved(&through_absent),
+            "where a path lands must not depend on what exists around it"
         );
+        assert!(roots.refusal_for(&through_present).is_none());
+        assert!(
+            roots.refusal_for(&through_absent).is_none(),
+            "the probe directory's absence changed the answer"
+        );
+    }
+
+    #[test]
+    fn folding_removes_dot_and_parent_components() {
+        assert_eq!(folded(Path::new("/a/./b/../c")), Path::new("/a/c"));
+        // Popping the root leaves the root rather than escaping above it.
+        assert_eq!(folded(Path::new("/../../a")), Path::new("/a"));
     }
 
     #[test]
