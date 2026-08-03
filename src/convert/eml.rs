@@ -74,17 +74,21 @@ static LINK_TARGET: LazyLock<Regex> = LazyLock::new(|| {
     .expect("link target pattern is valid")
 });
 
-/// A closing tag with an opening tag hard against it.
+/// Two elements written hard against each other, with no space either side.
 ///
-/// Two elements written back to back hold two values, and `<span>` is how
-/// Outlook and Word write a signature block: one styled span per line with
-/// nothing at all between the tags. Those have to be separated even though a
-/// span runs on elsewhere, or a card number welds onto the word after it into
-/// a token that matches no rule. Whitespace between the two is deliberately
-/// not matched: `<b>Jean</b> <b>Dupont</b>` keeps the space that makes it a
-/// name, while `<span>A</span><span>B</span>` is two values.
+/// `<span>` is how Outlook and Word write a signature block, one styled span
+/// per value with nothing at all between the tags, so those have to be
+/// separated even though a span runs on elsewhere, or a card number welds onto
+/// the word after it into a token that matches no rule.
+///
+/// The separation is only wanted where nothing already separates the two. The
+/// captured character before the closing tag must be a non-space, so
+/// `<span>Jean </span><span>Dupont</span>`, which is the other way the same
+/// clients split a name, keeps the space it wrote and stays one name; only
+/// `<span>78</span><span>Merci</span>`, which has nothing between the values,
+/// is broken.
 static TAG_AGAINST_TAG: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)(</\s*[a-z][a-z0-9]*\s*>)(<)").expect("adjacency pattern is valid")
+    Regex::new(r"(?i)(\S)(</\s*[a-z][a-z0-9]*\s*>)(<)").expect("adjacency pattern is valid")
 });
 
 /// Anything shaped like a tag, for the fallback strip.
@@ -300,7 +304,7 @@ fn announce(out: &mut String, part: &mail_parser::MessagePart) {
 /// line break.
 fn html_text(html: &str) -> String {
     let linked = LINK_TARGET.replace_all(html, "${0} ${1}${2} ");
-    let separated = TAG_AGAINST_TAG.replace_all(&linked, "$1<br>$2");
+    let separated = TAG_AGAINST_TAG.replace_all(&linked, "${1}${2}<br>${3}");
     let broken = TAG.replace_all(&separated, |captured: &regex::Captures| {
         let whole = &captured[0];
         if runs_on(&captured[1]) {
@@ -330,10 +334,13 @@ fn html_text(html: &str) -> String {
 /// stray angle bracket goes, so nothing that reaches the decoder can open a
 /// construct it would then wait to see closed.
 fn strip_tags(html: &str) -> String {
+    // A message may hold this byte itself, so it goes before it is used to
+    // stand for a tag; a value either side of one is left separated rather
+    // than welded, which is the way round that cannot hide a value.
     const BREAK: char = '\u{0}';
 
-    let without_style = STYLE_BLOCK.replace_all(html, " ");
-    let without_tags = ANY_TAG.replace_all(&without_style, BREAK.to_string().as_str());
+    let without_style = STYLE_BLOCK.replace_all(html, " ").replace(BREAK, " ");
+    let without_tags = ANY_TAG.replace_all(&without_style, "\u{0}");
     let bare: String = without_tags
         .chars()
         .map(|character| match character {
@@ -870,6 +877,24 @@ mod tests {
             !text.contains("4242Merci"),
             "two inline elements welded into one candidate:\n{text}"
         );
+    }
+
+    /// The other way the same clients split a name: the space sits inside the
+    /// first element rather than between the two. Separating those as well
+    /// puts `Jean` and `Dupont` on separate lines, and the name stops matching
+    /// the entry written to catch it.
+    #[test]
+    fn a_space_inside_an_inline_element_still_joins_the_name() {
+        let text = read(
+            "From: a@b.example\r\n\
+             Subject: S\r\n\
+             Content-Type: text/html\r\n\
+             \r\n\
+             <p><span>Jean </span><span>Dupont</span></p>\r\n",
+        )
+        .expect("reading");
+
+        assert!(text.contains("Jean Dupont"), "the name was split:\n{text}");
     }
 
     /// A body may carry a filename without being an attachment: a legacy
