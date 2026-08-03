@@ -213,6 +213,7 @@ a name in different subfolders do not collide.
 | `.csv`, `.tsv`         | Read byte for byte; the output keeps the tabular extension        |
 | `.docx`                | Text runs from the body, headers, footers, footnotes and comments |
 | `.pptx`                | Text from slides, speaker notes and comments                      |
+| `.eml`                 | Headers, both body parts, and attachment names                    |
 | `.odt`                 | Body, headers and footers, annotations, footnotes, image alt text |
 | `.xlsx`, `.xlsm`       | One TSV file per sheet, named `book.<sheet>.clean.tsv`            |
 | `.pdf`                 | Embedded text; a scan needs a build compiled `--features ocr`     |

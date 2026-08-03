@@ -122,6 +122,38 @@ That is deliberate: it is what stops such a value concatenating onto the word
 beside it and escaping detection, and it means the output reads less like the
 original than the other formats do.
 
+Inside an `.eml`, an attachment is named but never read.
+Its filename is cleaned like any other text, since a filename often identifies
+a document by itself, but its content is not, so an email carrying a contract
+as a PDF reaches the model as a covering note and a filename.
+Read the attachment separately if its content matters.
+
+Routing headers are dropped: `Received`, `Message-ID`, DKIM signatures and
+`X-*` are the envelope rather than the message.
+That means an internal hostname or an IP address in a `Received` chain never
+reaches the model, and also that the output is faithful to the message rather
+than to the file.
+
+An HTML body has each of its block elements put on a line of its own, for the
+same reason a `.odt` does, so an email laid out as a table reads as one value
+per line rather than as the table it was.
+
+An address written only as a link target survives when the link is `mailto:`
+or `tel:`, and is lost otherwise, since flattening HTML to text discards
+attributes.
+
+A forwarded message is followed, up to eight levels deep and up to three when
+the forward is itself base64 or quoted-printable encoded, which is the parser's
+own limit.
+Past either, the forward is named as an unread attachment rather than read.
+
+Single-byte charsets are decoded, which covers ISO-8859-x and windows-125x.
+A multi-byte charset such as Shift-JIS or GB2312 is read as lossy UTF-8, so a
+message in one of those may reach the detectors with characters replaced.
+
+`.msg`, which is Outlook's own compound-file container rather than a MIME
+message, and `.mbox`, which holds many messages in one file, are not read.
+
 ## Recognition accuracy on real scans is not guaranteed
 
 The tests read rendered text at a generous size, for a plain image and for both PDF codecs, and check three things: that none of the planted values survive cleaning, that two of the six rendered lines come back from recognition rather than being lost on the way in, and that the provider name restores.

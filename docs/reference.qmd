@@ -316,7 +316,7 @@ Two tools are offered.
 
 `clean` takes a `path` and answers with that file's text, cleaned the way [`clean`](#clean) cleans it, one content block per part.
 A workbook comes back as one block per sheet, each under a `## <sheet name>` heading, so a client that flattens the blocks into a single string still keeps the sheets apart.
-Every format this build reads is read here, so a `.pdf`, `.docx`, `.xlsx`, `.pptx` or `.odt` reaches the model as text, which a plain file read cannot manage at all.
+Every format this build reads is read here, so a `.pdf`, `.docx`, `.xlsx`, `.pptx`, `.odt` or `.eml` reaches the model as text, which a plain file read cannot manage at all.
 
 `map_list` takes no arguments and lists the placeholders the vault has issued.
 The real values are never returned, and neither are the times the placeholders were created, which [`map list`](#map) does print: a timestamp for each entry is a record of your working hours rather than anything a model can reason with.
@@ -379,7 +379,7 @@ allowlist:  1 entr(y/ies)
 denylist:   3 term(s)
 patterns:   1 custom
 filenames:  redacted
-formats:    txt, text, md, markdown, csv, tsv, docx, odt, pptx, xlsx, xlsm, pdf
+formats:    txt, text, md, markdown, csv, tsv, docx, eml, odt, pptx, xlsx, xlsm, pdf
 ocr:        not compiled in; images and scanned PDFs cannot be read
 model:      installed
 network:    only `models pull`, and only when you run it
