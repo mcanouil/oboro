@@ -1661,3 +1661,94 @@ fn the_installer_checks_every_conventional_directory() {
         );
     }
 }
+
+/// The flags belong to the commands that open a vault, so they are accepted
+/// after the command that uses them.
+#[test]
+fn the_store_flags_are_accepted_by_the_commands_that_open_a_vault() {
+    let workspace = Workspace::new();
+    let vault = workspace.path().join("elsewhere.db");
+
+    workspace
+        .command()
+        .arg("doctor")
+        .arg("--vault")
+        .arg(&vault)
+        .arg("--key")
+        .arg(workspace.path().join("elsewhere.key"))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(vault.display().to_string()));
+}
+
+/// Declared on the group rather than on each leaf, so `map list` and
+/// `map purge` are covered without the flags being repeated on both, and either
+/// position parses.
+#[test]
+fn the_store_flags_reach_a_subcommand_of_a_command_that_takes_them() {
+    let workspace = Workspace::new();
+    let vault = workspace.path().join("elsewhere.db");
+
+    for arguments in [
+        vec!["map", "--vault", vault.to_str().expect("a path"), "list"],
+        vec!["map", "list", "--vault", vault.to_str().expect("a path")],
+    ] {
+        workspace
+            .command()
+            .args(&arguments)
+            .assert()
+            .success()
+            .stderr(predicate::str::contains("the vault is empty"));
+    }
+}
+
+/// A command that never opens a vault refuses them rather than accepting and
+/// ignoring them, which is what listing them in its help amounted to.
+#[test]
+fn a_command_that_never_opens_a_vault_refuses_the_store_flags() {
+    let workspace = Workspace::new();
+
+    for arguments in [
+        vec!["skill", "show"],
+        vec!["hook", "install", "--dry-run", "--project"],
+    ] {
+        workspace
+            .command()
+            .args(&arguments)
+            .arg("--vault")
+            .arg(workspace.path().join("elsewhere.db"))
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("unexpected argument '--vault'"));
+    }
+}
+
+/// The help under a command is the same list the completion script offers, so a
+/// flag named there that the command ignores is wrong in two places at once.
+#[test]
+fn the_help_names_the_store_flags_only_where_they_work() {
+    let workspace = Workspace::new();
+
+    let takes_them = workspace
+        .command()
+        .arg("clean")
+        .arg("--help")
+        .output()
+        .expect("running oboro clean --help");
+    assert!(
+        String::from_utf8_lossy(&takes_them.stdout).contains("--vault"),
+        "clean opens a vault and must say so"
+    );
+
+    let does_not = workspace
+        .command()
+        .arg("skill")
+        .arg("show")
+        .arg("--help")
+        .output()
+        .expect("running oboro skill show --help");
+    assert!(
+        !String::from_utf8_lossy(&does_not.stdout).contains("--vault"),
+        "skill show never opens a vault and must not offer to"
+    );
+}

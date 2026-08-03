@@ -26,8 +26,6 @@ use oboro::vault::{self, Vault};
 struct Cli {
     #[command(subcommand)]
     command: Command,
-    #[command(flatten)]
-    store: StoreArgs,
 }
 
 #[derive(Subcommand)]
@@ -49,6 +47,8 @@ enum Command {
         /// Configuration file (defaults to the nearest oboro.toml)
         #[arg(long, value_name = "FILE")]
         config: Option<PathBuf>,
+        #[command(flatten)]
+        store: StoreArgs,
     },
     /// Put real values back into a model's answer
     Restore {
@@ -58,11 +58,15 @@ enum Command {
         /// Write to standard output instead of a file
         #[arg(long)]
         stdout: bool,
+        #[command(flatten)]
+        store: StoreArgs,
     },
     /// Inspect or wipe the placeholder mapping
     Map {
         #[command(subcommand)]
         action: MapAction,
+        #[command(flatten)]
+        store: StoreArgs,
     },
     /// Fetch or inspect the local recognition model
     #[cfg(feature = "ner")]
@@ -84,6 +88,8 @@ enum Command {
         /// Configuration file (defaults to the nearest oboro.toml)
         #[arg(long, value_name = "FILE")]
         config: Option<PathBuf>,
+        #[command(flatten)]
+        store: StoreArgs,
     },
     /// Answer an agent's hook, cleaning what it is about to be shown
     Hook {
@@ -125,9 +131,14 @@ enum Command {
         /// arrived at by leaving `--root` off.
         #[arg(long)]
         unconfined: bool,
+        #[command(flatten)]
+        store: StoreArgs,
     },
     /// Report the tool's configuration and environment
-    Doctor,
+    Doctor {
+        #[command(flatten)]
+        store: StoreArgs,
+    },
     /// Print a shell completion script
     ///
     /// The script goes to standard output and the destination it belongs in
@@ -171,13 +182,19 @@ enum HookAction {
     ///
     /// Reads a Claude Code `PostToolUse` payload on standard input and writes
     /// the reply that replaces the tool's result.
-    PostToolUse,
+    PostToolUse {
+        #[command(flatten)]
+        store: StoreArgs,
+    },
     /// Put real values back into a tool's arguments before it runs
     ///
     /// Reads a Claude Code `PreToolUse` payload on standard input and writes
     /// the reply that replaces the tool's arguments, so a placeholder the model
     /// echoed back never reaches a file.
-    PreToolUse,
+    PreToolUse {
+        #[command(flatten)]
+        store: StoreArgs,
+    },
 }
 
 #[derive(Subcommand)]
@@ -236,6 +253,16 @@ enum MapAction {
     },
 }
 
+/// Where the vault and its key live, for the commands that open one.
+///
+/// Flattened onto those commands rather than onto the root, so a command that
+/// never touches the vault does not list two flags it would ignore, and the
+/// completion script does not offer them there either.
+///
+/// `global` is kept, because it makes a group cover its own subcommands: it is
+/// declared once on `map` and reaches `map list` and `map purge`, so both
+/// `oboro map --vault X list` and `oboro map list --vault X` parse without
+/// `StoreArgs` being repeated on every leaf.
 #[derive(Args, Clone)]
 struct StoreArgs {
     /// Vault database (defaults to ~/.oboro/vault.db)
@@ -277,27 +304,30 @@ fn main() {
 }
 
 fn run() -> Result<()> {
-    let cli = Cli::parse();
-    let store = &cli.store;
-    match cli.command {
+    match Cli::parse().command {
         Command::Clean {
             files,
             recursive,
             output,
             stdout,
             config,
+            store,
         } => clean(
             &files,
             recursive,
             output.as_deref(),
             stdout,
-            store,
+            &store,
             config.as_deref(),
         ),
-        Command::Restore { file, stdout } => restore(file.as_deref(), stdout, store),
-        Command::Map { action } => match action {
-            MapAction::List { reveal } => map_list(reveal, store),
-            MapAction::Purge { yes } => map_purge(yes, store),
+        Command::Restore {
+            file,
+            stdout,
+            store,
+        } => restore(file.as_deref(), stdout, &store),
+        Command::Map { action, store } => match action {
+            MapAction::List { reveal } => map_list(reveal, &store),
+            MapAction::Purge { yes } => map_purge(yes, &store),
         },
         #[cfg(feature = "ner")]
         Command::Models { action } => match action {
@@ -309,11 +339,12 @@ fn run() -> Result<()> {
             recursive,
             output,
             config,
+            store,
         } => review(
             &files,
             recursive,
             output.as_deref(),
-            store,
+            &store,
             config.as_deref(),
         ),
         Command::Hook { action } => match action {
@@ -322,8 +353,8 @@ fn run() -> Result<()> {
                 user,
                 dry_run,
             } => hook_install(chosen_scope(project, user), dry_run),
-            HookAction::PostToolUse => hook_post_tool_use(store),
-            HookAction::PreToolUse => hook_pre_tool_use(store),
+            HookAction::PostToolUse { store } => hook_post_tool_use(&store),
+            HookAction::PreToolUse { store } => hook_pre_tool_use(&store),
         },
         Command::Skill { action } => match action {
             SkillAction::Install {
@@ -339,8 +370,9 @@ fn run() -> Result<()> {
             config,
             root,
             unconfined,
-        } => mcp(config.as_deref(), &root, unconfined, store),
-        Command::Doctor => doctor(store),
+            store,
+        } => mcp(config.as_deref(), &root, unconfined, &store),
+        Command::Doctor { store } => doctor(&store),
         Command::Completions { shell } => completions(shell),
     }
 }
