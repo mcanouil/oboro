@@ -13,7 +13,7 @@ use std::path::Path;
 use std::sync::LazyLock;
 
 use anyhow::{Context, Result, bail};
-use mail_parser::{Address, Message, MessageParser, PartType};
+use mail_parser::{Address, Message, MessageParser, MimeHeaders, PartType};
 use regex::Regex;
 
 /// The tags that begin or end a visual block.
@@ -43,6 +43,16 @@ static LINK_TARGET: LazyLock<Regex> = LazyLock::new(|| {
         .expect("link target pattern is valid")
 });
 
+/// How deep a chain of forwarded messages is followed.
+///
+/// `mail-parser` has its own `MAX_NESTED_ENCODED` of 3, but that bounds only
+/// base64 or quoted-printable encoded nested messages, which come back as
+/// `Binary` beyond it rather than as a `Message`. Unencoded nesting takes a
+/// different path inside the parser with no cap at all, so the cap has to be
+/// ours. Eight is well past any real thread and far short of anything that
+/// threatens the stack.
+const MAX_FORWARD_DEPTH: usize = 8;
+
 /// Reads a message: its human-written headers, then its bodies.
 ///
 /// # Errors
@@ -55,7 +65,8 @@ pub fn to_text(path: &Path) -> Result<String> {
         .parse(&raw)
         .with_context(|| format!("{} is not a readable .eml message", path.display()))?;
 
-    let text = render(&message);
+    let mut unread = 0;
+    let text = render(&message, 0, &mut unread, path)?;
 
     if text.trim().is_empty() {
         bail!(
@@ -63,6 +74,9 @@ pub fn to_text(path: &Path) -> Result<String> {
              read those separately",
             path.display()
         );
+    }
+    if unread > 0 {
+        crate::note!("{}: {unread} attachment(s) not read", path.display());
     }
     Ok(text)
 }
@@ -76,8 +90,28 @@ pub fn to_text(path: &Path) -> Result<String> {
 /// are the two lists disjoint, which is exactly where both twins are wanted:
 /// the plain twin is not reliably a superset, since a client may send a
 /// "requires HTML" stub and hide every address in the HTML.
-fn render(message: &Message) -> String {
+fn render(message: &Message, depth: usize, unread: &mut usize, path: &Path) -> Result<String> {
     let mut out = headers(message);
+
+    // `attachments()` yields nested messages too, so a forward has to be
+    // recognised here or it is both followed below and announced as unread.
+    for part in message.attachments().filter(|part| !part.is_message()) {
+        *unread += 1;
+        if let Some(name) = part.attachment_name() {
+            let kind = part.content_type().map_or_else(
+                || "unknown type".to_owned(),
+                |content| match content.subtype() {
+                    Some(subtype) => format!("{}/{subtype}", content.ctype()),
+                    None => content.ctype().to_owned(),
+                },
+            );
+            out.push_str("Attachment: ");
+            out.push_str(printable(name).trim());
+            out.push_str(" (");
+            out.push_str(&kind);
+            out.push_str(")\n");
+        }
+    }
 
     let already_read: HashSet<u32> = message.text_body.iter().copied().collect();
     let bodies = message.text_body.iter().chain(
@@ -91,6 +125,13 @@ fn render(message: &Message) -> String {
         let Some(part) = message.parts.get(id as usize) else {
             continue;
         };
+        if part.is_encoding_problem {
+            bail!(
+                "{} has a body part whose encoding could not be decoded, so it \
+                 would be read with less text than it holds",
+                path.display()
+            );
+        }
         match &part.body {
             PartType::Text(text) => push_block(&mut out, text),
             PartType::Html(html) => push_block(&mut out, &html_text(html)),
@@ -98,7 +139,19 @@ fn render(message: &Message) -> String {
         }
     }
 
-    out
+    for nested in message
+        .attachments()
+        .filter_map(mail_parser::MessagePart::message)
+    {
+        if depth >= MAX_FORWARD_DEPTH {
+            *unread += 1;
+            continue;
+        }
+        push_block(&mut out, "Forwarded message:");
+        push_block(&mut out, &render(nested, depth + 1, unread, path)?);
+    }
+
+    Ok(out)
 }
 
 /// Flattens HTML to text, after making its block structure survivable.
@@ -547,5 +600,194 @@ mod tests {
 
         assert!(text.contains("first 06 12 34 56 78"), "{text}");
         assert!(text.contains("second 75002 Paris"), "{text}");
+    }
+
+    /// The filename goes into the text so it is cleaned like any other value,
+    /// and it is often the most identifying thing about an attachment. The
+    /// bytes are never read.
+    #[test]
+    fn an_attachment_is_named_but_not_read() {
+        let text = read(
+            "From: a@b.example\r\n\
+             Subject: S\r\n\
+             Content-Type: multipart/mixed; boundary=X\r\n\
+             \r\n\
+             --X\r\n\
+             Content-Type: text/plain\r\n\
+             \r\n\
+             body\r\n\
+             --X\r\n\
+             Content-Type: application/pdf; name=\"contrat.pdf\"\r\n\
+             Content-Disposition: attachment; filename=\"contrat.pdf\"\r\n\
+             Content-Transfer-Encoding: base64\r\n\
+             \r\n\
+             U0VDUkVUQllURVM=\r\n\
+             --X--\r\n",
+        )
+        .expect("reading");
+
+        assert!(text.contains("Attachment: contrat.pdf"), "{text}");
+        assert!(
+            !text.contains("SECRETBYTES"),
+            "attachment bytes reached the output:\n{text}"
+        );
+    }
+
+    #[test]
+    fn an_rfc_2231_encoded_filename_is_decoded() {
+        let text = read(
+            "From: a@b.example\r\n\
+             Subject: S\r\n\
+             Content-Type: multipart/mixed; boundary=X\r\n\
+             \r\n\
+             --X\r\n\
+             Content-Type: text/plain\r\n\
+             \r\n\
+             body\r\n\
+             --X\r\n\
+             Content-Type: application/pdf\r\n\
+             Content-Disposition: attachment; filename*=UTF-8''contrat-%C3%A9t%C3%A9.pdf\r\n\
+             \r\n\
+             bytes\r\n\
+             --X--\r\n",
+        )
+        .expect("reading");
+
+        assert!(text.contains("contrat-été.pdf"), "{text}");
+    }
+
+    #[test]
+    fn two_attachments_sharing_a_filename_both_appear() {
+        let text = read(
+            "From: a@b.example\r\n\
+             Subject: S\r\n\
+             Content-Type: multipart/mixed; boundary=X\r\n\
+             \r\n\
+             --X\r\n\
+             Content-Type: text/plain\r\n\
+             \r\n\
+             body\r\n\
+             --X\r\n\
+             Content-Type: application/pdf\r\n\
+             Content-Disposition: attachment; filename=\"scan.pdf\"\r\n\
+             \r\n\
+             one\r\n\
+             --X\r\n\
+             Content-Type: application/pdf\r\n\
+             Content-Disposition: attachment; filename=\"scan.pdf\"\r\n\
+             \r\n\
+             two\r\n\
+             --X--\r\n",
+        )
+        .expect("reading");
+
+        assert_eq!(text.matches("Attachment: scan.pdf").count(), 2, "{text}");
+    }
+
+    /// A text part marked as an attachment is treated as an attachment, named
+    /// and not read, which is the same answer every other attachment gets. Its
+    /// content never reaches the output, so it is not a leak, only a document
+    /// read less fully than the file holds.
+    #[test]
+    fn a_text_part_marked_as_an_attachment_is_named_not_read() {
+        let text = read(
+            "From: a@b.example\r\n\
+             Subject: S\r\n\
+             Content-Type: multipart/mixed; boundary=X\r\n\
+             \r\n\
+             --X\r\n\
+             Content-Type: text/plain\r\n\
+             \r\n\
+             body\r\n\
+             --X\r\n\
+             Content-Type: text/plain; name=\"notes.txt\"\r\n\
+             Content-Disposition: attachment; filename=\"notes.txt\"\r\n\
+             \r\n\
+             attached text 4242 4242 4242 4242\r\n\
+             --X--\r\n",
+        )
+        .expect("reading");
+
+        assert!(text.contains("Attachment: notes.txt"), "{text}");
+        assert!(!text.contains("4242 4242 4242 4242"), "{text}");
+    }
+
+    /// A forwarded message is the densest personal data an inbox holds, and
+    /// `attachments()` yields it alongside real attachments, so it has to be
+    /// recognised before it is counted as one.
+    #[test]
+    fn a_forwarded_message_is_read() {
+        let text = read(
+            "From: a@b.example\r\n\
+             Subject: Fwd\r\n\
+             Content-Type: multipart/mixed; boundary=X\r\n\
+             \r\n\
+             --X\r\n\
+             Content-Type: text/plain\r\n\
+             \r\n\
+             see below\r\n\
+             --X\r\n\
+             Content-Type: message/rfc822\r\n\
+             \r\n\
+             From: inner@c.example\r\n\
+             Subject: Inner\r\n\
+             \r\n\
+             inner body 4242 4242 4242 4242\r\n\
+             --X--\r\n",
+        )
+        .expect("reading");
+
+        assert!(text.contains("Forwarded message:"), "{text}");
+        assert!(text.contains("From: inner@c.example"), "{text}");
+        assert!(text.contains("inner body 4242 4242 4242 4242"), "{text}");
+        assert!(
+            !text.contains("Attachment:"),
+            "a forward was also counted as an unread attachment:\n{text}"
+        );
+    }
+
+    /// A part whose transfer encoding will not decode yields text short of
+    /// what it holds, which is the silent under-read `src/convert/mod.rs`
+    /// exists to refuse. It fails only for a part being read as a body; an
+    /// attachment is already not read, so its encoding is beside the point.
+    #[test]
+    fn a_body_that_will_not_decode_fails_rather_than_reading_short() {
+        let error = read(
+            "From: a@b.example\r\n\
+             Subject: S\r\n\
+             Content-Type: text/plain\r\n\
+             Content-Transfer-Encoding: base64\r\n\
+             \r\n\
+             ****not base64****\r\n",
+        )
+        .expect_err("must refuse");
+
+        assert!(format!("{error:#}").contains("could not be decoded"));
+    }
+
+    /// An email whose only content is an attachment still has headers, and
+    /// they are the part carrying the addresses, so it must not be refused as
+    /// holding no text.
+    #[test]
+    fn an_attachment_only_message_still_returns_its_headers() {
+        let text = read(
+            "From: Jean Dupont <jean.dupont@acme-consulting.example>\r\n\
+             Subject: S\r\n\
+             Content-Type: multipart/mixed; boundary=X\r\n\
+             \r\n\
+             --X\r\n\
+             Content-Type: application/pdf\r\n\
+             Content-Disposition: attachment; filename=\"contrat.pdf\"\r\n\
+             \r\n\
+             bytes\r\n\
+             --X--\r\n",
+        )
+        .expect("reading");
+
+        assert!(
+            text.contains("jean.dupont@acme-consulting.example"),
+            "{text}"
+        );
+        assert!(text.contains("Attachment: contrat.pdf"), "{text}");
     }
 }
