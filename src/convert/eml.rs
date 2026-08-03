@@ -111,6 +111,14 @@ static STYLE_BLOCK: LazyLock<Regex> = LazyLock::new(|| {
 /// threatens the stack.
 const MAX_FORWARD_DEPTH: usize = 8;
 
+/// The bytes Windows tooling writes at the head of a file to mark it UTF-8.
+///
+/// RFC 5322 has no place for them, so the parser reads them as the beginning of
+/// the first header's name; that header stops being one and is dropped whole,
+/// taking whatever it held with it. `From` is written first more often than
+/// anything else and is the densest identifying header a message has.
+const BYTE_ORDER_MARK: &[u8] = &[0xef, 0xbb, 0xbf];
+
 /// Reads a message: its human-written headers, then its bodies.
 ///
 /// # Errors
@@ -120,7 +128,7 @@ const MAX_FORWARD_DEPTH: usize = 8;
 pub fn to_text(path: &Path) -> Result<String> {
     let raw = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
     let message = MessageParser::default()
-        .parse(&raw)
+        .parse(raw.strip_prefix(BYTE_ORDER_MARK).unwrap_or(&raw))
         .with_context(|| format!("{} is not a readable .eml message", path.display()))?;
 
     let mut unread = 0;
@@ -721,6 +729,29 @@ mod tests {
         std::fs::write(&path, &raw).expect("writing");
 
         assert!(to_text(&path).expect("reading").contains("Société"));
+    }
+
+    /// Windows tooling writes a byte order mark at the head of a file. It runs
+    /// into the first header's name, so that header stops being one and is
+    /// dropped whole, taking an address and a name with it while the message
+    /// still reads as though it had been sanitised.
+    #[test]
+    fn a_byte_order_mark_does_not_cost_the_first_header() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let path = dir.path().join("bom.eml");
+        let mut raw = vec![0xef, 0xbb, 0xbf];
+        raw.extend_from_slice(
+            b"From: Jean Dupont <jean.dupont@acme-consulting.example>\r\n\
+              Subject: S\r\n\r\nbody\r\n",
+        );
+        std::fs::write(&path, &raw).expect("writing");
+
+        let text = to_text(&path).expect("reading");
+        assert!(
+            text.contains("jean.dupont@acme-consulting.example"),
+            "the first header was dropped:\n{text}"
+        );
+        assert!(text.contains("Jean Dupont"), "{text}");
     }
 
     /// A multi-byte charset read as lossy UTF-8 comes back with characters
