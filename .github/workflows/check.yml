@@ -37,11 +37,15 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
-      # macOS only on pushes to main; pull requests run ubuntu alone for
-      # faster feedback, since the two behave alike for this crate.
+      # Pull requests run ubuntu alone for faster feedback; pushes to main and
+      # manual dispatches run every platform. Ubuntu and macOS behave alike for
+      # this crate, but Windows does not: it is the platform with its own cfg
+      # arms, in src/vault.rs and src/review/mod.rs, so nothing else exercises
+      # them. Dispatch is in the full list so a branch touching those arms can
+      # be proven on Windows before it merges rather than after.
       matrix:
-        os: ${{ github.event_name == 'push'
-          && fromJSON('["ubuntu-latest", "macos-latest"]')
+        os: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+          && fromJSON('["ubuntu-latest", "macos-latest", "windows-latest"]')
           || fromJSON('["ubuntu-latest"]') }}
     steps:
       - uses: actions/checkout@v7.0.0
