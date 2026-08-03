@@ -30,7 +30,8 @@ pub enum Format {
     /// Tab-separated values, read as-is; the output keeps the extension.
     Tsv,
     Docx,
-    /// RFC 5322 email, read as headers plus body text.
+    /// RFC 5322 email: headers, every body part, forwarded messages, and the
+    /// name of each attachment, whose bytes are never read.
     Eml,
     Odt,
     Pptx,

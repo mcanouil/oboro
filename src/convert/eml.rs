@@ -8,7 +8,6 @@
 //! a declared charset, and a message a client wrote in ISO-8859-1 would be
 //! refused outright by a UTF-8 read.
 
-use std::collections::HashSet;
 use std::path::Path;
 use std::sync::LazyLock;
 
@@ -16,22 +15,33 @@ use anyhow::{Context, Result, bail};
 use mail_parser::{Address, Message, MessageParser, MimeHeaders, PartType};
 use regex::Regex;
 
-/// The tags that begin or end a visual block.
+/// Any tag, with its name captured.
 ///
 /// `html_to_text` breaks a line on `<br>` and a closing `</p>` and on nothing
-/// else, so without this every other block element is stripped with no
-/// separator and its text welds onto its neighbour's. Gmail composes one
-/// `<div>` per line with no whitespace between the tags, so this is the common
-/// case rather than an odd one.
+/// else, so every other element is stripped with no separator and its text
+/// welds onto its neighbour's. Gmail composes one `<div>` per line with no
+/// whitespace between the tags, so this is the common case rather than an odd
+/// one, and a welded value matches no rule while no longer matching its
+/// planted spelling either: it leaks with the leak test passing.
+static TAG: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)<\s*/?\s*([a-z][a-z0-9]*)").expect("tag pattern is valid"));
+
+/// The tags whose text runs on with the text either side of them.
 ///
-/// Inline tags are deliberately absent: `Jean <b>Dupont</b>` has to keep
-/// concatenating, which is the same rule `src/convert/xml.rs` depends on.
-static BLOCK_TAG: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r"(?i)<\s*/?\s*(?:div|p|br|tr|td|th|li|ul|ol|dl|dd|dt|h[1-6]|table|blockquote|section|article|header|footer|pre|hr|address)\b",
-    )
-    .expect("block tag pattern is valid")
-});
+/// This is the way round that fails safe, and it is the same conclusion
+/// `src/convert/odt.rs` reached: a tag nobody thought of costs a line break
+/// rather than letting two values weld into one that matches no rule. Naming
+/// the block tags instead means enumerating a list nobody finishes, and
+/// `<center>`, which is ordinary in real mail, was already missing from it.
+///
+/// The listed tags have to keep concatenating: `Jean <b>Dupont</b>` is one
+/// name, and splitting it stops it matching, which is the same rule
+/// `src/convert/xml.rs` depends on.
+const INLINE_TAGS: &[&str] = &[
+    "a", "abbr", "acronym", "b", "bdi", "bdo", "big", "cite", "code", "data", "del", "dfn", "em",
+    "font", "i", "img", "ins", "kbd", "label", "mark", "nobr", "q", "rp", "rt", "ruby", "s",
+    "samp", "small", "span", "strike", "strong", "sub", "sup", "time", "tt", "u", "var", "wbr",
+];
 
 /// A `mailto:` or `tel:` link target.
 ///
@@ -53,6 +63,23 @@ static LINK_TARGET: LazyLock<Regex> = LazyLock::new(|| {
 /// threatens the stack.
 const MAX_FORWARD_DEPTH: usize = 8;
 
+/// How many nested messages a file may declare before it is refused unread.
+///
+/// [`MAX_FORWARD_DEPTH`] bounds this module's own walk, which is not the same
+/// thing: `MessageParser::parse` builds the whole tree first, and dropping a
+/// chain of nested messages recurses once per level. Measured, a file of some
+/// eighty thousand stacked `message/rfc822` parts overflows the stack as the
+/// parsed message goes out of scope, and a stack overflow aborts the process
+/// rather than returning an error, so a directory walk would die on the file
+/// with no diagnostic. Counting the declarations in the bytes, before they are
+/// parsed, is what keeps that shape from being built at all. A thousand is
+/// past any real thread by orders of magnitude and short of the overflow by
+/// nearly two.
+const MAX_NESTED_MESSAGES: usize = 1024;
+
+/// The content type a message declares for a part it nests inside itself.
+const NESTED_MESSAGE_TYPE: &[u8] = b"message/rfc822";
+
 /// Reads a message: its human-written headers, then its bodies.
 ///
 /// # Errors
@@ -61,6 +88,19 @@ const MAX_FORWARD_DEPTH: usize = 8;
 /// file is not a message at all, or if it yields no text.
 pub fn to_text(path: &Path) -> Result<String> {
     let raw = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
+
+    let nested = raw
+        .windows(NESTED_MESSAGE_TYPE.len())
+        .filter(|window| window.eq_ignore_ascii_case(NESTED_MESSAGE_TYPE))
+        .count();
+    if nested > MAX_NESTED_MESSAGES {
+        bail!(
+            "{} declares {nested} nested messages, more than the {MAX_NESTED_MESSAGES} \
+             this reads; parsing it would exhaust the stack rather than fail",
+            path.display()
+        );
+    }
+
     let message = MessageParser::default()
         .parse(&raw)
         .with_context(|| format!("{} is not a readable .eml message", path.display()))?;
@@ -81,55 +121,46 @@ pub fn to_text(path: &Path) -> Result<String> {
     Ok(text)
 }
 
-/// Renders one message: headers, then every distinct body.
+/// Renders one message: headers, what it carries, then every body it shows.
 ///
-/// The body rule is the subtle part. An ordinary message parses with the same
-/// part id in both `text_body` and `html_body`, so emitting every text body
-/// and then every HTML body would emit it twice, the second time round-tripped
-/// through HTML the parser synthesised. Only inside a `multipart/alternative`
-/// are the two lists disjoint, which is exactly where both twins are wanted:
-/// the plain twin is not reliably a superset, since a client may send a
-/// "requires HTML" stub and hide every address in the HTML.
+/// The bodies are taken from `parts` directly rather than from `text_body` and
+/// `html_body`. Those two lists are the parser's answer to "what would a mail
+/// client display", which is a narrower question than this one, and they leave
+/// text out in shapes that occur in ordinary post: a `multipart/related` whose
+/// HTML root is not its first part is left out of both, and so is any part the
+/// parser could not decode, since failing to decode one also demotes it out of
+/// them. Reading every part instead means a body cannot be missed by being
+/// classified as something else, and it makes the twin problem disappear
+/// rather than needing a rule: an ordinary message names the same part id in
+/// both lists, but it is still one part, so walking parts emits it once.
 fn render(message: &Message, depth: usize, unread: &mut usize, path: &Path) -> Result<String> {
     let mut out = headers(message);
 
-    // `attachments()` yields nested messages too, so a forward has to be
-    // recognised here or it is both followed below and announced as unread.
-    for part in message.attachments().filter(|part| !part.is_message()) {
+    // `attachments()` yields nested messages and demoted bodies too, so both
+    // have to be recognised here or a forward is announced as unread while
+    // being followed below, and a body is announced instead of being read.
+    for part in message
+        .attachments()
+        .filter(|part| !part.is_message() && !is_body(part))
+    {
         *unread += 1;
-        if let Some(name) = part.attachment_name() {
-            let kind = part.content_type().map_or_else(
-                || "unknown type".to_owned(),
-                |content| match content.subtype() {
-                    Some(subtype) => format!("{}/{subtype}", content.ctype()),
-                    None => content.ctype().to_owned(),
-                },
-            );
-            out.push_str("Attachment: ");
-            out.push_str(printable(name).trim());
-            out.push_str(" (");
-            out.push_str(&kind);
-            out.push_str(")\n");
-        }
+        announce(&mut out, part);
     }
 
-    let already_read: HashSet<u32> = message.text_body.iter().copied().collect();
-    let bodies = message.text_body.iter().chain(
-        message
-            .html_body
-            .iter()
-            .filter(|id| !already_read.contains(id)),
-    );
-
-    for &id in bodies {
-        let Some(part) = message.parts.get(id as usize) else {
+    for part in &message.parts {
+        if !is_body(part) {
             continue;
-        };
+        }
         if part.is_encoding_problem {
+            let kind = part.content_type().map_or_else(
+                || "unknown type".to_owned(),
+                |content| content.ctype().to_owned(),
+            );
             bail!(
-                "{} has a body part whose encoding could not be decoded, so it \
-                 would be read with less text than it holds",
-                path.display()
+                "{}: the encoding of a {} body part could not be decoded, so the \
+                 message would be read with less text than it holds",
+                path.display(),
+                super::quoted(&kind)
             );
         }
         match &part.body {
@@ -145,6 +176,10 @@ fn render(message: &Message, depth: usize, unread: &mut usize, path: &Path) -> R
     {
         if depth >= MAX_FORWARD_DEPTH {
             *unread += 1;
+            push_block(
+                &mut out,
+                "Forwarded message: not read, more than eight levels of forwarding",
+            );
             continue;
         }
         push_block(&mut out, "Forwarded message:");
@@ -152,6 +187,41 @@ fn render(message: &Message, depth: usize, unread: &mut usize, path: &Path) -> R
     }
 
     Ok(out)
+}
+
+/// Whether a part is text the message shows rather than a file it carries.
+///
+/// A filename is what separates the two, and it is the parser's own answer to
+/// a `Content-Disposition: attachment` or a `name` parameter. A `text/plain`
+/// sent as an attachment therefore stays an attachment, named and not read,
+/// which is the answer every other attachment gets.
+fn is_body(part: &mail_parser::MessagePart) -> bool {
+    matches!(part.body, PartType::Text(_) | PartType::Html(_)) && part.attachment_name().is_none()
+}
+
+/// Writes the line naming a part that is carried rather than read.
+///
+/// A part with no filename is named by its type alone. Announcing it is what
+/// keeps a meeting invitation, which is as dense with personal data as an
+/// email gets and carries no filename at all, from leaving nothing in the
+/// output to say the message carried anything.
+fn announce(out: &mut String, part: &mail_parser::MessagePart) {
+    let kind = part.content_type().map_or_else(
+        || "unknown type".to_owned(),
+        |content| match content.subtype() {
+            Some(subtype) => format!("{}/{subtype}", content.ctype()),
+            None => content.ctype().to_owned(),
+        },
+    );
+
+    out.push_str("Attachment: ");
+    match part.attachment_name() {
+        Some(name) => out.push_str(printable(name).trim()),
+        None => out.push_str("unnamed"),
+    }
+    out.push_str(" (");
+    out.push_str(printable(&kind).trim());
+    out.push_str(")\n");
 }
 
 /// Flattens HTML to text, after making its block structure survivable.
@@ -165,7 +235,14 @@ fn render(message: &Message, depth: usize, unread: &mut usize, path: &Path) -> R
 /// line break.
 fn html_text(html: &str) -> String {
     let linked = LINK_TARGET.replace_all(html, "$0 $1 ");
-    let broken = BLOCK_TAG.replace_all(&linked, "<br>$0");
+    let broken = TAG.replace_all(&linked, |captured: &regex::Captures| {
+        let whole = &captured[0];
+        if INLINE_TAGS.contains(&captured[1].to_ascii_lowercase().as_str()) {
+            whole.to_owned()
+        } else {
+            format!("<br>{whole}")
+        }
+    });
     mail_parser::decoders::html::html_to_text(&broken)
 }
 
@@ -352,6 +429,81 @@ mod tests {
         );
     }
 
+    /// Every header a person wrote is rendered, not only the four an ordinary
+    /// message carries. A recipient in `Cc` or `Bcc` is a person the message
+    /// went to, and a `Reply-To` is an address someone chose to publish.
+    #[test]
+    fn every_rendered_header_is_read() {
+        let text = read(
+            "Date: Tue, 3 Feb 2026 09:12:44 +0100\r\n\
+             From: a@b.example\r\n\
+             Reply-To: reply@d.example\r\n\
+             To: to@e.example\r\n\
+             Cc: cc@f.example\r\n\
+             Bcc: bcc@g.example\r\n\
+             Subject: S\r\n\
+             \r\n\
+             body\r\n",
+        )
+        .expect("reading");
+
+        for expected in [
+            "Date: Tue, 3 Feb 2026",
+            "Reply-To: reply@d.example",
+            "Cc: cc@f.example",
+            "Bcc: bcc@g.example",
+        ] {
+            assert!(text.contains(expected), "{expected} is missing:\n{text}");
+        }
+    }
+
+    /// A telephone number written only as a link target is lost with the
+    /// attributes unless it is lifted out first, the same as a `mailto:`.
+    #[test]
+    fn a_tel_link_target_is_read() {
+        let text = read(
+            "From: a@b.example\r\n\
+             Subject: S\r\n\
+             Content-Type: text/html\r\n\
+             \r\n\
+             <a href=\"tel:+33142685300\">call us</a>\r\n",
+        )
+        .expect("reading");
+
+        assert!(text.contains("+33142685300"), "{text}");
+    }
+
+    /// A control character is replaced by a space rather than deleted, so two
+    /// values either side of one cannot weld into a third that matches no
+    /// rule. Deleting would pass the sibling test, which only counts lines.
+    #[test]
+    fn a_control_character_leaves_a_space_behind_rather_than_welding() {
+        let text = read(
+            "From: a@b.example\r\n\
+             Subject: =?UTF-8?B?MDYgMTIgMzQgNTYgNzgNNzUwMDIgUGFyaXM=?=\r\n\
+             \r\n\
+             body\r\n",
+        )
+        .expect("reading");
+
+        assert!(
+            !text.contains("7875002"),
+            "a stripped control character welded two values:\n{text}"
+        );
+    }
+
+    /// A message with nothing but an empty body and headers that render to
+    /// nothing must say so rather than write an empty file that reads as a
+    /// document with nothing sensitive in it.
+    #[test]
+    fn a_message_with_no_text_at_all_is_refused() {
+        let error = read("Message-ID: <x@y.example>\r\n\r\n\r\n").expect_err("must refuse");
+        assert!(
+            format!("{error:#}").contains("no extractable text"),
+            "{error:#}"
+        );
+    }
+
     /// The parser is best-effort and returns `None` only when no header parses
     /// at all, so this fixture must carry no colon on its first line.
     #[test]
@@ -440,6 +592,28 @@ mod tests {
         assert!(to_text(&path).expect("reading").contains("Société"));
     }
 
+    /// A multi-byte charset read as lossy UTF-8 comes back with characters
+    /// replaced, which is a document read for less than it holds and a name
+    /// that no longer matches the denylist entry written to catch it.
+    #[test]
+    fn a_multi_byte_charset_body_is_decoded() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let path = dir.path().join("shift-jis.eml");
+        let mut raw = b"From: a@b.example\r\nSubject: S\r\n\
+                        Content-Type: text/plain; charset=shift_jis\r\n\r\n"
+            .to_vec();
+        // "東京" in Shift-JIS.
+        raw.extend_from_slice(&[0x93, 0x8c, 0x8b, 0x9e, 0x0d, 0x0a]);
+        std::fs::write(&path, &raw).expect("writing");
+
+        let text = to_text(&path).expect("reading");
+        assert!(text.contains("東京"), "{text:?}");
+        assert!(
+            !text.contains('\u{fffd}'),
+            "characters were replaced:\n{text:?}"
+        );
+    }
+
     /// A plain-text message parses with the same part id in both `text_body`
     /// and `html_body`, and `body_html` then returns HTML the parser
     /// synthesised. Reading every text body and then every HTML body would
@@ -522,6 +696,34 @@ mod tests {
                 .any(|line| line.contains("06 12 34 56 78") && line.contains("75002")),
             "two blocks share a line, where one rule can run on into the next:\n{text}"
         );
+    }
+
+    /// The tags that lay a message out are not a list anybody finishes, and a
+    /// tag nobody thought of welded its text onto its neighbour's, which is
+    /// the leak this whole rule exists to stop. `<center>` is ordinary in real
+    /// mail; `tbody`, `figcaption` and `fieldset` are the same shape.
+    #[test]
+    fn a_block_tag_nobody_enumerated_still_breaks_the_line() {
+        for (open, close) in [
+            ("<center>", "</center>"),
+            ("<tbody>", "</tbody>"),
+            ("<figcaption>", "</figcaption>"),
+            ("<fieldset>", "</fieldset>"),
+        ] {
+            let text = read(&format!(
+                "From: a@b.example\r\n\
+                 Subject: S\r\n\
+                 Content-Type: text/html\r\n\
+                 \r\n\
+                 {open}06 12 34 56 78{close}{open}Acme Consulting SARL{close}\r\n"
+            ))
+            .expect("reading");
+
+            assert!(
+                !text.contains("78Acme"),
+                "{open} welded two values into one candidate:\n{text}"
+            );
+        }
     }
 
     #[test]
@@ -803,5 +1005,162 @@ mod tests {
             "{text}"
         );
         assert!(text.contains("Attachment: contrat.pdf"), "{text}");
+    }
+
+    /// A part the parser could not decode is demoted out of `text_body` and
+    /// into `attachments`, so a reader that checks the encoding only on the
+    /// body lists never sees the one part that has the problem. This shape is
+    /// what a truncated download produces: the closing boundary is missing.
+    #[test]
+    fn a_body_demoted_to_an_attachment_still_fails_rather_than_reading_short() {
+        let error = read(
+            "From: a@b.example\r\n\
+             Subject: S\r\n\
+             Content-Type: multipart/mixed; boundary=X\r\n\
+             \r\n\
+             --X\r\n\
+             Content-Type: text/plain\r\n\
+             \r\n\
+             first 06 12 34 56 78\r\n\
+             --X\r\n\
+             Content-Type: text/plain\r\n\
+             \r\n\
+             second jean.dupont@acme-consulting.example\r\n",
+        )
+        .expect_err("must refuse");
+
+        assert!(
+            format!("{error:#}").contains("could not be decoded"),
+            "{error:#}"
+        );
+    }
+
+    /// `mail-parser` picks a `multipart/related` root by position and ignores
+    /// the RFC 2387 `start` parameter, so an HTML root that is not the first
+    /// part is left out of both body lists. Reading only those lists loses the
+    /// entire body of such a message while still returning its headers, which
+    /// is output that looks sanitised without having been read.
+    #[test]
+    fn an_html_root_that_is_not_the_first_part_is_read() {
+        let text = read(
+            "From: a@b.example\r\n\
+             Subject: S\r\n\
+             Content-Type: multipart/related; boundary=X; type=\"text/html\"\r\n\
+             \r\n\
+             --X\r\n\
+             Content-Type: image/png\r\n\
+             \r\n\
+             png\r\n\
+             --X\r\n\
+             Content-Type: text/html\r\n\
+             \r\n\
+             <p>Jean Dupont 06 12 34 56 78</p>\r\n\
+             --X--\r\n",
+        )
+        .expect("reading");
+
+        assert!(
+            text.contains("Jean Dupont 06 12 34 56 78"),
+            "the body was lost:\n{text}"
+        );
+    }
+
+    /// An attachment with no filename is the shape a meeting invitation takes,
+    /// and it is as dense with personal data as an email gets. Counted but
+    /// never named, it leaves nothing in the output saying the message carried
+    /// anything at all.
+    #[test]
+    fn an_unnamed_attachment_is_still_announced() {
+        let text = read(
+            "From: a@b.example\r\n\
+             Subject: Invite\r\n\
+             Content-Type: multipart/mixed; boundary=X\r\n\
+             \r\n\
+             --X\r\n\
+             Content-Type: text/plain\r\n\
+             \r\n\
+             covering note\r\n\
+             --X\r\n\
+             Content-Type: application/ics; method=REQUEST\r\n\
+             Content-Disposition: attachment\r\n\
+             \r\n\
+             BEGIN:VCALENDAR\r\n\
+             --X--\r\n",
+        )
+        .expect("reading");
+
+        assert!(
+            text.contains("Attachment:"),
+            "an unnamed part left no trace:\n{text}"
+        );
+        assert!(text.contains("application/ics"), "{text}");
+    }
+
+    /// A content type is written by whoever produced the message, so it may
+    /// carry any byte. Unlike a filename it was reaching the output as found,
+    /// putting an escape sequence into a file the user is expected to paste
+    /// elsewhere.
+    #[test]
+    fn a_hostile_content_type_cannot_reach_the_output_as_written() {
+        let text = read(
+            "From: a@b.example\r\n\
+             Subject: S\r\n\
+             Content-Type: multipart/mixed; boundary=X\r\n\
+             \r\n\
+             --X\r\n\
+             Content-Type: text/plain\r\n\
+             \r\n\
+             body\r\n\
+             --X\r\n\
+             Content-Type: \x1b[2Japp/\x1b[31mevil; name=\"f.bin\"\r\n\
+             Content-Disposition: attachment; filename=\"f.bin\"\r\n\
+             \r\n\
+             bytes\r\n\
+             --X--\r\n",
+        )
+        .expect("reading");
+
+        assert!(
+            !text.contains('\x1b'),
+            "an escape sequence reached the output:\n{text:?}"
+        );
+    }
+
+    /// Past the depth cap the forward was counted and nothing was written, so
+    /// the output gave no sign a thread had been cut short.
+    #[test]
+    fn a_forward_past_the_depth_cap_is_announced() {
+        let mut raw = String::from("From: a@b.example\r\nSubject: S\r\n");
+        for _ in 0..12 {
+            raw.push_str("Content-Type: message/rfc822\r\n\r\nFrom: b@c.example\r\n");
+        }
+        raw.push_str("\r\ninner 4242 4242 4242 4242\r\n");
+
+        let text = read(&raw).expect("reading");
+
+        assert!(
+            text.contains("not read"),
+            "a forward past the cap left no trace:\n{text}"
+        );
+    }
+
+    /// The depth cap bounds this module's own walk, not the tree `mail-parser`
+    /// builds and then destroys: dropping a long chain of nested messages
+    /// recurses once per level and overflows the stack, which aborts the
+    /// process rather than returning an error. The shape has to be refused
+    /// before it is parsed.
+    #[test]
+    fn a_file_of_stacked_nested_messages_is_refused_before_it_is_parsed() {
+        let mut raw = String::from("From: a@b.example\r\nSubject: S\r\n");
+        for _ in 0..=MAX_NESTED_MESSAGES {
+            raw.push_str("Content-Type: message/rfc822\r\n\r\nFrom: b@c.example\r\n");
+        }
+        raw.push_str("\r\nbody\r\n");
+
+        let error = read(&raw).expect_err("must refuse");
+        assert!(
+            format!("{error:#}").contains("nested messages"),
+            "{error:#}"
+        );
     }
 }
