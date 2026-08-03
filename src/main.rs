@@ -4,7 +4,7 @@ use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, CommandFactory, Parser, Subcommand};
 
 use oboro::claude::{SCOPES, Scope};
 use oboro::config::{self, Config, RegionSource};
@@ -26,8 +26,6 @@ use oboro::vault::{self, Vault};
 struct Cli {
     #[command(subcommand)]
     command: Command,
-    #[command(flatten)]
-    store: StoreArgs,
 }
 
 #[derive(Subcommand)]
@@ -49,6 +47,8 @@ enum Command {
         /// Configuration file (defaults to the nearest oboro.toml)
         #[arg(long, value_name = "FILE")]
         config: Option<PathBuf>,
+        #[command(flatten)]
+        store: StoreArgs,
     },
     /// Put real values back into a model's answer
     Restore {
@@ -58,11 +58,15 @@ enum Command {
         /// Write to standard output instead of a file
         #[arg(long)]
         stdout: bool,
+        #[command(flatten)]
+        store: StoreArgs,
     },
     /// Inspect or wipe the placeholder mapping
     Map {
         #[command(subcommand)]
         action: MapAction,
+        #[command(flatten)]
+        store: StoreArgs,
     },
     /// Fetch or inspect the local recognition model
     #[cfg(feature = "ner")]
@@ -84,6 +88,8 @@ enum Command {
         /// Configuration file (defaults to the nearest oboro.toml)
         #[arg(long, value_name = "FILE")]
         config: Option<PathBuf>,
+        #[command(flatten)]
+        store: StoreArgs,
     },
     /// Answer an agent's hook, cleaning what it is about to be shown
     Hook {
@@ -125,9 +131,33 @@ enum Command {
         /// arrived at by leaving `--root` off.
         #[arg(long)]
         unconfined: bool,
+        #[command(flatten)]
+        store: StoreArgs,
     },
     /// Report the tool's configuration and environment
-    Doctor,
+    Doctor {
+        #[command(flatten)]
+        store: StoreArgs,
+    },
+    /// Print a shell completion script
+    ///
+    /// The script goes to standard output and the destination it belongs in
+    /// goes to standard error alongside it, so `oboro completions zsh >
+    /// _oboro` writes a file the shell can read and still tells you where to
+    /// put it. Redirect standard error away to suppress that.
+    ///
+    /// The destinations are listed at
+    /// https://m.canouil.dev/oboro/reference.html#completions
+    // This doc comment is help text before it is documentation, and the fix
+    // `doc_markdown` asks for, wrapping the URL in angle brackets, would print
+    // them to anyone running `oboro completions --help`, where they read as a
+    // placeholder to substitute rather than as a link to follow.
+    #[expect(clippy::doc_markdown, reason = "a bare URL is what the help shows")]
+    Completions {
+        /// The shell to generate for
+        #[arg(value_name = "SHELL")]
+        shell: clap_complete::Shell,
+    },
 }
 
 #[derive(Subcommand)]
@@ -152,13 +182,19 @@ enum HookAction {
     ///
     /// Reads a Claude Code `PostToolUse` payload on standard input and writes
     /// the reply that replaces the tool's result.
-    PostToolUse,
+    PostToolUse {
+        #[command(flatten)]
+        store: StoreArgs,
+    },
     /// Put real values back into a tool's arguments before it runs
     ///
     /// Reads a Claude Code `PreToolUse` payload on standard input and writes
     /// the reply that replaces the tool's arguments, so a placeholder the model
     /// echoed back never reaches a file.
-    PreToolUse,
+    PreToolUse {
+        #[command(flatten)]
+        store: StoreArgs,
+    },
 }
 
 #[derive(Subcommand)]
@@ -217,6 +253,16 @@ enum MapAction {
     },
 }
 
+/// Where the vault and its key live, for the commands that open one.
+///
+/// Flattened onto those commands rather than onto the root, so a command that
+/// never touches the vault does not list two flags it would ignore, and the
+/// completion script does not offer them there either.
+///
+/// `global` is kept, because it makes a group cover its own subcommands: it is
+/// declared once on `map` and reaches `map list` and `map purge`, so both
+/// `oboro map --vault X list` and `oboro map list --vault X` parse without
+/// `StoreArgs` being repeated on every leaf.
 #[derive(Args, Clone)]
 struct StoreArgs {
     /// Vault database (defaults to ~/.oboro/vault.db)
@@ -258,27 +304,30 @@ fn main() {
 }
 
 fn run() -> Result<()> {
-    let cli = Cli::parse();
-    let store = &cli.store;
-    match cli.command {
+    match Cli::parse().command {
         Command::Clean {
             files,
             recursive,
             output,
             stdout,
             config,
+            store,
         } => clean(
             &files,
             recursive,
             output.as_deref(),
             stdout,
-            store,
+            &store,
             config.as_deref(),
         ),
-        Command::Restore { file, stdout } => restore(file.as_deref(), stdout, store),
-        Command::Map { action } => match action {
-            MapAction::List { reveal } => map_list(reveal, store),
-            MapAction::Purge { yes } => map_purge(yes, store),
+        Command::Restore {
+            file,
+            stdout,
+            store,
+        } => restore(file.as_deref(), stdout, &store),
+        Command::Map { action, store } => match action {
+            MapAction::List { reveal } => map_list(reveal, &store),
+            MapAction::Purge { yes } => map_purge(yes, &store),
         },
         #[cfg(feature = "ner")]
         Command::Models { action } => match action {
@@ -290,11 +339,12 @@ fn run() -> Result<()> {
             recursive,
             output,
             config,
+            store,
         } => review(
             &files,
             recursive,
             output.as_deref(),
-            store,
+            &store,
             config.as_deref(),
         ),
         Command::Hook { action } => match action {
@@ -303,8 +353,8 @@ fn run() -> Result<()> {
                 user,
                 dry_run,
             } => hook_install(chosen_scope(project, user), dry_run),
-            HookAction::PostToolUse => hook_post_tool_use(store),
-            HookAction::PreToolUse => hook_pre_tool_use(store),
+            HookAction::PostToolUse { store } => hook_post_tool_use(&store),
+            HookAction::PreToolUse { store } => hook_pre_tool_use(&store),
         },
         Command::Skill { action } => match action {
             SkillAction::Install {
@@ -320,9 +370,26 @@ fn run() -> Result<()> {
             config,
             root,
             unconfined,
-        } => mcp(config.as_deref(), &root, unconfined, store),
-        Command::Doctor => doctor(store),
+            store,
+        } => mcp(config.as_deref(), &root, unconfined, &store),
+        Command::Doctor { store } => doctor(&store),
+        Command::Completions { shell } => completions(shell),
     }
+}
+
+/// Prints the completion script for `shell`, and where it belongs.
+///
+/// The script alone answers "what" and leaves "where" to the user, which is the
+/// part they cannot guess. Sending the two to different streams is what lets
+/// one command do both: the redirect captures the script, the hint stays on the
+/// terminal where it is useful at that moment, and `2>/dev/null` drops it for
+/// anyone scripting this.
+fn completions(shell: clap_complete::Shell) -> Result<()> {
+    let mut command = Cli::command();
+    let name = command.get_name().to_owned();
+    print_stdout(&oboro::completions::script(shell, &mut command))?;
+    oboro::note!("{}", oboro::completions::hint(shell, &name).trim_end());
+    Ok(())
 }
 
 /// Discovers and loads the configuration, opens the vault, and creates the
@@ -1348,6 +1415,7 @@ fn doctor(store: &StoreArgs) -> Result<()> {
     let plugins = oboro::hooks::enabled_plugins_from(&cwd);
     write!(report, "{}", describe_hooks(&cwd, &plugins)?)?;
     write!(report, "{}", describe_skill(&cwd, &plugins)?)?;
+    write!(report, "{}", describe_completions(&mut Cli::command())?)?;
     print_stdout(&report)
 }
 
@@ -1443,6 +1511,70 @@ fn describe_skill(cwd: &Path, plugins: &[EnabledPlugin]) -> Result<String> {
             Status::Unreadable => "UNREADABLE",
         };
         writeln!(report, "skill       {} ({state})", path.display())?;
+    }
+    Ok(report)
+}
+
+/// How wide the label column is, so a continuation line lines up under what it
+/// continues rather than under the label.
+const LABEL: usize = 12;
+
+/// Reports whether the completion scripts on disk still match this binary.
+///
+/// A completion script is a copy of the command surface at the moment it was
+/// generated, so a release that adds a command leaves the script offering the
+/// old set and nothing says so. Regenerating and comparing byte for byte
+/// answers that exactly, with no version to parse and nothing to keep in step.
+///
+/// Every conventional path is checked whatever `$SHELL` says. Reading that
+/// variable is the obvious way to pick one and is wrong often enough to matter,
+/// and a path that does not exist is not reported anyway, so checking all of
+/// them costs a line only for scripts that are really there.
+///
+/// Absence is reported rather than passed over in silence, as the hooks and the
+/// skill are: a report that says nothing cannot be told from one that found
+/// nothing to say.
+fn describe_completions(command: &mut clap::Command) -> Result<String> {
+    use std::fmt::Write as _;
+
+    let name = command.get_name().to_owned();
+    let mut report = String::new();
+    let mut found = false;
+
+    for location in oboro::completions::conventional_paths(&name) {
+        let Ok(installed) = std::fs::read(&location.path) else {
+            // Either nothing is there, which is the ordinary case and not worth
+            // a line, or it cannot be read, which the next stat tells apart.
+            if location.path.exists() {
+                found = true;
+                writeln!(
+                    report,
+                    "completion  {} (UNREADABLE)",
+                    location.path.display()
+                )?;
+            }
+            continue;
+        };
+        found = true;
+        if installed == oboro::completions::script(location.shell, command).as_bytes() {
+            writeln!(report, "completion  {} (current)", location.path.display())?;
+            continue;
+        }
+        writeln!(report, "completion  {} (stale)", location.path.display())?;
+        writeln!(
+            report,
+            "{:LABEL$}{name} completions {} > {}",
+            "",
+            location.shell,
+            location.path.display()
+        )?;
+    }
+
+    if !found {
+        writeln!(
+            report,
+            "completion  not installed; run `{name} completions <shell>`"
+        )?;
     }
     Ok(report)
 }

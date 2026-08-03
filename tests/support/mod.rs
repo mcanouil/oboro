@@ -78,9 +78,32 @@ impl Workspace {
         Command::from_std(self.std_command(locale))
     }
 
+    /// A `oboro` invocation for the tests that look for completion scripts.
+    ///
+    /// The conventional destinations are resolved against the home directory
+    /// unless one of these variables names somewhere else, and a developer with
+    /// oh-my-zsh or an XDG layout of their own has them set. Clearing them is
+    /// what keeps the temporary home the only place these tests can find a
+    /// script, so their own machine cannot decide the result.
+    pub fn completions_command(&self) -> Command {
+        let mut command = self.command();
+        command
+            .env_remove("XDG_DATA_HOME")
+            .env_remove("XDG_CONFIG_HOME")
+            .env_remove("ZSH_CUSTOM");
+        command
+    }
+
     /// The same invocation as [`Workspace::command_in_locale`], as a plain
     /// [`std::process::Command`], for the tests that have to spawn the process
     /// themselves and drive its pipes.
+    ///
+    /// The store is named through the environment rather than with `--vault`
+    /// and `--key`, because those flags belong to the commands that open a
+    /// vault and this harness does not know which command a test is about to
+    /// run. `oboro skill show --vault X` is now the error it always should have
+    /// been, and a harness passing the flags to every invocation would make
+    /// that error the only thing these tests could produce.
     pub fn std_command(&self, locale: &str) -> std::process::Command {
         let mut command = std::process::Command::new(assert_cmd::cargo::cargo_bin("oboro"));
         command
@@ -88,10 +111,8 @@ impl Workspace {
             .env("HOME", self.home())
             .env("LC_ALL", locale)
             .env("LANG", locale)
-            .arg("--vault")
-            .arg(self.dir.path().join("vault.db"))
-            .arg("--key")
-            .arg(self.dir.path().join("key"));
+            .env("OBORO_VAULT", self.dir.path().join("vault.db"))
+            .env("OBORO_KEY_FILE", self.dir.path().join("key"));
         command
     }
 

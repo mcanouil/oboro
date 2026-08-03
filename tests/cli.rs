@@ -1539,3 +1539,216 @@ fn hook_install_refuses_a_symlinked_settings_file() {
         "the link target is untouched"
     );
 }
+
+/// The whole design of `completions` is the split between the two streams: the
+/// redirect has to capture a script the shell can read, and the instructions
+/// have to reach the person who ran the command.
+#[test]
+fn completions_writes_the_script_to_stdout_and_the_destination_to_stderr() {
+    let workspace = Workspace::new();
+    let output = workspace
+        .command()
+        .arg("completions")
+        .arg("zsh")
+        .output()
+        .expect("running oboro completions");
+
+    assert!(output.status.success());
+    let script = String::from_utf8(output.stdout).expect("the script must be UTF-8");
+    let hint = String::from_utf8(output.stderr).expect("the hint must be UTF-8");
+
+    assert!(
+        script.starts_with("#compdef oboro"),
+        "the redirect must capture a script and nothing before it: {:?}",
+        script.lines().next()
+    );
+    assert!(
+        !script.contains("m.canouil.dev"),
+        "no part of the hint may reach the file"
+    );
+    assert!(
+        hint.contains("_oboro"),
+        "the hint must name the destination"
+    );
+    assert!(
+        hint.contains("autoload -Uz compinit && compinit"),
+        "the hint must print the command that makes zsh read it"
+    );
+}
+
+/// A build directory or a renamed copy still has to complete the installed
+/// name, so the script is generated under the name the command carries.
+#[test]
+fn completions_generates_under_the_installed_name() {
+    let workspace = Workspace::new();
+    workspace
+        .command()
+        .arg("completions")
+        .arg("bash")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("_oboro()"))
+        .stdout(predicate::str::contains("target/debug").not());
+}
+
+/// A completion script is a copy of the command surface from when it was
+/// generated, and nothing else in the tool would say it has fallen behind.
+#[test]
+fn doctor_reports_a_completion_script_as_current_then_stale() {
+    let workspace = Workspace::new();
+    let directory = workspace.home().join(".zfunc");
+    std::fs::create_dir_all(&directory).expect("creating the completion directory");
+    let script = directory.join("_oboro");
+
+    // Nothing installed anywhere: said rather than passed over, as the hooks
+    // and the skill are.
+    workspace
+        .completions_command()
+        .arg("doctor")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("completion  not installed"));
+
+    let generated = workspace
+        .completions_command()
+        .arg("completions")
+        .arg("zsh")
+        .output()
+        .expect("running oboro completions");
+    std::fs::write(&script, &generated.stdout).expect("writing the completion script");
+
+    workspace
+        .completions_command()
+        .arg("doctor")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(format!(
+            "completion  {} (current)",
+            script.display()
+        )));
+
+    std::fs::write(&script, b"# an older release wrote this\n").expect("editing the script");
+
+    workspace
+        .completions_command()
+        .arg("doctor")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("(stale)"))
+        .stdout(predicate::str::contains(format!(
+            "oboro completions zsh > {}",
+            script.display()
+        )));
+}
+
+/// The installer checks the same places in shell that `conventional_paths`
+/// checks in Rust, so the list is written twice and can drift. The home
+/// directory and the environment overrides are what a test cannot compare, so
+/// it compares the part of each path that neither of them changes.
+#[test]
+fn the_installer_checks_every_conventional_directory() {
+    let installer = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/install.sh"),
+    )
+    .expect("reading docs/install.sh");
+
+    for location in oboro::completions::conventional_paths("oboro") {
+        assert!(
+            installer.contains(location.convention),
+            "docs/install.sh does not look in {}, which {} reads",
+            location.convention,
+            location.shell
+        );
+    }
+}
+
+/// The flags belong to the commands that open a vault, so they are accepted
+/// after the command that uses them.
+#[test]
+fn the_store_flags_are_accepted_by_the_commands_that_open_a_vault() {
+    let workspace = Workspace::new();
+    let vault = workspace.path().join("elsewhere.db");
+
+    workspace
+        .command()
+        .arg("doctor")
+        .arg("--vault")
+        .arg(&vault)
+        .arg("--key")
+        .arg(workspace.path().join("elsewhere.key"))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(vault.display().to_string()));
+}
+
+/// Declared on the group rather than on each leaf, so `map list` and
+/// `map purge` are covered without the flags being repeated on both, and either
+/// position parses.
+#[test]
+fn the_store_flags_reach_a_subcommand_of_a_command_that_takes_them() {
+    let workspace = Workspace::new();
+    let vault = workspace.path().join("elsewhere.db");
+
+    for arguments in [
+        vec!["map", "--vault", vault.to_str().expect("a path"), "list"],
+        vec!["map", "list", "--vault", vault.to_str().expect("a path")],
+    ] {
+        workspace
+            .command()
+            .args(&arguments)
+            .assert()
+            .success()
+            .stderr(predicate::str::contains("the vault is empty"));
+    }
+}
+
+/// A command that never opens a vault refuses them rather than accepting and
+/// ignoring them, which is what listing them in its help amounted to.
+#[test]
+fn a_command_that_never_opens_a_vault_refuses_the_store_flags() {
+    let workspace = Workspace::new();
+
+    for arguments in [
+        vec!["skill", "show"],
+        vec!["hook", "install", "--dry-run", "--project"],
+    ] {
+        workspace
+            .command()
+            .args(&arguments)
+            .arg("--vault")
+            .arg(workspace.path().join("elsewhere.db"))
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("unexpected argument '--vault'"));
+    }
+}
+
+/// The help under a command is the same list the completion script offers, so a
+/// flag named there that the command ignores is wrong in two places at once.
+#[test]
+fn the_help_names_the_store_flags_only_where_they_work() {
+    let workspace = Workspace::new();
+
+    let takes_them = workspace
+        .command()
+        .arg("clean")
+        .arg("--help")
+        .output()
+        .expect("running oboro clean --help");
+    assert!(
+        String::from_utf8_lossy(&takes_them.stdout).contains("--vault"),
+        "clean opens a vault and must say so"
+    );
+
+    let does_not = workspace
+        .command()
+        .arg("skill")
+        .arg("show")
+        .arg("--help")
+        .output()
+        .expect("running oboro skill show --help");
+    assert!(
+        !String::from_utf8_lossy(&does_not.stdout).contains("--vault"),
+        "skill show never opens a vault and must not offer to"
+    );
+}
