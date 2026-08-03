@@ -40,6 +40,7 @@ macro_rules! note {
 }
 
 pub mod claude;
+pub mod completions;
 pub mod config;
 pub mod convert;
 pub mod detect;

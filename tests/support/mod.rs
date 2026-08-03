@@ -78,6 +78,22 @@ impl Workspace {
         Command::from_std(self.std_command(locale))
     }
 
+    /// A `oboro` invocation for the tests that look for completion scripts.
+    ///
+    /// The conventional destinations are resolved against the home directory
+    /// unless one of these variables names somewhere else, and a developer with
+    /// oh-my-zsh or an XDG layout of their own has them set. Clearing them is
+    /// what keeps the temporary home the only place these tests can find a
+    /// script, so their own machine cannot decide the result.
+    pub fn completions_command(&self) -> Command {
+        let mut command = self.command();
+        command
+            .env_remove("XDG_DATA_HOME")
+            .env_remove("XDG_CONFIG_HOME")
+            .env_remove("ZSH_CUSTOM");
+        command
+    }
+
     /// The same invocation as [`Workspace::command_in_locale`], as a plain
     /// [`std::process::Command`], for the tests that have to spawn the process
     /// themselves and drive its pipes.

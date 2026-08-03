@@ -196,6 +196,53 @@ verify_provenance() {
 	fi
 }
 
+# Names any completion script already on disk, with the command that rewrites
+# it.
+#
+# A completion script is a copy of the command surface from whenever it was last
+# generated, so a release that adds a command leaves it offering the old set and
+# nothing says so. This installer is the moment that knows a version changed,
+# which makes it the moment to say it. Nothing is printed when no script is
+# found, so a first install stays quiet.
+#
+# The paths are checked directly rather than derived from the user's shell: a
+# `curl | bash` pipe runs under bash whatever the login shell is, so $SHELL is
+# unreliable here and $fpath is not available at all. PowerShell is left out
+# because it evaluates completion from $PROFILE rather than reading a file.
+#
+# Kept in step with `conventional_paths` in src/completions.rs, which a test
+# compares against this file.
+report_installed_completions() {
+	local xdg_data="${XDG_DATA_HOME:-${HOME:-}/.local/share}"
+	local xdg_config="${XDG_CONFIG_HOME:-${HOME:-}/.config}"
+	local zsh_custom="${ZSH_CUSTOM:-${HOME:-}/.oh-my-zsh/custom}"
+	local found=0
+	local entry shell path
+
+	for entry in \
+		"bash:${xdg_data}/bash-completion/completions/${BINARY_NAME}" \
+		"zsh:${zsh_custom}/completions/_${BINARY_NAME}" \
+		"zsh:${HOME:-}/.zfunc/_${BINARY_NAME}" \
+		"fish:${xdg_config}/fish/completions/${BINARY_NAME}.fish" \
+		"elvish:${xdg_config}/elvish/lib/${BINARY_NAME}.elv"; do
+		shell="${entry%%:*}"
+		path="${entry#*:}"
+		[ -f "${path}" ] || continue
+		if [ "${found}" -eq 0 ]; then
+			echo "A completion script is already installed. This version may offer commands"
+			echo "it does not know about, so rewrite it:"
+			found=1
+		fi
+		echo "  ${BINARY_NAME} completions ${shell} > ${path}"
+	done
+
+	if [ "${found}" -ne 0 ]; then
+		echo
+		echo "\`${BINARY_NAME} doctor\` compares them against this binary and says which are stale."
+		echo
+	fi
+}
+
 main() {
 	local version="${OBORO_VERSION:-}"
 	local install_dir_override=""
@@ -336,6 +383,7 @@ main() {
 	echo "  ${BINARY_NAME} doctor   # Report what this build can do"
 	echo "  ${BINARY_NAME} --help   # List the commands"
 	echo
+	report_installed_completions
 	if [ "${features}" = "ner" ]; then
 		if [ "$(uname -s)" = "Linux" ]; then
 			echo "The ner binary links glibc: it needs glibc 2.39 or newer (Ubuntu 24.04+,"
