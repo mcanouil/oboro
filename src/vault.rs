@@ -385,6 +385,9 @@ fn create_private_dir(path: &Path) -> Result<()> {
 }
 
 /// Restricts a file to owner read and write.
+// Off Unix the body does nothing, so the `Result` is always `Ok`. The type
+// stays because the Unix arm is fallible and one signature serves both.
+#[cfg_attr(not(unix), allow(clippy::unnecessary_wraps))]
 fn restrict_permissions(path: &Path) -> Result<()> {
     #[cfg(unix)]
     {

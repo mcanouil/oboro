@@ -1,0 +1,8 @@
+# Fixtures are read byte for byte, so nothing under testdata may be rewritten
+# on checkout. Git's own binary heuristic looks for a NUL byte near the head of
+# a file and misses `sparse.pdf` and `scanned.pdf`, which have none, so a
+# Windows checkout with `core.autocrlf=true` turns them into unparsable PDFs.
+testdata/** -text
+
+# A shell script checked out with CRLF is refused by bash on the first line.
+*.sh text eol=lf

@@ -234,7 +234,10 @@ fn identity_of(path: &Path) -> Result<Option<(u64, u64)>> {
     }
 }
 
+// Always `Ok(None)`, but the signature has to match the Unix arm above, whose
+// metadata call can fail.
 #[cfg(not(unix))]
+#[allow(clippy::unnecessary_wraps)]
 fn identity_of(_path: &Path) -> Result<Option<(u64, u64)>> {
     Ok(None)
 }
