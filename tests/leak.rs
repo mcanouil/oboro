@@ -45,6 +45,7 @@ const DOCUMENTS: &[&str] = &[
     "clients.tsv",
     "invoice.pdf",
     "slides.pptx",
+    "message.eml",
 ];
 
 /// The fixtures that only a build with the `ocr` feature can read: an image,
@@ -227,6 +228,22 @@ const PLANTED_IN: &[(&str, &[&str])] = &[
             "Acme Consulting SARL",
             "Globex Industries",
             "Jean Dupont",
+        ],
+    ),
+    (
+        "message.eml",
+        &[
+            "jean.dupont@acme-consulting.example",
+            "marie.martin@globex.example",
+            "06 12 34 56 78",
+            "+33 1 42 68 53 00",
+            "12 bis rue de la Paix",
+            "8 avenue des Champs-Élysées",
+            "75002 Paris",
+            "Acme Consulting SARL",
+            "Globex Industries",
+            "Jean Dupont",
+            "CT-874512",
         ],
     ),
     (

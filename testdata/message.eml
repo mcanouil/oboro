@@ -1,0 +1,34 @@
+Date: Tue, 3 Feb 2026 09:12:44 +0100
+From: Jean Dupont <jean.dupont@acme-consulting.example>
+To: Marie Martin <marie.martin@globex.example>
+Subject: =?UTF-8?Q?Contrat_CT-874512?=
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="OUTER"
+
+--OUTER
+Content-Type: multipart/alternative; boundary="INNER"
+
+--INNER
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+Bonjour,
+
+Acme Consulting SARL, 12 bis rue de la Paix, 75002 Paris.
+T=C3=A9l=C3=A9phone : 06 12 34 56 78
+
+--INNER
+Content-Type: text/html; charset=utf-8
+
+<div>Globex Industries</div><div>8 avenue des Champs-&Eacute;lys&eacute;es</div><div>+33 1 42 68 53 00</div>
+
+--INNER--
+
+--OUTER
+Content-Type: application/pdf
+Content-Disposition: attachment; filename="contrat-CT-874512.pdf"
+Content-Transfer-Encoding: base64
+
+U0VDUkVUQllURVM=
+
+--OUTER--

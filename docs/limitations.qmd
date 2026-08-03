@@ -103,7 +103,7 @@ Older `.doc`, `.xls` and `.ppt` are not read at all, nor are the OpenDocument
 spreadsheet and presentation formats, `.ods` and `.odp`.
 Neither is anything embedded inside a document: a spreadsheet pasted into a Word file is not reached.
 
-Structured data and mail are not read either: `.json`, `.yaml` and `.eml`.
+Structured data is not read either: `.json` and `.yaml`.
 A file with one of those extensions is refused rather than read partially, and
 the message names the formats this build does read.
 
@@ -125,6 +125,52 @@ rather than where it sits in the page.
 That is deliberate: it is what stops such a value concatenating onto the word
 beside it and escaping detection, and it means the output reads less like the
 original than the other formats do.
+
+Inside an `.eml`, an attachment is named but never read.
+Its filename is cleaned like any other text, since a filename often identifies
+a document by itself, but its content is not, so an email carrying a contract
+as a PDF reaches the model as a covering note and a filename.
+An attachment with no filename, which is the shape a meeting invitation takes,
+is named by its type alone.
+Read the attachment separately if its content matters.
+
+Only the headers a person writes and reads are rendered: `Date`, `From`,
+`Reply-To`, `To`, `Cc`, `Bcc` and `Subject`.
+Everything else is dropped, the routing headers `Received`, `Message-ID`, DKIM
+signatures and `X-*` along with the rest, so an internal hostname or an IP
+address in a `Received` chain never reaches the model, and so does
+`Organization`, which is written by a person and is not envelope at all.
+
+An HTML body has every element other than the inline ones put on a line of its
+own, for the same reason a `.odt` does, so an email laid out as a table reads
+as one value per line rather than as the table it was.
+Naming the elements that run on, rather than the ones that break, is what
+keeps an element nobody thought of from welding two values into one that
+matches no rule.
+Two elements written hard against each other are separated even when they are
+inline, since that is how Outlook and Word write a signature block, and text
+either side of an element that runs on is joined, since that is how the same
+clients split a name.
+
+HTML the flattener cannot follow, an unclosed `<head>` or comment among it, is
+read by stripping its tags instead.
+That recovers the text a strict reading would drop, and it is noisier: what
+was markup can reach the model as words.
+
+An address written only as a link target survives when the link is `mailto:`
+or `tel:`, quoted or not.
+It is lost otherwise, since flattening HTML to text discards attributes.
+
+A forwarded message is followed, up to eight levels deep and up to three when
+the forward is itself base64 or quoted-printable encoded, which is the parser's
+own limit.
+Past either, the forward is named as unread rather than read.
+
+Charsets are decoded, single-byte and multi-byte alike, so ISO-8859-x,
+windows-125x, Shift-JIS and GB2312 are all read as written.
+
+`.msg`, which is Outlook's own compound-file container rather than a MIME
+message, and `.mbox`, which holds many messages in one file, are not read.
 
 ## Recognition accuracy on real scans is not guaranteed
 

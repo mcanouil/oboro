@@ -49,6 +49,12 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.151", features = ["preserve_order"] }
 toml = "1.1.3"
 zeroize = { version = "1.9.0", features = ["derive"] }
+# An email is bytes with a declared charset rather than text, and the charset
+# is often neither UTF-8 nor Latin-1. `full_encoding` decodes the multi-byte
+# ones, so a Shift-JIS or GB2312 message is read as written rather than with
+# characters replaced. It pulls `encoding_rs`, which this build already
+# compiles for `calamine`, `lopdf` and `quick-xml`, so it costs no new crate.
+mail-parser = { version = "0.11.5", features = ["full_encoding"] }
 
 [dev-dependencies]
 assert_cmd = "2.2.2"

@@ -323,7 +323,7 @@ fn descriptors() -> Value {
                             stable placeholders such as [[NAME_1]] and [[PHONE_2]]. Prefer this \
                             over reading a file directly: it keeps names, addresses, telephone \
                             numbers, e-mail addresses and account identifiers out of your \
-                            context. It also reads .pdf, .docx, .xlsx, .pptx and .odt, which a \
+                            context. It also reads .pdf, .docx, .xlsx, .pptx, .odt and .eml, which a \
                             plain file read cannot open at all.",
             "inputSchema": {
                 "type": "object",
