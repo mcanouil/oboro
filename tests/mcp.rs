@@ -48,6 +48,13 @@ fn session_with(workspace: &Workspace, args: &[&str], messages: &[&str]) -> Vec<
         .collect()
 }
 
+/// The `arguments` object naming `path`, built with `serde_json` rather than
+/// spliced into a string: a Windows path's separators would otherwise read as
+/// escape sequences and the message would not parse.
+fn path_argument(path: &std::path::Path) -> String {
+    serde_json::json!({ "path": path.display().to_string() }).to_string()
+}
+
 /// A `tools/call` message for `name` with `arguments`.
 fn call(name: &str, arguments: &str) -> String {
     format!(
@@ -164,13 +171,7 @@ fn clean_replaces_values_with_placeholders() {
     let file = workspace.path().join("note.txt");
     std::fs::write(&file, "Call Marie on 06 12 34 56 78.").expect("writing the note");
 
-    let replies = session(
-        &workspace,
-        &[&call(
-            "clean",
-            &format!(r#"{{"path":"{}"}}"#, file.display()),
-        )],
-    );
+    let replies = session(&workspace, &[&call("clean", &path_argument(&file))]);
 
     let cleaned = text_of(&replies[0]);
     assert!(
@@ -196,13 +197,7 @@ fn each_sheet_of_a_workbook_becomes_its_own_block() {
         ],
     );
 
-    let replies = session(
-        &workspace,
-        &[&call(
-            "clean",
-            &format!(r#"{{"path":"{}"}}"#, book.display()),
-        )],
-    );
+    let replies = session(&workspace, &[&call("clean", &path_argument(&book))]);
 
     let blocks = replies[0]["result"]["content"]
         .as_array()
@@ -236,7 +231,7 @@ fn a_missing_path_is_a_tool_error_and_the_loop_survives_it() {
     let replies = session(
         &workspace,
         &[
-            &call("clean", &format!(r#"{{"path":"{}"}}"#, missing.display())),
+            &call("clean", &path_argument(&missing)),
             r#"{"jsonrpc":"2.0","id":2,"method":"ping"}"#,
         ],
     );
@@ -269,8 +264,8 @@ fn a_read_failure_does_not_end_the_session() {
     let replies = session(
         &workspace,
         &[
-            &call("clean", &format!(r#"{{"path":"{}"}}"#, missing.display())),
-            &call("clean", &format!(r#"{{"path":"{}"}}"#, file.display())),
+            &call("clean", &path_argument(&missing)),
+            &call("clean", &path_argument(&file)),
         ],
     );
 
@@ -297,13 +292,7 @@ fn a_sheet_named_after_a_person_is_headed_with_a_placeholder() {
     let book = workspace.path().join("book.xlsx");
     support::write_xlsx(&book, &[("06 12 34 56 78", &[&["a value"]])]);
 
-    let replies = session(
-        &workspace,
-        &[&call(
-            "clean",
-            &format!(r#"{{"path":"{}"}}"#, book.display()),
-        )],
-    );
+    let replies = session(&workspace, &[&call("clean", &path_argument(&book))]);
 
     let heading = text_of(&replies[0]);
     assert!(
@@ -343,10 +332,7 @@ fn a_sheet_heading_is_cleaned_even_when_filename_redaction_is_off() {
             "--config",
             config.to_str().expect("a UTF-8 path"),
         ],
-        &[&call(
-            "clean",
-            &format!(r#"{{"path":"{}"}}"#, book.display()),
-        )],
+        &[&call("clean", &path_argument(&book))],
     );
 
     let heading = text_of(&replies[0]);
@@ -388,13 +374,7 @@ fn a_reader_error_never_carries_a_fragment_of_the_document() {
     let file = workspace.path().join("broken.docx");
     write_docx_with_a_bare_entity(&file);
 
-    let replies = session(
-        &workspace,
-        &[&call(
-            "clean",
-            &format!(r#"{{"path":"{}"}}"#, file.display()),
-        )],
-    );
+    let replies = session(&workspace, &[&call("clean", &path_argument(&file))]);
 
     assert_eq!(
         replies[0]["result"]["isError"], true,
@@ -414,13 +394,7 @@ fn an_unsupported_extension_names_what_can_be_read() {
     let file = workspace.path().join("archive.tar.gz");
     std::fs::write(&file, b"not a document").expect("writing the file");
 
-    let replies = session(
-        &workspace,
-        &[&call(
-            "clean",
-            &format!(r#"{{"path":"{}"}}"#, file.display()),
-        )],
-    );
+    let replies = session(&workspace, &[&call("clean", &path_argument(&file))]);
 
     let message = text_of(&replies[0]);
     assert_eq!(replies[0]["result"]["isError"], true);
@@ -435,13 +409,7 @@ fn a_missing_path_says_so_rather_than_saying_nothing() {
     let workspace = Workspace::new();
     let missing = workspace.path().join("nowhere.txt");
 
-    let replies = session(
-        &workspace,
-        &[&call(
-            "clean",
-            &format!(r#"{{"path":"{}"}}"#, missing.display()),
-        )],
-    );
+    let replies = session(&workspace, &[&call("clean", &path_argument(&missing))]);
 
     let message = text_of(&replies[0]);
     assert!(
@@ -460,13 +428,7 @@ fn a_text_file_that_is_not_utf8_is_named_as_such() {
     // `caf` then 0xe9, which is Latin-1 for the acute e and never valid UTF-8.
     std::fs::write(&file, b"caf\xe9").expect("writing the file");
 
-    let replies = session(
-        &workspace,
-        &[&call(
-            "clean",
-            &format!(r#"{{"path":"{}"}}"#, file.display()),
-        )],
-    );
+    let replies = session(&workspace, &[&call("clean", &path_argument(&file))]);
 
     let message = text_of(&replies[0]);
     assert_eq!(replies[0]["result"]["isError"], true);
@@ -482,13 +444,7 @@ fn a_corrupt_archive_is_not_called_an_encoding_problem() {
     let file = workspace.path().join("corrupt.docx");
     std::fs::write(&file, b"this is not a zip archive at all").expect("writing the file");
 
-    let replies = session(
-        &workspace,
-        &[&call(
-            "clean",
-            &format!(r#"{{"path":"{}"}}"#, file.display()),
-        )],
-    );
+    let replies = session(&workspace, &[&call("clean", &path_argument(&file))]);
 
     let message = text_of(&replies[0]);
     assert_eq!(replies[0]["result"]["isError"], true);
@@ -507,7 +463,7 @@ fn a_placeholder_issued_by_clean_is_listed_by_map_list() {
     let replies = session(
         &workspace,
         &[
-            &call("clean", &format!(r#"{{"path":"{}"}}"#, file.display())),
+            &call("clean", &path_argument(&file)),
             &call("map_list", "{}"),
         ],
     );
@@ -539,7 +495,7 @@ fn a_named_configuration_is_honoured_and_its_absence_is_not_silent() {
     .expect("writing the configuration");
     let file = workspace.path().join("note.txt");
     std::fs::write(&file, "The client is Globex.").expect("writing the note");
-    let message = call("clean", &format!(r#"{{"path":"{}"}}"#, file.display()));
+    let message = call("clean", &path_argument(&file));
 
     let with = session_with(
         &workspace,
@@ -628,8 +584,8 @@ fn a_file_inside_a_root_is_cleaned_and_one_outside_is_refused() {
         &workspace,
         &["--root", root.to_str().expect("a UTF-8 path")],
         &[
-            &call("clean", &format!(r#"{{"path":"{}"}}"#, inside.display())),
-            &call("clean", &format!(r#"{{"path":"{}"}}"#, outside.display())),
+            &call("clean", &path_argument(&inside)),
+            &call("clean", &path_argument(&outside)),
         ],
     );
 
@@ -663,8 +619,8 @@ fn a_refusal_outside_the_roots_does_not_say_whether_the_file_exists() {
         &workspace,
         &["--root", root.to_str().expect("a UTF-8 path")],
         &[
-            &call("clean", &format!(r#"{{"path":"{}"}}"#, real.display())),
-            &call("clean", &format!(r#"{{"path":"{}"}}"#, absent.display())),
+            &call("clean", &path_argument(&real)),
+            &call("clean", &path_argument(&absent)),
         ],
     );
 
@@ -697,14 +653,8 @@ fn a_traversal_answers_the_same_whatever_exists_along_it() {
         &workspace,
         &["--root", root.to_str().expect("a UTF-8 path")],
         &[
-            &call(
-                "clean",
-                &format!(r#"{{"path":"{}"}}"#, through_present.display()),
-            ),
-            &call(
-                "clean",
-                &format!(r#"{{"path":"{}"}}"#, through_absent.display()),
-            ),
+            &call("clean", &path_argument(&through_present)),
+            &call("clean", &path_argument(&through_absent)),
         ],
     );
 
@@ -738,11 +688,8 @@ fn a_symbolic_link_out_of_a_root_is_refused_even_through_a_missing_component() {
         &workspace,
         &["--root", root.to_str().expect("a UTF-8 path")],
         &[
-            &call("clean", &format!(r#"{{"path":"{}"}}"#, direct.display())),
-            &call(
-                "clean",
-                &format!(r#"{{"path":"{}"}}"#, through_missing.display()),
-            ),
+            &call("clean", &path_argument(&direct)),
+            &call("clean", &path_argument(&through_missing)),
         ],
     );
 
