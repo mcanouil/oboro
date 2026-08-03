@@ -143,17 +143,24 @@ as one value per line rather than as the table it was.
 Naming the elements that run on, rather than the ones that break, is what
 keeps an element nobody thought of from welding two values into one that
 matches no rule.
+Two elements written hard against each other are separated even when they are
+inline, since that is how Outlook and Word write a signature block, and text
+either side of an element that runs on is joined, since that is how the same
+clients split a name.
+
+HTML the flattener cannot follow, an unclosed `<head>` or comment among it, is
+read by stripping its tags instead.
+That recovers the text a strict reading would drop, and it is noisier: what
+was markup can reach the model as words.
 
 An address written only as a link target survives when the link is `mailto:`
-or `tel:` and the target is quoted, as a mail client writes it.
+or `tel:`, quoted or not.
 It is lost otherwise, since flattening HTML to text discards attributes.
 
 A forwarded message is followed, up to eight levels deep and up to three when
 the forward is itself base64 or quoted-printable encoded, which is the parser's
 own limit.
 Past either, the forward is named as unread rather than read.
-A file that declares more than a thousand nested messages is refused unread,
-since parsing one exhausts the stack instead of failing.
 
 Charsets are decoded, single-byte and multi-byte alike, so ISO-8859-x,
 windows-125x, Shift-JIS and GB2312 are all read as written.
