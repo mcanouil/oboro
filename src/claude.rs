@@ -128,13 +128,16 @@ pub fn write_atomic(path: &Path, contents: &[u8]) -> Result<()> {
 mod tests {
     use super::*;
 
+    // Making a symbolic link on Windows needs a privilege an ordinary user does
+    // not have, so there is no link to refuse and the assertion below cannot
+    // hold. The refusal it covers is a Unix guarantee.
+    #[cfg(unix)]
     #[test]
     fn a_link_anywhere_below_the_root_is_refused() {
         let root = tempfile::tempdir().expect("temporary directory");
         std::fs::create_dir_all(root.path().join(".claude")).expect("creating .claude");
         let elsewhere = root.path().join("elsewhere");
         std::fs::create_dir_all(&elsewhere).expect("creating the link target");
-        #[cfg(unix)]
         std::os::unix::fs::symlink(&elsewhere, root.path().join(".claude/skills"))
             .expect("linking");
 
