@@ -1539,3 +1539,125 @@ fn hook_install_refuses_a_symlinked_settings_file() {
         "the link target is untouched"
     );
 }
+
+/// The whole design of `completions` is the split between the two streams: the
+/// redirect has to capture a script the shell can read, and the instructions
+/// have to reach the person who ran the command.
+#[test]
+fn completions_writes_the_script_to_stdout_and_the_destination_to_stderr() {
+    let workspace = Workspace::new();
+    let output = workspace
+        .command()
+        .arg("completions")
+        .arg("zsh")
+        .output()
+        .expect("running oboro completions");
+
+    assert!(output.status.success());
+    let script = String::from_utf8(output.stdout).expect("the script must be UTF-8");
+    let hint = String::from_utf8(output.stderr).expect("the hint must be UTF-8");
+
+    assert!(
+        script.starts_with("#compdef oboro"),
+        "the redirect must capture a script and nothing before it: {:?}",
+        script.lines().next()
+    );
+    assert!(
+        !script.contains("m.canouil.dev"),
+        "no part of the hint may reach the file"
+    );
+    assert!(
+        hint.contains("_oboro"),
+        "the hint must name the destination"
+    );
+    assert!(
+        hint.contains("autoload -Uz compinit && compinit"),
+        "the hint must print the command that makes zsh read it"
+    );
+}
+
+/// A build directory or a renamed copy still has to complete the installed
+/// name, so the script is generated under the name the command carries.
+#[test]
+fn completions_generates_under_the_installed_name() {
+    let workspace = Workspace::new();
+    workspace
+        .command()
+        .arg("completions")
+        .arg("bash")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("_oboro()"))
+        .stdout(predicate::str::contains("target/debug").not());
+}
+
+/// A completion script is a copy of the command surface from when it was
+/// generated, and nothing else in the tool would say it has fallen behind.
+#[test]
+fn doctor_reports_a_completion_script_as_current_then_stale() {
+    let workspace = Workspace::new();
+    let directory = workspace.home().join(".zfunc");
+    std::fs::create_dir_all(&directory).expect("creating the completion directory");
+    let script = directory.join("_oboro");
+
+    // Nothing installed anywhere: said rather than passed over, as the hooks
+    // and the skill are.
+    workspace
+        .completions_command()
+        .arg("doctor")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("completion  not installed"));
+
+    let generated = workspace
+        .completions_command()
+        .arg("completions")
+        .arg("zsh")
+        .output()
+        .expect("running oboro completions");
+    std::fs::write(&script, &generated.stdout).expect("writing the completion script");
+
+    workspace
+        .completions_command()
+        .arg("doctor")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(format!(
+            "completion  {} (current)",
+            script.display()
+        )));
+
+    std::fs::write(&script, b"# an older release wrote this\n").expect("editing the script");
+
+    workspace
+        .completions_command()
+        .arg("doctor")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("(stale)"))
+        .stdout(predicate::str::contains(format!(
+            "oboro completions zsh > {}",
+            script.display()
+        )));
+}
+
+/// The installer checks the same places in shell that `conventional_paths`
+/// checks in Rust, so the list is written twice and can drift. The home
+/// directory and the environment overrides are what a test cannot compare, so
+/// it compares the part of each path that neither of them changes.
+#[test]
+fn the_installer_checks_every_conventional_directory() {
+    let installer = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/install.sh"),
+    )
+    .expect("reading docs/install.sh");
+
+    for location in oboro::completions::conventional_paths("oboro") {
+        assert!(
+            installer.contains(location.convention),
+            "docs/install.sh does not look in {}, which {} reads",
+            location.convention,
+            location.shell
+        );
+    }
+}

@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Features
+
+- feat: Print a shell completion script with `oboro completions <shell>`, for `bash`, `zsh`, `fish`, `elvish` and `powershell`. The script goes to standard output and the destination it belongs in goes to standard error alongside it, so one command answers both halves of a question a generated script only ever answers half of: `oboro completions zsh > ~/.oh-my-zsh/custom/completions/_oboro` writes a file with nothing in front of it for the shell to trip over, the instructions still reach the terminal where they are useful at that moment, and `2>/dev/null` drops them for anyone scripting the command. Each shell is told its own convention rather than a generic sentence, including the leading underscore in the zsh filename and the two lines `compinit` needs when the directory is not already on `$fpath`; oh-my-zsh is named first, because it puts `$ZSH_CUSTOM/completions` on `$fpath` and runs `compinit` itself, so those users are finished once the file is written and the generic advice would send them to edit `~/.zshrc` for no effect. The script is generated under the name the command carries rather than the name it was invoked by, so one written from a build directory or from a renamed copy still completes the installed name. (#101)
+- feat: Report in `oboro doctor` whether the completion scripts on disk still match the binary. A completion script is a copy of the command surface from the moment it was generated, so a release that adds a command leaves it offering the old set and nothing otherwise says so; each one is regenerated and compared byte for byte, which answers that exactly with no version to parse, and a stale one is followed by the command that rewrites it. Every conventional destination is looked in whatever `$SHELL` says, since that variable is wrong often enough to matter and a place holding no file costs no line. `docs/install.sh` looks in the same places and prints the same command when it finds one, being the moment that knows a version changed, and says nothing when it finds none so a first install stays quiet. (#101)
+
 ## 0.6.0 (2026-08-03)
 
 ### Features

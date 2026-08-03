@@ -1,6 +1,6 @@
 ---
 title: "Command reference"
-description: "Every oboro command and the options it accepts: clean, review, restore, map, models, and doctor."
+description: "Every oboro command and the options it accepts: clean, review, restore, map, models, doctor, and completions."
 ---
 
 Every command accepts `--vault` and `--key` to point at a store other than the default, which is useful for keeping one vault per project.
@@ -387,11 +387,12 @@ PostToolUse .claude/settings.local.json (Read|Grep|Bash|WebFetch, reachable)
 PreToolUse  not installed; run `oboro hook install`
 skill       /Users/you/work/.claude/skills/oboro/SKILL.md (current)
 skill       /Users/you/.claude/skills/oboro/SKILL.md (not installed)
+completion  /Users/you/.zfunc/_oboro (current)
 ```
 
 Start here when something is not being detected: it shows whether the model is installed, which configuration was found, and which formats this build reads.
 
-The last four lines answer a different question: whether the agent side is wired up.
+The four lines before the last answer a different question: whether the agent side is wired up.
 
 Both hook events are reported whether or not they are found, because having only the first is the worst of the three states: the model is shown placeholders and nothing puts the values back, so they reach your files.
 `reachable` means the program the hook names can actually be run; a hook naming a binary that is not on `PATH` is configured and useless.
@@ -411,3 +412,61 @@ Installing on top of it is worth avoiding rather than merely noticing: two copie
 
 Both [skill](#skill) scopes are reported for the same reason.
 `current` is the text this build carries; `edited` is a copy that has drifted from it, which is the state where the agent is being told something the binary no longer does.
+
+The `completion` lines answer the same question for [completions](#completions).
+Every conventional destination is looked in, whichever shell you use, and only the ones holding a file are named.
+Each is regenerated and compared byte for byte against this binary, so `current` and `stale` are measured rather than guessed, and a stale one is followed by the command that rewrites it:
+
+```text
+completion  /Users/you/.config/fish/completions/oboro.fish (stale)
+            oboro completions fish > /Users/you/.config/fish/completions/oboro.fish
+```
+
+## `completions`
+
+Prints a shell completion script.
+
+```bash
+oboro completions <SHELL>
+```
+
+`<SHELL>` is one of `bash`, `zsh`, `fish`, `elvish` or `powershell`.
+
+The script goes to standard output and the destination it belongs in goes to standard error, so one command answers both halves of the question:
+
+```bash
+oboro completions zsh > ~/.oh-my-zsh/custom/completions/_oboro
+```
+
+The redirect captures the script alone, leaving a file with nothing in front of it for the shell to trip over, while the instructions still reach the terminal.
+Add `2>/dev/null` to drop them when you are scripting this.
+
+| Shell | Destination | Follow-up |
+| --- | --- | --- |
+| bash | `~/.local/share/bash-completion/completions/oboro` | None. |
+| zsh | `_oboro` in a directory on `$fpath` | `compinit` has to run after that directory is added. |
+| fish | `~/.config/fish/completions/oboro.fish` | None. |
+| elvish | `~/.config/elvish/lib/oboro.elv` | Add `use oboro` to `~/.config/elvish/rc.elv`. |
+| powershell | Usually no file | Pipe into `Invoke-Expression` from `$PROFILE`. |
+
+`$XDG_DATA_HOME` and `$XDG_CONFIG_HOME` are honoured where they apply.
+Note the leading underscore in the zsh filename, and that zsh has no fixed directory: any on `$fpath` will do.
+
+With oh-my-zsh there is nothing to do beyond writing the file, since it puts `$ZSH_CUSTOM/completions`, by default `~/.oh-my-zsh/custom/completions`, on `$fpath` and runs `compinit` itself.
+Without it, pick a directory such as `~/.zfunc` and add both lines to `~/.zshrc`:
+
+```bash
+fpath=(~/.zfunc $fpath)
+autoload -Uz compinit && compinit
+```
+
+PowerShell is usually evaluated rather than saved:
+
+```powershell
+oboro completions powershell | Out-String | Invoke-Expression
+```
+
+Put that in `$PROFILE` to have it in every session.
+
+A completion script is a copy of the command surface from the moment it was generated, so an upgrade that adds a command leaves it offering the old set.
+[`doctor`](#doctor) says when that has happened, and the install script says so at the moment it happens.

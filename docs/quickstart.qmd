@@ -133,6 +133,8 @@ Check what your build can do:
 oboro doctor
 ```
 
+However you installed it, `oboro completions <shell>` prints a completion script and tells you where it belongs; the destinations are in the [command reference](reference.qmd#completions).
+
 ## Wire it into Claude Code
 
 Do this first if you use Claude Code.
