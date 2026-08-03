@@ -6,6 +6,7 @@
 //! sanitised without ever having been read.
 
 mod docx;
+mod eml;
 mod odt;
 mod pdf;
 mod pptx;
@@ -29,6 +30,8 @@ pub enum Format {
     /// Tab-separated values, read as-is; the output keeps the extension.
     Tsv,
     Docx,
+    /// RFC 5322 email, read as headers plus body text.
+    Eml,
     Odt,
     Pptx,
     Xlsx,
@@ -49,6 +52,7 @@ const FORMATS: &[(&str, Format)] = &[
     ("csv", Format::Csv),
     ("tsv", Format::Tsv),
     ("docx", Format::Docx),
+    ("eml", Format::Eml),
     ("odt", Format::Odt),
     ("pptx", Format::Pptx),
     ("xlsx", Format::Xlsx),
@@ -203,6 +207,7 @@ pub fn read(path: &Path, ocr_languages: &[String]) -> Result<Conversion> {
         Format::Text => read_utf8(path).map(|text| Conversion::Document(tidy(&text))),
         Format::Csv | Format::Tsv => read_utf8(path).map(Conversion::Document),
         Format::Docx => docx::to_text(path).map(Conversion::Document),
+        Format::Eml => eml::to_text(path).map(Conversion::Document),
         Format::Odt => odt::to_text(path).map(Conversion::Document),
         Format::Pptx => pptx::to_text(path).map(Conversion::Document),
         Format::Xlsx => xlsx::to_sheets(path).map(Conversion::Sheets),
