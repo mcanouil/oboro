@@ -449,6 +449,12 @@ mod tests {
     }
 
     #[test]
+    fn email_is_advertised_and_matched_regardless_of_case() {
+        assert!(supported().contains(&"eml"));
+        assert_eq!(format_of(Path::new("a.EML")), Some(Format::Eml));
+    }
+
+    #[test]
     fn tabular_extensions_are_advertised() {
         assert!(supported().contains(&"csv"));
         assert!(supported().contains(&"tsv"));
@@ -462,6 +468,8 @@ mod tests {
             Some(Format::Csv),
             Some(Format::Tsv),
             Some(Format::Docx),
+            Some(Format::Eml),
+            Some(Format::Odt),
             Some(Format::Pptx),
             Some(Format::Xlsx),
             Some(Format::Pdf),

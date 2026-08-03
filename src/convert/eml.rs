@@ -155,10 +155,18 @@ fn render(message: &Message, depth: usize, unread: &mut usize, path: &Path) -> R
 }
 
 /// Flattens HTML to text, after making its block structure survivable.
+///
+/// The separator inserted before a block tag is a `<br>` rather than a plain
+/// newline, since `html_to_text` collapses whitespace between tags into a
+/// single space. A space keeps two values from welding but leaves them on one
+/// line, where a rule matching one can run on into the next: measured on the
+/// fixture, one address placeholder swallowed the telephone number sitting in
+/// the next `<div>`. A `<br>` is the one thing the flattener turns into a real
+/// line break.
 fn html_text(html: &str) -> String {
     let linked = LINK_TARGET.replace_all(html, "$0 $1 ");
-    let spaced = BLOCK_TAG.replace_all(&linked, "\n$0");
-    mail_parser::decoders::html::html_to_text(&spaced)
+    let broken = BLOCK_TAG.replace_all(&linked, "<br>$0");
+    mail_parser::decoders::html::html_to_text(&broken)
 }
 
 /// Appends a block, keeping a blank line between it and whatever precedes it
@@ -507,6 +515,12 @@ mod tests {
         assert!(
             !text.contains("7875002"),
             "two values merged into one candidate:\n{text}"
+        );
+        assert!(
+            !text
+                .lines()
+                .any(|line| line.contains("06 12 34 56 78") && line.contains("75002")),
+            "two blocks share a line, where one rule can run on into the next:\n{text}"
         );
     }
 
