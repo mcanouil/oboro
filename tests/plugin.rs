@@ -11,8 +11,6 @@
 //! file renamed or deleted is a build failure here rather than a plugin that
 //! quietly stops loading for everyone who installs it.
 
-use std::path::{Path, PathBuf};
-
 /// The manifest an agent reads to load the plugin.
 const PLUGIN: &str = include_str!("../.claude-plugin/plugin.json");
 /// The manifest an agent reads to find the plugin.
@@ -108,8 +106,11 @@ fn the_plugin_hooks_match_the_events_oboro_answers() {
 }
 
 /// Where the wrapper is, run from wherever the test happens to run.
-fn wrapper() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("hooks/oboro-hook.sh")
+// Only [`run`] calls this, and running a bash wrapper is Unix-only, so off Unix
+// the helper is dead rather than merely unused.
+#[cfg(unix)]
+fn wrapper() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("hooks/oboro-hook.sh")
 }
 
 /// Runs the wrapper with `path` as its `PATH`, feeding it `payload`.
