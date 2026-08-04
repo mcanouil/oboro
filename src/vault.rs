@@ -813,6 +813,27 @@ mod acl {
                 Protection::Unreadable
             );
         }
+
+        // Temporary diagnostic: dumps the raw icacls listing this runner
+        // actually produces, to compare against what `interpret` expects.
+        // Remove once the real-runner ACL shape is confirmed.
+        #[cfg(windows)]
+        #[test]
+        fn zzz_dump_real_icacls_output() {
+            let dir = tempfile::tempdir().expect("temporary directory");
+            let path = dir.path().join("probe");
+            std::fs::write(&path, b"x").expect("writing a probe file");
+
+            let account = identity().expect("resolving the current account");
+            restrict_file(&path).expect("restricting the probe file");
+            let output = run_icacls(&path, &[]).expect("running icacls");
+
+            panic!(
+                "account = {account:?}\npath = {path:?}\nstdout = {:?}\nstderr = {:?}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
     }
 }
 
