@@ -333,7 +333,8 @@ regex = "CT-[0-9]{6}"
 | `~/.oboro/vault.db` | Placeholder mapping, values encrypted with AES-256-GCM |
 | `~/.oboro/key`      | The 32-byte key, created on first use                  |
 
-Both are created with owner-only permissions. Values are looked up through a
+Both are created readable only by you: an owner-only file mode on Unix, an
+ACL granting only your account on Windows. Values are looked up through a
 keyed hash rather than the plaintext, so the database on its own reveals
 neither the values nor whether a guessed value is present.
 
