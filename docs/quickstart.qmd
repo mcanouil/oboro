@@ -354,3 +354,15 @@ pbpaste | oboro restore
 oboro clean contract.docx --stdout | pbcopy   # paste into the model
 pbpaste | oboro restore                       # read what it said, with real values
 ```
+
+## Uninstalling
+
+One command removes everything Oboro wrote: the completion script, the agent hooks and skill, the vault, the recognition model, and the binary itself.
+
+```bash
+oboro uninstall
+```
+
+It prints everything that would go and asks to confirm; `--dry-run` prints the same report and stops there.
+Without `--keep-vault` the vault and its key go too, and restoring anything cleaned earlier becomes impossible from then on.
+See the [`uninstall` reference](reference.qmd#uninstall) for the flags, and the [Docker guide](docker.qmd) for the volume and image this command cannot reach.

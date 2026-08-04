@@ -408,6 +408,170 @@ fn kind_of(value: &serde_json::Value) -> &'static str {
     }
 }
 
+/// What removing an event's hook from a settings file did.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum Removal {
+    /// An Oboro hook was named for this event, matched against this, and has
+    /// been taken out.
+    Remove(Option<String>),
+    /// No Oboro hook was named for this event; nothing to remove.
+    Absent,
+}
+
+/// What removing Oboro's hooks from a scope would leave, decided once so that
+/// what is announced and what is written cannot disagree.
+#[derive(Debug)]
+pub struct RemovalPlan {
+    /// The settings file this would rewrite.
+    pub file: PathBuf,
+    /// What happens to each event, in the order [`EVENTS`] lists them.
+    pub changes: Vec<(&'static str, Removal)>,
+    /// The settings as they would end up, so `--dry-run` can show them.
+    settings: serde_json::Value,
+}
+
+impl RemovalPlan {
+    /// Whether anything would actually be removed.
+    #[must_use]
+    pub fn writes(&self) -> bool {
+        self.changes
+            .iter()
+            .any(|(_, change)| matches!(change, Removal::Remove(_)))
+    }
+
+    /// The settings as they would end up, formatted the way they would land.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the settings cannot be rendered, for the same
+    /// reason [`Plan::rendered`] does not fail in practice either.
+    pub fn rendered(&self) -> Result<String> {
+        let text = serde_json::to_string_pretty(&self.settings)
+            .with_context(|| format!("rendering the settings for {}", self.file.display()))?;
+        Ok(format!("{text}\n"))
+    }
+}
+
+/// What removing Oboro's hooks from `scope` would do, without doing it.
+///
+/// # Errors
+///
+/// Returns an error for the same reasons [`plan`] does: a symbolic link on the
+/// path to the settings file, or a settings file whose shape Oboro does not
+/// recognise. A file Oboro cannot read is one it must not rewrite either.
+pub fn removal_plan(scope: Scope, cwd: &Path) -> Result<RemovalPlan> {
+    let root = scope.root(cwd)?;
+    refuse_symlinks(&root, &settings_components(scope))?;
+    let file = settings_path(scope, cwd)?;
+
+    let mut settings = read_settings(&file)?;
+    let mut changes = Vec::new();
+    for event in EVENTS {
+        changes.push((event.name, remove_hook(&mut settings, &event, &file)?));
+    }
+    Ok(RemovalPlan {
+        file,
+        changes,
+        settings,
+    })
+}
+
+/// Carries out a [`RemovalPlan`], returning it so the caller can report what
+/// happened.
+///
+/// # Errors
+///
+/// Returns an error when the settings file cannot be written.
+pub fn uninstall(plan: RemovalPlan) -> Result<RemovalPlan> {
+    if !plan.writes() {
+        return Ok(plan);
+    }
+    write_atomic(&plan.file, plan.rendered()?.as_bytes())?;
+    Ok(plan)
+}
+
+/// Removes `event`'s Oboro hook from `settings`, if one is named.
+///
+/// Prunes upwards as it goes: an emptied matcher group is dropped, then an
+/// emptied event list, then an emptied `hooks` object, so a settings file that
+/// held nothing else of Oboro's ends as `{}` rather than carrying empty
+/// scaffolding behind. Everything else in the file, and every other tool's
+/// hook on the same event, is left exactly as it was written.
+fn remove_hook(settings: &mut serde_json::Value, event: &Event, file: &Path) -> Result<Removal> {
+    let Some(root) = settings.as_object_mut() else {
+        // `read_settings` already guarantees an object; defensive only.
+        return Ok(Removal::Absent);
+    };
+    let Some(hooks) = root.get_mut("hooks") else {
+        return Ok(Removal::Absent);
+    };
+    let Some(hooks_obj) = hooks.as_object_mut() else {
+        bail!(
+            "`hooks` in {} holds {} rather than an object",
+            file.display(),
+            kind_of(hooks)
+        );
+    };
+    let Some(groups_value) = hooks_obj.get_mut(event.name) else {
+        return Ok(Removal::Absent);
+    };
+    let Some(groups) = groups_value.as_array_mut() else {
+        bail!(
+            "`hooks.{}` in {} holds {} rather than a list",
+            event.name,
+            file.display(),
+            kind_of(groups_value)
+        );
+    };
+
+    let mut removed: Option<Option<String>> = None;
+    for group in groups.iter_mut() {
+        let matcher = group
+            .get("matcher")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned);
+        let Some(entries) = group
+            .get_mut("hooks")
+            .and_then(serde_json::Value::as_array_mut)
+        else {
+            continue;
+        };
+        let mut found_here = false;
+        entries.retain(|entry| {
+            let is_ours = entry
+                .get("command")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|command| names_oboro_hook(command, event.subcommand));
+            found_here |= is_ours;
+            !is_ours
+        });
+        if found_here && removed.is_none() {
+            removed = Some(matcher);
+        }
+    }
+
+    let Some(matcher) = removed else {
+        return Ok(Removal::Absent);
+    };
+
+    groups.retain(|group| {
+        group
+            .get("hooks")
+            .and_then(serde_json::Value::as_array)
+            .is_none_or(|entries| !entries.is_empty())
+    });
+    let event_emptied = groups.is_empty();
+    if event_emptied {
+        hooks_obj.remove(event.name);
+    }
+    let hooks_emptied = hooks_obj.is_empty();
+    if hooks_emptied {
+        root.remove("hooks");
+    }
+
+    Ok(Removal::Remove(matcher))
+}
+
 /// Whether the program a hook command starts with can be run.
 ///
 /// Only the first word is checked: everything after it is the subcommand and
@@ -735,5 +899,112 @@ mod tests {
             "/nonexistent/oboro hook post-tool-use"
         ));
         assert!(!program_is_reachable(""));
+    }
+
+    /// Uninstalls from a temporary project, the way the command does.
+    fn uninstall_from(cwd: &Path) -> Result<RemovalPlan> {
+        uninstall(removal_plan(Scope::Project, cwd)?)
+    }
+
+    #[test]
+    fn removing_from_a_project_with_no_settings_changes_nothing() {
+        let project = tempfile::tempdir().expect("temporary directory");
+
+        let done = uninstall_from(project.path()).expect("uninstalling");
+
+        assert!(!done.writes());
+        assert!(
+            !settings_path(Scope::Project, project.path())
+                .expect("a path")
+                .exists()
+        );
+    }
+
+    #[test]
+    fn both_hooks_are_removed_and_the_file_ends_empty() {
+        let project = tempfile::tempdir().expect("temporary directory");
+        install_into(project.path()).expect("installing");
+
+        let done = uninstall_from(project.path()).expect("uninstalling");
+
+        assert_eq!(
+            done.changes,
+            vec![
+                (
+                    "PostToolUse",
+                    Removal::Remove(Some("Read|Grep|Bash|WebFetch".to_owned()))
+                ),
+                ("PreToolUse", Removal::Remove(Some("Write|Edit".to_owned()))),
+            ]
+        );
+        assert_eq!(settings_in(project.path()), serde_json::json!({}));
+    }
+
+    /// Someone else's hook on the same event is not Oboro's to remove.
+    #[test]
+    fn another_tools_hook_on_the_same_event_survives() {
+        let project = tempfile::tempdir().expect("temporary directory");
+        write_settings(
+            project.path(),
+            r#"{"hooks": {"PostToolUse": [{"matcher": "Write", "hooks": [{"type": "command", "command": "cargo fmt"}]}]}}"#,
+        );
+        install_into(project.path()).expect("installing");
+
+        uninstall_from(project.path()).expect("uninstalling");
+
+        let groups = settings_in(project.path())["hooks"]["PostToolUse"]
+            .as_array()
+            .expect("a list")
+            .clone();
+        assert_eq!(groups.len(), 1, "only ours is removed");
+        assert_eq!(groups[0]["hooks"][0]["command"], "cargo fmt");
+    }
+
+    /// Every other key in the file keeps its place, the same guarantee the
+    /// install side gives.
+    #[test]
+    fn every_other_key_survives_uninstalling() {
+        let project = tempfile::tempdir().expect("temporary directory");
+        write_settings(
+            project.path(),
+            r#"{"zebra": 1, "permissions": {"allow": ["Bash(ls)"]}, "alpha": 2}"#,
+        );
+        install_into(project.path()).expect("installing");
+
+        uninstall_from(project.path()).expect("uninstalling");
+
+        let text =
+            std::fs::read_to_string(settings_path(Scope::Project, project.path()).expect("a path"))
+                .expect("reading the settings");
+        assert!(text.contains("Bash(ls)"), "other settings must survive");
+        assert!(!text.contains("oboro hook"), "the hooks are gone: {text}");
+    }
+
+    /// A settings file with no Oboro hook is a no-op, not an error.
+    #[test]
+    fn a_settings_file_with_no_oboro_hook_is_left_alone() {
+        let project = tempfile::tempdir().expect("temporary directory");
+        write_settings(project.path(), r#"{"model": "opus"}"#);
+
+        let done = uninstall_from(project.path()).expect("uninstalling");
+
+        assert!(!done.writes());
+        assert_eq!(
+            settings_in(project.path()),
+            serde_json::json!({"model": "opus"})
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_claude_directory_is_refused_on_removal() {
+        let project = tempfile::tempdir().expect("temporary directory");
+        let elsewhere = project.path().join("elsewhere");
+        std::fs::create_dir_all(&elsewhere).expect("creating the link target");
+        std::os::unix::fs::symlink(&elsewhere, project.path().join(".claude")).expect("linking");
+
+        let error = uninstall_from(project.path()).expect_err("must refuse");
+
+        assert!(format!("{error:#}").contains("symbolic link"), "{error:#}");
     }
 }

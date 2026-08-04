@@ -493,7 +493,7 @@ pub fn describe_protection(path: &Path) -> Option<String> {
 ///
 /// Returns an error if the home directory cannot be determined.
 pub fn default_db_path() -> Result<PathBuf> {
-    Ok(oboro_home()?.join("vault.db"))
+    Ok(home()?.join("vault.db"))
 }
 
 /// The default key location, `~/.oboro/key`.
@@ -502,10 +502,20 @@ pub fn default_db_path() -> Result<PathBuf> {
 ///
 /// Returns an error if the home directory cannot be determined.
 pub fn default_key_path() -> Result<PathBuf> {
-    Ok(oboro_home()?.join("key"))
+    Ok(home()?.join("key"))
 }
 
-fn oboro_home() -> Result<PathBuf> {
+/// Where Oboro keeps everything it stores for this user: the vault, the key,
+/// and the recognition model when the `ner` feature has fetched one.
+///
+/// Public so `oboro uninstall` can name the whole directory without needing
+/// the `ner` feature, which is the only build `crate::models::directory` is
+/// compiled into.
+///
+/// # Errors
+///
+/// Returns an error if the home directory cannot be determined.
+pub fn home() -> Result<PathBuf> {
     let home = dirs::home_dir()
         .ok_or_else(|| anyhow!("cannot determine the home directory; pass --vault explicitly"))?;
     Ok(home.join(".oboro"))
