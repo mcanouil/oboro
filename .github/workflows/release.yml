@@ -236,6 +236,12 @@ jobs:
             target: aarch64-apple-darwin
             features: ""
             suffix: ""
+          # Windows ships the default build only: ONNX Runtime (ner) and
+          # Tesseract (ocr) both stay source builds there.
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            features: ""
+            suffix: ""
           # The ner build links ONNX Runtime, whose prebuilt library is
           # glibc-only, so these are glibc targets rather than musl. The
           # Ubuntu runners are pinned to 24.04 rather than latest so the
@@ -306,6 +312,7 @@ jobs:
         run: cargo build --release --locked --target ${{ matrix.target }} ${{ matrix.features && format('--features {0}', matrix.features) || '' }}
 
       - name: Package
+        if: runner.os != 'Windows'
         shell: bash
         env:
           VERSION: ${{ needs.bump-version.outputs.version }}
@@ -315,18 +322,36 @@ jobs:
           tar -czf "release_assets/oboro-${VERSION}-${{ matrix.target }}${{ matrix.suffix }}.tar.gz" \
             -C "target/${{ matrix.target }}/release" oboro
 
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.bump-version.outputs.version }}
+        run: |
+          New-Item -ItemType Directory -Force -Path release_assets | Out-Null
+          Compress-Archive `
+            -Path "target/${{ matrix.target }}/release/oboro.exe" `
+            -DestinationPath "release_assets/oboro-$env:VERSION-${{ matrix.target }}${{ matrix.suffix }}.zip"
+
       # Lets anyone run `gh attestation verify` and learn which workflow and
-      # which commit produced the file in front of them.
+      # which commit produced the file in front of them. Two globs rather
+      # than one: only one of them ever matches on a given runner, and the
+      # action only fails when the combined match set is empty.
       - name: Attest the build provenance
         uses: actions/attest-build-provenance@v4
         with:
-          subject-path: release_assets/*.tar.gz
+          subject-path: |
+            release_assets/*.tar.gz
+            release_assets/*.zip
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
           name: binary-${{ matrix.target }}${{ matrix.suffix }}
-          path: release_assets/*.tar.gz
+          path: |
+            release_assets/*.tar.gz
+            release_assets/*.zip
+          if-no-files-found: error
           retention-days: 7
 
   github-release:
@@ -402,7 +427,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sha256sum *.tar.gz > SHA256SUMS
+          sha256sum *.tar.gz *.zip > SHA256SUMS
           cat SHA256SUMS
 
       - name: Create GitHub Release
@@ -413,6 +438,7 @@ jobs:
           set -euo pipefail
           gh release create "${VERSION}" \
             release_assets/*.tar.gz \
+            release_assets/*.zip \
             release_assets/SHA256SUMS \
             --title "${VERSION}" \
             --notes-file "${NOTES_FILE}" \

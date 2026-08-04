@@ -106,14 +106,14 @@ It would be inconsistent to ask you to trust its own binaries on sight.
 | `x86_64-unknown-linux-musl` | Linux on Intel or AMD. Statically linked, so any distribution, glibc version or Alpine. |
 | `aarch64-unknown-linux-musl` | Linux on ARM, including most cloud instances. Statically linked. |
 | `aarch64-apple-darwin` | macOS on Apple silicon. |
+| `x86_64-pc-windows-msvc` | Windows on Intel or AMD. |
 | `x86_64-unknown-linux-gnu-ner` | Linux on Intel or AMD, with name recognition. Needs glibc 2.39+ (Ubuntu 24.04+, Debian 13+). |
 | `aarch64-unknown-linux-gnu-ner` | Linux on ARM, with name recognition. Needs glibc 2.39+. |
 | `aarch64-apple-darwin-ner` | macOS on Apple silicon, with name recognition. |
 
 The `-ner` archives find untold names once the model is fetched with `oboro models pull`; the others are the smaller default build.
 
-There is no Windows build.
-The code that creates the vault key readable only by you is Unix-specific, and shipping a build where that quietly does nothing would misrepresent what the tool guarantees.
+The Windows archive is a `.zip`; extract it with `Expand-Archive`.
 
 ## Documentation
 
