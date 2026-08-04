@@ -3,6 +3,8 @@ project:
   resources:
     # Published verbatim so `curl -fsSL .../install.sh | bash` works.
     - install.sh
+    # Published verbatim so `irm .../install.ps1 | iex` works.
+    - install.ps1
     # Quarto copies only these globs, plus files it finds behind an `href` or
     # `src` in the rendered HTML. The manifest names its icons in JSON, which is
     # not scanned, so they are listed here. `assets/icons/icon.svg` is not: the
