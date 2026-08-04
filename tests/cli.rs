@@ -1593,6 +1593,13 @@ fn completions_generates_under_the_installed_name() {
 
 /// A completion script is a copy of the command surface from when it was
 /// generated, and nothing else in the tool would say it has fallen behind.
+// Unix only, for the reason given above the skill's equivalent: the home
+// directory the harness sets is invisible to `dirs::home_dir` on Windows, so
+// `doctor` would walk the runner's own profile rather than the directory this
+// writes the script into. The staleness comparison itself is covered on every
+// platform by the unit tests in `src/completions.rs`, which resolve an
+// `Environment` against a temporary directory.
+#[cfg(unix)]
 #[test]
 fn doctor_reports_a_completion_script_as_current_then_stale() {
     let workspace = Workspace::new();
