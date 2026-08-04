@@ -671,6 +671,16 @@ mod acl {
             .with_context(|| format!("running icacls on {}", path.display()))
     }
 
+    /// The well-known SIDs Windows grants explicit, non-inherited access to
+    /// on a freshly created file, from the default DACL on the creating
+    /// process's token rather than from anything this crate asked for:
+    /// `NT AUTHORITY\SYSTEM` and `BUILTIN\Administrators`. `/inheritance:r`
+    /// only strips *inherited* entries, so these survive it and have to be
+    /// named and removed explicitly. Well-known SIDs, rather than the
+    /// account names, are what keep this working under a localised Windows.
+    #[cfg(windows)]
+    const DEFAULT_DACL_SIDS: [&str; 2] = ["*S-1-5-18", "*S-1-5-32-544"];
+
     /// Drops every inherited grant and gives `rights` to the current
     /// account alone. A non-zero exit, or `icacls` missing entirely, is an
     /// error naming the path: a silent no-op here is exactly what would
@@ -678,14 +688,14 @@ mod acl {
     #[cfg(windows)]
     fn grant(path: &Path, rights: &str) -> Result<()> {
         let (_, sid) = identity()?;
-        let output = run_icacls(
-            path,
-            &[
-                std::ffi::OsString::from("/inheritance:r"),
-                std::ffi::OsString::from("/grant:r"),
-                std::ffi::OsString::from(format!("*{sid}:{rights}")),
-            ],
-        )?;
+        let mut args = vec![
+            std::ffi::OsString::from("/inheritance:r"),
+            std::ffi::OsString::from("/grant:r"),
+            std::ffi::OsString::from(format!("*{sid}:{rights}")),
+            std::ffi::OsString::from("/remove:g"),
+        ];
+        args.extend(DEFAULT_DACL_SIDS.into_iter().map(std::ffi::OsString::from));
+        let output = run_icacls(path, &args)?;
         if !output.status.success() {
             return Err(anyhow!(
                 "icacls could not restrict {}: {}",
@@ -811,27 +821,6 @@ mod acl {
                     "DESKTOP-X\\you"
                 ),
                 Protection::Unreadable
-            );
-        }
-
-        // Temporary diagnostic: dumps the raw icacls listing this runner
-        // actually produces, to compare against what `interpret` expects.
-        // Remove once the real-runner ACL shape is confirmed.
-        #[cfg(windows)]
-        #[test]
-        fn zzz_dump_real_icacls_output() {
-            let dir = tempfile::tempdir().expect("temporary directory");
-            let path = dir.path().join("probe");
-            std::fs::write(&path, b"x").expect("writing a probe file");
-
-            let account = identity().expect("resolving the current account");
-            restrict_file(&path).expect("restricting the probe file");
-            let output = run_icacls(&path, &[]).expect("running icacls");
-
-            panic!(
-                "account = {account:?}\npath = {path:?}\nstdout = {:?}\nstderr = {:?}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
             );
         }
     }
