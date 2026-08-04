@@ -442,6 +442,7 @@ fn reharden(path: &Path) -> Result<()> {
 /// expected rather than a failure. On Windows this does nothing: the
 /// sidecars inherit their ACL from the parent directory instead, see
 /// [`create_private_dir`].
+#[cfg_attr(not(unix), allow(clippy::unnecessary_wraps))]
 fn restrict_sidecars(db_path: &Path) -> Result<()> {
     #[cfg(unix)]
     for suffix in ["-wal", "-shm"] {
