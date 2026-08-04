@@ -192,107 +192,9 @@ pub struct Location {
 /// saved.
 #[must_use]
 pub fn known_locations(environment: &Environment, shell: Shell) -> Vec<Location> {
-    // `compinit -i`, not `-C`. `-C` omits the check for new completion
-    // functions and reuses the dump when one exists, and one always does here:
-    // this block is appended below whatever compinit the user already calls, so
-    // `_oboro` would never be picked up. `-i` keeps the check and only skips
-    // the warning about insecure directories, which their own call has already
-    // reported if there was anything to report.
-    let zshrc = |directory: &Path| {
-        Some(RcEdit {
-            file: environment.home.join(".zshrc"),
-            body: format!(
-                "fpath=(\"{}\" $fpath)\nautoload -Uz compinit && compinit -i",
-                directory.display()
-            ),
-        })
-    };
-
     match shell {
-        Shell::Bash => {
-            let sourced = environment
-                .data
-                .join(format!("{name}-completions", name = environment.name))
-                .join(format!("{name}.bash", name = environment.name));
-
-            vec![
-                Location {
-                    shell,
-                    // bash-completion loads this directory lazily, so the file
-                    // on its own is enough.
-                    path: environment
-                        .data
-                        .join("bash-completion/completions")
-                        .join(&environment.name),
-                    convention: "bash-completion/completions",
-                    rc: None,
-                    sweep_only: false,
-                },
-                Location {
-                    shell,
-                    rc: Some(RcEdit {
-                        file: environment.home.join(".bashrc"),
-                        body: format!(
-                            "[ -r \"{path}\" ] && . \"{path}\"",
-                            path = sourced.display()
-                        ),
-                    }),
-                    path: sourced,
-                    convention: "-completions",
-                    sweep_only: false,
-                },
-            ]
-        }
-        Shell::Zsh => {
-            let zfunc = environment.home.join(".zfunc");
-            // Where a hand install following older instructions would have put
-            // it. Listed so such a file is found and swept rather than left to
-            // shadow the one being maintained.
-            let site_functions = environment.data.join("zsh/site-functions");
-
-            let mut locations = vec![Location {
-                shell,
-                // Oh My Zsh puts this on $fpath and runs compinit itself, both
-                // before anything appended to ~/.zshrc could run, so the file
-                // is all it needs.
-                path: environment
-                    .oh_my_zsh
-                    .join("completions")
-                    .join(underscored(&environment.name)),
-                convention: ".oh-my-zsh/custom",
-                rc: None,
-                sweep_only: false,
-            }];
-
-            if let Some(directory) = environment.brew_site_functions() {
-                // Homebrew's own shell setup puts this on $fpath for the same
-                // reason.
-                locations.push(Location {
-                    shell,
-                    path: directory.join(underscored(&environment.name)),
-                    convention: "share/zsh/site-functions",
-                    rc: None,
-                    sweep_only: false,
-                });
-            }
-
-            locations.push(Location {
-                shell,
-                path: zfunc.join(underscored(&environment.name)),
-                convention: ".zfunc",
-                rc: zshrc(&zfunc),
-                sweep_only: false,
-            });
-            locations.push(Location {
-                shell,
-                path: site_functions.join(underscored(&environment.name)),
-                convention: "zsh/site-functions",
-                rc: zshrc(&site_functions),
-                sweep_only: true,
-            });
-
-            locations
-        }
+        Shell::Bash => bash_locations(environment),
+        Shell::Zsh => zsh_locations(environment),
         // fish autoloads this directory, so there is nothing to configure.
         Shell::Fish => vec![Location {
             shell,
@@ -323,6 +225,109 @@ pub fn known_locations(environment: &Environment, shell: Shell) -> Vec<Location>
         // future clap_complete has no convention here to guess at.
         _ => Vec::new(),
     }
+}
+
+/// Where bash reads a completion script from, in the order an install prefers.
+fn bash_locations(environment: &Environment) -> Vec<Location> {
+    let sourced = environment
+        .data
+        .join(format!("{name}-completions", name = environment.name))
+        .join(format!("{name}.bash", name = environment.name));
+
+    vec![
+        Location {
+            shell: Shell::Bash,
+            // bash-completion loads this directory lazily, so the file on its
+            // own is enough.
+            path: environment
+                .data
+                .join("bash-completion/completions")
+                .join(&environment.name),
+            convention: "bash-completion/completions",
+            rc: None,
+            sweep_only: false,
+        },
+        Location {
+            shell: Shell::Bash,
+            rc: Some(RcEdit {
+                file: environment.home.join(".bashrc"),
+                body: format!(
+                    "[ -r \"{path}\" ] && . \"{path}\"",
+                    path = sourced.display()
+                ),
+            }),
+            path: sourced,
+            convention: "-completions",
+            sweep_only: false,
+        },
+    ]
+}
+
+/// Where zsh reads a completion function from, in the order an install prefers.
+///
+/// zsh has no per-user directory on its default `fpath`, so which of these
+/// applies depends on what else the machine has installed.
+fn zsh_locations(environment: &Environment) -> Vec<Location> {
+    // `compinit -i`, not `-C`. `-C` omits the check for new completion
+    // functions and reuses the dump when one exists, and one always does here:
+    // this block is appended below whatever compinit the user already calls, so
+    // the function would never be picked up. `-i` keeps the check and only
+    // skips the warning about insecure directories, which their own call has
+    // already reported if there was anything to report.
+    let zshrc = |directory: &Path| {
+        Some(RcEdit {
+            file: environment.home.join(".zshrc"),
+            body: format!(
+                "fpath=(\"{}\" $fpath)\nautoload -Uz compinit && compinit -i",
+                directory.display()
+            ),
+        })
+    };
+
+    let function = underscored(&environment.name);
+    let zfunc = environment.home.join(".zfunc");
+    // Where a hand install following older instructions would have put it.
+    // Listed so such a file is found and swept rather than left to shadow the
+    // one being maintained.
+    let site_functions = environment.data.join("zsh/site-functions");
+
+    let mut locations = vec![Location {
+        shell: Shell::Zsh,
+        // Oh My Zsh puts this on $fpath and runs compinit itself, both before
+        // anything appended to ~/.zshrc could run, so the file is all it needs.
+        path: environment.oh_my_zsh.join("completions").join(&function),
+        convention: ".oh-my-zsh/custom",
+        rc: None,
+        sweep_only: false,
+    }];
+
+    if let Some(directory) = environment.brew_site_functions() {
+        // Homebrew's own shell setup puts this on $fpath for the same reason.
+        locations.push(Location {
+            shell: Shell::Zsh,
+            path: directory.join(&function),
+            convention: "share/zsh/site-functions",
+            rc: None,
+            sweep_only: false,
+        });
+    }
+
+    locations.push(Location {
+        shell: Shell::Zsh,
+        path: zfunc.join(&function),
+        convention: ".zfunc",
+        rc: zshrc(&zfunc),
+        sweep_only: false,
+    });
+    locations.push(Location {
+        shell: Shell::Zsh,
+        path: site_functions.join(&function),
+        convention: "zsh/site-functions",
+        rc: zshrc(&site_functions),
+        sweep_only: true,
+    });
+
+    locations
 }
 
 /// Every place any shell reads a completion script from.
@@ -477,8 +482,21 @@ pub fn install(environment: &Environment, plan: &Plan, script: &str) -> Result<S
     }
 
     for path in &plan.stale {
-        remove_file(path)?;
-        let _ = writeln!(report, "Removed {}", path.display());
+        // A copy that cannot be removed is reported rather than fatal. One of
+        // the places looked in is Homebrew's prefix, which is outside the home
+        // directory and may belong to another user or to a package manager,
+        // and a file there is not reason enough to fail an install that has
+        // otherwise worked. Nothing is ever removed with elevated rights.
+        if remove_file(path).is_ok() {
+            let _ = writeln!(report, "Removed {}", path.display());
+        } else {
+            let _ = writeln!(
+                report,
+                "Could not remove {}: no permission. Remove it yourself, or it may be \
+                 found before the one that is kept up to date.",
+                path.display()
+            );
+        }
     }
 
     if let Some(file) = &plan.stale_rc {
@@ -556,9 +574,16 @@ pub fn uninstall(environment: &Environment, shell: Shell, dry_run: bool) -> Resu
     for path in &scripts {
         if dry_run {
             let _ = writeln!(report, "Would remove {}", path.display());
-        } else {
-            remove_file(path)?;
+        } else if remove_file(path).is_ok() {
             let _ = writeln!(report, "Removed {}", path.display());
+        } else {
+            // As in `install`: a file in a directory this user cannot write to
+            // is said out loud rather than turned into a failed uninstall.
+            let _ = writeln!(
+                report,
+                "Could not remove {}: no permission.",
+                path.display()
+            );
         }
     }
     for file in &blocks {
@@ -1005,6 +1030,35 @@ mod tests {
         let report = uninstall(&environment, Shell::Zsh, false).expect("a report");
 
         assert_eq!(report.matches("Cleaned").count(), 1, "{report}");
+    }
+
+    /// A stale copy in a directory nobody can write to, which is what
+    /// Homebrew's prefix or a system package leaves behind. The install has
+    /// otherwise worked, so it says what it could not remove and still
+    /// succeeds.
+    #[cfg(unix)]
+    #[test]
+    fn a_stale_copy_that_cannot_be_removed_does_not_fail_the_install() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let home = tempfile::tempdir().expect("a temporary home");
+        let environment = environment(home.path());
+        let directory = home.path().join(".local/share/zsh/site-functions");
+        plant(&directory.join("_oboro"));
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o500))
+            .expect("making the directory read-only");
+
+        let plan = plan(&environment, Shell::Zsh).expect("a plan");
+        let report =
+            install(&environment, &plan, "#compdef oboro\n").expect("the install to succeed");
+
+        // Restored before the assertions, so a failure still leaves a
+        // directory the harness can clean up.
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700))
+            .expect("restoring the directory");
+
+        assert!(report.contains("Could not remove"), "{report}");
+        assert!(home.path().join(".zfunc/_oboro").is_file(), "{report}");
     }
 
     /// Saying nothing at all reads as a broken command, and this is the first
