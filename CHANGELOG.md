@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-- feat: Add `oboro uninstall`, which removes everything the tool wrote: completion scripts, the agent hooks and skill in both scopes, the vault, the recognition model, and the binary itself. It prints everything that would go and asks to confirm; `--dry-run` stops after printing, `--yes` skips the prompt, and `--keep-vault` leaves the vault and its key in place. A settings file keeps everything but Oboro's own hook, ending as `{}` rather than being deleted, and the running binary removes itself on macOS and Linux; on Windows, which locks a running image, the path and the command to finish the job are printed instead.
+- feat: Add `oboro uninstall`, which removes everything the tool wrote: completion scripts, the agent hooks and skill in both scopes, the vault, the recognition model, and the binary itself. It prints everything that would go and asks to confirm; `--dry-run` stops after printing, `--yes` skips the prompt, and `--keep-vault` leaves the vault and its key in place. A settings file keeps everything but Oboro's own hook, ending as `{}` rather than being deleted, and the running binary removes itself on macOS and Linux; on Windows, which locks a running image, the path and the command to finish the job are printed instead. (#108)
 
 ## 0.7.0 (2026-08-04)
 
