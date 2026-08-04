@@ -335,11 +335,18 @@ fn zsh_locations(environment: &Environment) -> Vec<Location> {
 /// What `doctor` walks, and what a test compares `docs/install.sh` against.
 #[must_use]
 pub fn conventional_paths(environment: &Environment) -> Vec<Location> {
-    [Shell::Bash, Shell::Zsh, Shell::Fish, Shell::Elvish]
+    FILE_BACKED_SHELLS
         .into_iter()
         .flat_map(|shell| known_locations(environment, shell))
         .collect()
 }
+
+/// Every shell whose completions live in a file, which [`conventional_paths`]
+/// walks for `doctor` and `oboro uninstall` sweeps.
+///
+/// PowerShell is left out: it evaluates its script from `$PROFILE` rather than
+/// reading one, so there is nothing on disk for either to find.
+pub const FILE_BACKED_SHELLS: [Shell; 4] = [Shell::Bash, Shell::Zsh, Shell::Fish, Shell::Elvish];
 
 /// Where a first install goes, given what this machine has installed.
 fn default_location(environment: &Environment, shell: Shell) -> Option<Location> {
@@ -538,6 +545,13 @@ pub fn describe(plan: &Plan) -> String {
     report.trim_end().to_owned()
 }
 
+/// Closes a dry-run [`uninstall`] report.
+///
+/// Public so `oboro uninstall`, which prints one shell's report per line
+/// alongside its own, can strip this trailer rather than let its own
+/// `--dry-run` line be preceded by a copy of the same sentence.
+pub const DRY_RUN_TRAILER: &str = "--dry-run: nothing was removed.";
+
 /// Removes every script and managed block for `shell`, returning what happened.
 ///
 /// # Errors
@@ -596,7 +610,7 @@ pub fn uninstall(environment: &Environment, shell: Shell, dry_run: bool) -> Resu
     }
 
     if dry_run {
-        let _ = write!(report, "\n--dry-run: nothing was removed.");
+        let _ = write!(report, "\n{DRY_RUN_TRAILER}");
     }
 
     Ok(report.trim_end().to_owned())

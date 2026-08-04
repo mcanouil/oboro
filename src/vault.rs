@@ -445,10 +445,7 @@ fn reharden(path: &Path) -> Result<()> {
 #[cfg_attr(not(unix), allow(clippy::unnecessary_wraps))]
 fn restrict_sidecars(db_path: &Path) -> Result<()> {
     #[cfg(unix)]
-    for suffix in ["-wal", "-shm"] {
-        let mut name = db_path.as_os_str().to_owned();
-        name.push(suffix);
-        let sidecar = PathBuf::from(name);
+    for sidecar in sidecars(db_path) {
         if sidecar.exists() {
             restrict_permissions(&sidecar)?;
         }
@@ -456,6 +453,21 @@ fn restrict_sidecars(db_path: &Path) -> Result<()> {
     #[cfg(not(unix))]
     let _ = db_path;
     Ok(())
+}
+
+/// The WAL and SHM sidecars WAL mode creates beside `db_path`, named whether
+/// or not either currently exists.
+///
+/// Public so `oboro uninstall`, which has to remove them explicitly when
+/// `--vault` points outside the directory it sweeps wholesale, names them the
+/// same way this module does rather than re-deriving the suffixes.
+#[must_use]
+pub fn sidecars(db_path: &Path) -> [PathBuf; 2] {
+    ["-wal", "-shm"].map(|suffix| {
+        let mut name = db_path.as_os_str().to_owned();
+        name.push(suffix);
+        PathBuf::from(name)
+    })
 }
 
 /// Describes whether `path` is protected from other accounts, for `oboro

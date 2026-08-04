@@ -282,6 +282,36 @@ impl Plan {
 /// file passes through a symbolic link, or when the file exists but is not JSON
 /// this can merge into. A file Oboro cannot read is one it must not replace.
 pub fn plan(scope: Scope, cwd: &Path) -> Result<Plan> {
+    let Resolved {
+        file,
+        changes,
+        settings,
+    } = changes_for_each_event(scope, cwd, merge)?;
+    Ok(Plan {
+        file,
+        changes,
+        settings,
+    })
+}
+
+/// What [`changes_for_each_event`] found, generic over what happened to one
+/// event: [`Change`] for [`plan`], [`Removal`] for [`removal_plan`].
+struct Resolved<C> {
+    file: PathBuf,
+    changes: Vec<(&'static str, C)>,
+    settings: serde_json::Value,
+}
+
+/// The scaffolding [`plan`] and [`removal_plan`] share: resolving the
+/// settings file for `scope`, refusing a symbolic link on the way to it,
+/// reading what is there, and running `per_event` over each of [`EVENTS`] in
+/// turn. Only what happens to one event, merging a hook in or taking one out,
+/// differs between the two.
+fn changes_for_each_event<C>(
+    scope: Scope,
+    cwd: &Path,
+    mut per_event: impl FnMut(&mut serde_json::Value, &Event, &Path) -> Result<C>,
+) -> Result<Resolved<C>> {
     let root = scope.root(cwd)?;
     refuse_symlinks(&root, &settings_components(scope))?;
     let file = settings_path(scope, cwd)?;
@@ -289,9 +319,9 @@ pub fn plan(scope: Scope, cwd: &Path) -> Result<Plan> {
     let mut settings = read_settings(&file)?;
     let mut changes = Vec::new();
     for event in EVENTS {
-        changes.push((event.name, merge(&mut settings, &event, &file)?));
+        changes.push((event.name, per_event(&mut settings, &event, &file)?));
     }
-    Ok(Plan {
+    Ok(Resolved {
         file,
         changes,
         settings,
@@ -439,13 +469,13 @@ impl RemovalPlan {
             .any(|(_, change)| matches!(change, Removal::Remove(_)))
     }
 
-    /// The settings as they would end up, formatted the way they would land.
+    /// The settings as they would end up, formatted the way they land.
     ///
     /// # Errors
     ///
     /// Returns an error if the settings cannot be rendered, for the same
     /// reason [`Plan::rendered`] does not fail in practice either.
-    pub fn rendered(&self) -> Result<String> {
+    fn rendered(&self) -> Result<String> {
         let text = serde_json::to_string_pretty(&self.settings)
             .with_context(|| format!("rendering the settings for {}", self.file.display()))?;
         Ok(format!("{text}\n"))
@@ -460,15 +490,11 @@ impl RemovalPlan {
 /// path to the settings file, or a settings file whose shape Oboro does not
 /// recognise. A file Oboro cannot read is one it must not rewrite either.
 pub fn removal_plan(scope: Scope, cwd: &Path) -> Result<RemovalPlan> {
-    let root = scope.root(cwd)?;
-    refuse_symlinks(&root, &settings_components(scope))?;
-    let file = settings_path(scope, cwd)?;
-
-    let mut settings = read_settings(&file)?;
-    let mut changes = Vec::new();
-    for event in EVENTS {
-        changes.push((event.name, remove_hook(&mut settings, &event, &file)?));
-    }
+    let Resolved {
+        file,
+        changes,
+        settings,
+    } = changes_for_each_event(scope, cwd, remove_hook)?;
     Ok(RemovalPlan {
         file,
         changes,
@@ -560,12 +586,10 @@ fn remove_hook(settings: &mut serde_json::Value, event: &Event, file: &Path) -> 
             .and_then(serde_json::Value::as_array)
             .is_none_or(|entries| !entries.is_empty())
     });
-    let event_emptied = groups.is_empty();
-    if event_emptied {
+    if groups.is_empty() {
         hooks_obj.remove(event.name);
     }
-    let hooks_emptied = hooks_obj.is_empty();
-    if hooks_emptied {
+    if hooks_obj.is_empty() {
         root.remove("hooks");
     }
 

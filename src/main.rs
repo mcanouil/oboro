@@ -479,19 +479,6 @@ fn completions(
     Ok(())
 }
 
-/// Every shell whose completions live in a file, in the order [`completions`]
-/// generates a script for none in particular: PowerShell evaluates its script
-/// from `$PROFILE` rather than reading one, so it contributes nothing to sweep,
-/// and a shell `clap_complete` adds later has no convention here to guess at
-/// either. [`oboro::completions::conventional_paths`] is built from the same
-/// list, for `doctor`.
-const UNINSTALLABLE_SHELLS: [clap_complete::Shell; 4] = [
-    clap_complete::Shell::Bash,
-    clap_complete::Shell::Zsh,
-    clap_complete::Shell::Fish,
-    clap_complete::Shell::Elvish,
-];
-
 /// Removes everything Oboro wrote, having said so first and been told to
 /// proceed.
 ///
@@ -524,8 +511,11 @@ fn uninstall_everything(
         }
     }
 
-    let name = Cli::command().get_name().to_owned();
-    let completions_environment = oboro::completions::Environment::from_env(&name).ok();
+    // The name alone, not the whole command tree `completions()` builds when it
+    // also has to render a script: `env!` names the same binary the `#[command]`
+    // attribute on `Cli` does, without walking every subcommand for it.
+    let completions_environment =
+        oboro::completions::Environment::from_env(env!("CARGO_PKG_NAME")).ok();
 
     oboro::note!("oboro uninstall would remove:");
     for (scope, plan) in &hook_plans {
@@ -535,14 +525,14 @@ fn uninstall_everything(
         describe_skill_removal(*scope, removal);
     }
     if let Some(environment) = &completions_environment {
-        for shell in UNINSTALLABLE_SHELLS {
+        for shell in oboro::completions::FILE_BACKED_SHELLS {
             let report = oboro::completions::uninstall(environment, shell, true)?;
             // `completions::uninstall` closes its own report with the same
             // trailer this command's own `--dry-run` line prints once at the
             // end; keeping both would repeat it and misplace it ahead of the
             // store and binary lines that still follow.
             let report = report
-                .strip_suffix("--dry-run: nothing was removed.")
+                .strip_suffix(oboro::completions::DRY_RUN_TRAILER)
                 .map_or(report.as_str(), str::trim_end);
             if !report.is_empty() && !report.starts_with("Nothing to remove") {
                 oboro::note!("{report}");
@@ -552,7 +542,13 @@ fn uninstall_everything(
         oboro::note!("completions   no home directory");
     }
     describe_store(&vault_path, &key_path, home.as_deref(), keep_vault);
-    describe_binary();
+    // Resolved once and carried through to the removal below, rather than
+    // asking the OS for the running binary's path twice for one command.
+    let exe = std::env::current_exe();
+    match &exe {
+        Ok(exe) => oboro::note!("binary  {}", exe.display()),
+        Err(error) => oboro::note!("binary  could not be found: {error:#}"),
+    }
     note_what_cannot_be_reached_here(&cwd);
 
     if dry_run {
@@ -572,12 +568,14 @@ fn uninstall_everything(
         oboro::skill::uninstall(removal)?;
     }
     if let Some(environment) = &completions_environment {
-        for shell in UNINSTALLABLE_SHELLS {
+        for shell in oboro::completions::FILE_BACKED_SHELLS {
             oboro::completions::uninstall(environment, shell, false)?;
         }
     }
     remove_store(&vault_path, &key_path, home.as_deref(), keep_vault)?;
-    finish_binary()?;
+    if let Ok(exe) = &exe {
+        finish_binary(exe)?;
+    }
 
     oboro::note!("oboro has been uninstalled.");
     Ok(())
@@ -604,20 +602,24 @@ fn confirmed() -> Result<bool> {
 /// Says what removing a scope's hooks would do, and nothing when there is
 /// nothing to remove there.
 fn describe_hook_removal(scope: Scope, plan: &oboro::hooks::RemovalPlan) {
-    if !plan.writes() {
-        return;
-    }
-    let events: Vec<_> = plan
+    let removed: Vec<String> = plan
         .changes
         .iter()
-        .filter_map(|(name, change)| {
-            matches!(change, oboro::hooks::Removal::Remove(_)).then_some(*name)
+        .filter_map(|(name, change)| match change {
+            oboro::hooks::Removal::Remove(matcher) => Some(format!(
+                "{name} ({})",
+                matcher.as_deref().unwrap_or("every tool")
+            )),
+            oboro::hooks::Removal::Absent => None,
         })
         .collect();
+    if removed.is_empty() {
+        return;
+    }
     oboro::note!(
         "hooks   {} ({}): {}",
         describe_scope(scope),
-        events.join(", "),
+        removed.join(", "),
         plan.file.display()
     );
 }
@@ -627,14 +629,6 @@ fn describe_hook_removal(scope: Scope, plan: &oboro::hooks::RemovalPlan) {
 fn describe_skill_removal(scope: Scope, removal: &oboro::skill::Removal) {
     if let oboro::skill::Removal::Remove(path) = removal {
         oboro::note!("skill   {}: {}", describe_scope(scope), path.display());
-    }
-}
-
-/// Says what removing the running binary would do, without doing it.
-fn describe_binary() {
-    match std::env::current_exe() {
-        Ok(exe) => oboro::note!("binary  {}", exe.display()),
-        Err(error) => oboro::note!("binary  could not be found: {error:#}"),
     }
 }
 
@@ -718,10 +712,7 @@ fn remove_vault_file(path: &Path) -> Result<()> {
     if path.is_file() {
         std::fs::remove_file(path).with_context(|| format!("removing {}", path.display()))?;
     }
-    for suffix in ["-wal", "-shm"] {
-        let mut name = path.as_os_str().to_owned();
-        name.push(suffix);
-        let sidecar = PathBuf::from(name);
+    for sidecar in vault::sidecars(path) {
         if sidecar.is_file() {
             let _ = std::fs::remove_file(&sidecar);
         }
@@ -747,52 +738,38 @@ fn note_what_cannot_be_reached_here(cwd: &Path) {
     );
 }
 
-/// Removes the running binary on Unix, which can unlink an executable while it
-/// is running.
-#[cfg(unix)]
-fn finish_binary() -> Result<()> {
-    let exe = match std::env::current_exe() {
-        Ok(exe) => exe,
-        Err(error) => {
-            oboro::note!("binary  could not be found: {error:#}; remove it yourself");
-            return Ok(());
-        }
-    };
-    match std::fs::remove_file(&exe) {
-        Ok(()) => oboro::note!("binary  removed {}", exe.display()),
-        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => oboro::note!(
-            "binary  {} needs elevated rights to remove; run: sudo rm {}",
-            exe.display(),
-            exe.display()
-        ),
-        Err(error) => return Err(error).with_context(|| format!("removing {}", exe.display())),
-    }
-    if let Some(home) = dirs::home_dir()
-        && exe.starts_with(home.join(".cargo/bin"))
+/// Removes the running binary, or says why it could not.
+///
+/// Unix can unlink an executable while it is running, so `exe` goes here.
+/// Windows, and anywhere else this crate is not known to run, locks a running
+/// image instead, so the path and the command to finish the job are printed
+/// rather than attempted.
+fn finish_binary(exe: &Path) -> Result<()> {
+    #[cfg(unix)]
     {
-        oboro::note!("binary  installed with cargo; `cargo uninstall oboro` also works");
+        match std::fs::remove_file(exe) {
+            Ok(()) => oboro::note!("binary  removed {}", exe.display()),
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => oboro::note!(
+                "binary  {} needs elevated rights to remove; run: sudo rm {}",
+                exe.display(),
+                exe.display()
+            ),
+            Err(error) => {
+                return Err(error).with_context(|| format!("removing {}", exe.display()));
+            }
+        }
+        if let Some(home) = dirs::home_dir()
+            && exe.starts_with(home.join(".cargo/bin"))
+        {
+            oboro::note!("binary  installed with cargo; `cargo uninstall oboro` also works");
+        }
     }
-    Ok(())
-}
-
-/// Windows locks a running executable's image, so the binary cannot remove
-/// itself; the path and the command to finish the job are printed instead.
-#[cfg(windows)]
-fn finish_binary() -> Result<()> {
-    let exe = std::env::current_exe().context("finding the running binary")?;
+    #[cfg(not(unix))]
     oboro::note!(
-        "binary  {} is still running this command; Windows will not let it delete \
-         itself, so remove it once you are done: del \"{}\"",
+        "binary  {} is still running this command; remove it once you are done: del \"{}\"",
         exe.display(),
         exe.display()
     );
-    Ok(())
-}
-
-#[cfg(not(any(unix, windows)))]
-fn finish_binary() -> Result<()> {
-    let exe = std::env::current_exe().context("finding the running binary")?;
-    oboro::note!("binary  remove it yourself: {}", exe.display());
     Ok(())
 }
 

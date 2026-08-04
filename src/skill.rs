@@ -27,13 +27,16 @@ pub const SKILL: &str = include_str!("../skills/oboro/SKILL.md");
 ///
 /// Returns an error for the same reason [`Scope::root`] does.
 pub fn path(scope: Scope, cwd: &Path) -> Result<PathBuf> {
-    Ok(scope
-        .root(cwd)?
-        .join(SKILL_PATH.iter().collect::<PathBuf>()))
+    Ok(below(&scope.root(cwd)?))
 }
 
 /// Where the skill sits below a scope's root.
 const SKILL_PATH: [&str; 4] = [".claude", "skills", "oboro", "SKILL.md"];
+
+/// `root` joined with [`SKILL_PATH`], the one place that path is assembled.
+fn below(root: &Path) -> PathBuf {
+    root.join(SKILL_PATH.iter().collect::<PathBuf>())
+}
 
 /// What is at a scope's path.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -103,7 +106,7 @@ pub fn status(path: &Path) -> Status {
 pub fn plan(scope: Scope, cwd: &Path, force: bool) -> Result<Plan> {
     let root = scope.root(cwd)?;
     refuse_symlinks(&root, &SKILL_PATH)?;
-    let path = root.join(SKILL_PATH.iter().collect::<PathBuf>());
+    let path = below(&root);
 
     if force {
         return Ok(Plan::Write(path));
@@ -166,7 +169,7 @@ pub enum Removal {
 pub fn removal_plan(scope: Scope, cwd: &Path) -> Result<Removal> {
     let root = scope.root(cwd)?;
     refuse_symlinks(&root, &SKILL_PATH)?;
-    let path = root.join(SKILL_PATH.iter().collect::<PathBuf>());
+    let path = below(&root);
 
     Ok(match status(&path) {
         Status::Missing => Removal::Absent(path),

@@ -12,7 +12,7 @@ use std::fmt::Write as _;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, bail};
 
 /// Where the weights come from.
 ///
@@ -65,9 +65,9 @@ pub fn download_bytes() -> u64 {
 ///
 /// Returns an error if the home directory cannot be determined.
 pub fn directory() -> Result<PathBuf> {
-    let home = dirs::home_dir()
-        .ok_or_else(|| anyhow!("cannot determine the home directory to store the model in"))?;
-    Ok(home.join(".oboro").join("models").join("gliner-multi-pii"))
+    Ok(crate::vault::home()?
+        .join("models")
+        .join("gliner-multi-pii"))
 }
 
 /// Whether every artefact is present, without rehashing them.
