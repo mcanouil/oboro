@@ -67,12 +67,19 @@ impl Vault {
             create_private_dir(parent)?;
         }
         let master = load_or_create_key(key_path)?;
+        let existed = db_path.exists();
         let connection = Connection::open(db_path)
             .with_context(|| format!("opening vault at {}", db_path.display()))?;
-        restrict_permissions(db_path)?;
+        if existed {
+            reharden(db_path)?;
+        } else {
+            restrict_permissions(db_path)?;
+        }
         initialise_schema(&connection)?;
         // WAL mode creates -wal and -shm sidecars next to the database; left to
-        // the umask they would be world-readable, so tighten them to match.
+        // the umask they would be world-readable, so tighten them to match. On
+        // Windows they inherit their ACL from the parent directory instead,
+        // see restrict_sidecars.
         restrict_sidecars(db_path)?;
 
         Ok(Self {
@@ -341,7 +348,10 @@ fn load_or_create_key(path: &Path) -> Result<Zeroizing<[u8; 32]>> {
 ///
 /// Writing first and restricting afterwards would leave the key readable by
 /// anyone for the duration, since the default umask usually grants group and
-/// world read.
+/// world read. On Windows there is no mode-at-creation, so the file is
+/// opened empty, its ACL is tightened, and only then are the key bytes
+/// written; the open handle we already hold is unaffected, since Windows
+/// checks access at open time rather than per read.
 fn write_private_file(path: &Path, contents: &[u8]) -> Result<()> {
     use std::io::Write as _;
 
@@ -353,6 +363,8 @@ fn write_private_file(path: &Path, contents: &[u8]) -> Result<()> {
         options.mode(0o600);
     }
     let mut file = options.open(path)?;
+    #[cfg(windows)]
+    acl::restrict_file(path)?;
     file.write_all(contents)?;
     file.sync_all()?;
     Ok(())
@@ -368,7 +380,9 @@ fn write_private_file(path: &Path, contents: &[u8]) -> Result<()> {
 ///
 /// Nothing is lost by that. The key file is created `0600` in one step by
 /// [`write_private_file`], and the database likewise, so the protection that
-/// matters does not depend on the directory's mode.
+/// matters does not depend on the directory's mode. On Windows the grant is
+/// made inheritable, so the WAL and SHM sidecars `SQLite` creates inside this
+/// directory pick it up without an `icacls` call of their own.
 fn create_private_dir(path: &Path) -> Result<()> {
     if path.is_dir() {
         return Ok(());
@@ -381,13 +395,16 @@ fn create_private_dir(path: &Path) -> Result<()> {
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
             .with_context(|| format!("restricting permissions on {}", path.display()))?;
     }
+    #[cfg(windows)]
+    acl::restrict_dir(path)?;
     Ok(())
 }
 
 /// Restricts a file to owner read and write.
-// Off Unix the body does nothing, so the `Result` is always `Ok`. The type
-// stays because the Unix arm is fallible and one signature serves both.
-#[cfg_attr(not(unix), allow(clippy::unnecessary_wraps))]
+// Off Unix and Windows the body does nothing, so the `Result` is always
+// `Ok`. The type stays because both real arms are fallible and one
+// signature serves all three.
+#[cfg_attr(not(any(unix, windows)), allow(clippy::unnecessary_wraps))]
 fn restrict_permissions(path: &Path) -> Result<()> {
     #[cfg(unix)]
     {
@@ -395,6 +412,25 @@ fn restrict_permissions(path: &Path) -> Result<()> {
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
             .with_context(|| format!("restricting permissions on {}", path.display()))?;
     }
+    #[cfg(windows)]
+    acl::restrict_file(path)?;
+    #[cfg(not(any(unix, windows)))]
+    let _ = path;
+    Ok(())
+}
+
+/// Re-tightens a database or key that already existed before this open.
+///
+/// On Unix this is the same cheap `chmod` [`restrict_permissions`] always
+/// does, so it runs unconditionally and self-heals a file loosened by hand.
+/// On Windows it would be an `icacls` spawn on every open, and `Vault::open`
+/// runs once per agent tool call through the hooks, so re-hardening an
+/// existing file there is left to `oboro doctor` to report rather than done
+/// silently on a path this hot.
+#[cfg_attr(not(unix), allow(clippy::unnecessary_wraps))]
+fn reharden(path: &Path) -> Result<()> {
+    #[cfg(unix)]
+    restrict_permissions(path)?;
     #[cfg(not(unix))]
     let _ = path;
     Ok(())
@@ -403,8 +439,11 @@ fn restrict_permissions(path: &Path) -> Result<()> {
 /// Tightens the WAL sidecars to owner-only.
 ///
 /// A sidecar only exists once WAL has work to persist, so one that is absent is
-/// expected rather than a failure.
+/// expected rather than a failure. On Windows this does nothing: the
+/// sidecars inherit their ACL from the parent directory instead, see
+/// [`create_private_dir`].
 fn restrict_sidecars(db_path: &Path) -> Result<()> {
+    #[cfg(unix)]
     for suffix in ["-wal", "-shm"] {
         let mut name = db_path.as_os_str().to_owned();
         name.push(suffix);
@@ -413,7 +452,38 @@ fn restrict_sidecars(db_path: &Path) -> Result<()> {
             restrict_permissions(&sidecar)?;
         }
     }
+    #[cfg(not(unix))]
+    let _ = db_path;
     Ok(())
+}
+
+/// Describes whether `path` is protected from other accounts, for `oboro
+/// doctor`. `None` when the path does not exist.
+#[must_use]
+pub fn describe_protection(path: &Path) -> Option<String> {
+    if !path.exists() {
+        return None;
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(path).ok()?.permissions().mode() & 0o777;
+        let state = if mode == 0o600 {
+            "ok"
+        } else {
+            "too permissive"
+        };
+        Some(format!("mode {mode:04o} ({state})"))
+    }
+
+    #[cfg(windows)]
+    {
+        Some(acl::describe(path))
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    None
 }
 
 /// The default vault location, `~/.oboro/vault.db`.
@@ -438,6 +508,311 @@ fn oboro_home() -> Result<PathBuf> {
     let home = dirs::home_dir()
         .ok_or_else(|| anyhow!("cannot determine the home directory; pass --vault explicitly"))?;
     Ok(home.join(".oboro"))
+}
+
+/// Windows access control, shelled out to `icacls` rather than linked
+/// against the Win32 ACL APIs, which `unsafe_code = "forbid"` rules out and
+/// which a new dependency is not worth for three call sites.
+///
+/// The parsing here compiles and is unit-tested on every platform; only the
+/// functions that spawn a process are gated to Windows, so a change to how
+/// `icacls` output is read is provable without a Windows runner.
+#[cfg(any(windows, test))]
+mod acl {
+    #[cfg(windows)]
+    use std::path::Path;
+
+    #[cfg(windows)]
+    use anyhow::Context;
+    use anyhow::{Result, anyhow};
+
+    /// What one `icacls <path>` listing says about who can reach it.
+    #[derive(Debug, PartialEq, Eq)]
+    enum Protection {
+        /// One explicit grant, to the account this process runs as.
+        OwnerOnly,
+        /// At least one access-control entry was inherited from the parent
+        /// directory rather than set directly on the path.
+        Inherited,
+        /// An explicit grant names an account other than this process's own.
+        Shared,
+        /// The output did not parse as an access-control entry list at all.
+        Unreadable,
+    }
+
+    #[cfg(windows)]
+    impl Protection {
+        fn describe(&self) -> &'static str {
+            match self {
+                Self::OwnerOnly => "owner-only (ok)",
+                Self::Inherited => "inherited access (too permissive)",
+                Self::Shared => "granted to others (too permissive)",
+                Self::Unreadable => "acl could not be read",
+            }
+        }
+    }
+
+    /// Reads the account name and SID from one line of `whoami /user /fo csv
+    /// /nh`, such as `"DESKTOP-X\you","S-1-5-21-...-512"`.
+    ///
+    /// `%USERNAME%` is not used for the account half: it is localisation-
+    /// and domain-sensitive in a way this CSV line is not.
+    fn parse_identity(line: &str) -> Result<(String, String)> {
+        let line = line.trim().trim_matches('"');
+        let (account, sid) = line
+            .split_once("\",\"")
+            .ok_or_else(|| anyhow!("unrecognised whoami output: {line}"))?;
+        if account.is_empty() || sid.is_empty() {
+            return Err(anyhow!("unrecognised whoami output: {line}"));
+        }
+        Ok((account.to_owned(), sid.to_owned()))
+    }
+
+    /// The verdict a plain `icacls <path>` listing carries for `path`, read
+    /// against the account name `icacls` displays the current user under.
+    ///
+    /// The first line carries `path` as a prefix; every following line up to
+    /// the first blank one is another access-control entry for the same
+    /// path. Stripping the known `path` prefix, rather than splitting on
+    /// `:`, is what keeps a path that itself contains one (`C:\...`) from
+    /// being mistaken for part of the first entry.
+    fn interpret(output: &str, path: &str, account: &str) -> Protection {
+        let Some(first) = output.lines().next() else {
+            return Protection::Unreadable;
+        };
+        let Some(first_entry) = first.strip_prefix(path) else {
+            return Protection::Unreadable;
+        };
+
+        let mut entries = vec![first_entry.trim()];
+        for line in output.lines().skip(1) {
+            let line = line.trim();
+            if line.is_empty() {
+                break;
+            }
+            entries.push(line);
+        }
+
+        let mut inherited = false;
+        let mut others = false;
+        let mut has_owner = false;
+        for entry in entries {
+            let Some((who, grant)) = entry.split_once(':') else {
+                return Protection::Unreadable;
+            };
+            let who = who.trim();
+            if who.is_empty() {
+                return Protection::Unreadable;
+            }
+            if grant.contains("(I)") {
+                inherited = true;
+            }
+            if who.eq_ignore_ascii_case(account) {
+                has_owner = true;
+            } else {
+                others = true;
+            }
+        }
+
+        if inherited {
+            Protection::Inherited
+        } else if others {
+            Protection::Shared
+        } else if has_owner {
+            Protection::OwnerOnly
+        } else {
+            Protection::Unreadable
+        }
+    }
+
+    /// The current account name and SID, resolved once per process: a
+    /// `whoami` spawn is only worth paying when `identity` is first called,
+    /// which is on creating a key or directory, or running `oboro doctor`,
+    /// never on every vault open.
+    #[cfg(windows)]
+    fn identity() -> Result<(String, String)> {
+        use std::sync::OnceLock;
+
+        static IDENTITY: OnceLock<Result<(String, String), String>> = OnceLock::new();
+        IDENTITY
+            .get_or_init(|| resolve_identity().map_err(|error| error.to_string()))
+            .clone()
+            .map_err(|error| anyhow!(error))
+    }
+
+    #[cfg(windows)]
+    fn resolve_identity() -> Result<(String, String)> {
+        let output = std::process::Command::new("whoami")
+            .args(["/user", "/fo", "csv", "/nh"])
+            .output()
+            .context("running whoami to resolve the current account")?;
+        if !output.status.success() {
+            return Err(anyhow!(
+                "whoami exited with {}: {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
+        }
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let line = stdout
+            .lines()
+            .next()
+            .ok_or_else(|| anyhow!("whoami produced no output"))?;
+        parse_identity(line)
+    }
+
+    #[cfg(windows)]
+    fn run_icacls(path: &Path, args: &[std::ffi::OsString]) -> Result<std::process::Output> {
+        std::process::Command::new("icacls")
+            .arg(path)
+            .args(args)
+            .output()
+            .with_context(|| format!("running icacls on {}", path.display()))
+    }
+
+    /// Drops every inherited grant and gives `rights` to the current
+    /// account alone. A non-zero exit, or `icacls` missing entirely, is an
+    /// error naming the path: a silent no-op here is exactly what would
+    /// misrepresent the guarantee this function exists to give.
+    #[cfg(windows)]
+    fn grant(path: &Path, rights: &str) -> Result<()> {
+        let (_, sid) = identity()?;
+        let output = run_icacls(
+            path,
+            &[
+                std::ffi::OsString::from("/inheritance:r"),
+                std::ffi::OsString::from("/grant:r"),
+                std::ffi::OsString::from(format!("*{sid}:{rights}")),
+            ],
+        )?;
+        if !output.status.success() {
+            return Err(anyhow!(
+                "icacls could not restrict {}: {}",
+                path.display(),
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
+        }
+        Ok(())
+    }
+
+    /// Restricts a file to the current account, read and write.
+    #[cfg(windows)]
+    pub fn restrict_file(path: &Path) -> Result<()> {
+        grant(path, "(R,W)")
+    }
+
+    /// Restricts a directory the same way, and makes the grant inheritable
+    /// so files created inside it pick it up without a spawn of their own.
+    #[cfg(windows)]
+    pub fn restrict_dir(path: &Path) -> Result<()> {
+        grant(path, "(OI)(CI)(F)")
+    }
+
+    /// The protection verdict for `path`, for `oboro doctor`.
+    #[cfg(windows)]
+    pub fn describe(path: &Path) -> String {
+        let account = match identity() {
+            Ok((account, _)) => account,
+            Err(error) => return format!("account could not be resolved ({error})"),
+        };
+        let output = match run_icacls(path, &[]) {
+            Ok(output) if output.status.success() => output,
+            Ok(output) => {
+                return format!(
+                    "icacls could not be read ({})",
+                    String::from_utf8_lossy(&output.stderr).trim()
+                );
+            }
+            Err(error) => return format!("icacls could not be run ({error})"),
+        };
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        interpret(&stdout, &path.to_string_lossy(), &account)
+            .describe()
+            .to_owned()
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn a_whoami_line_yields_the_account_and_the_sid() {
+            let (account, sid) =
+                parse_identity("\"DESKTOP-X\\you\",\"S-1-5-21-1-2-3-512\"\r\n").expect("parsing");
+            assert_eq!(account, "DESKTOP-X\\you");
+            assert_eq!(sid, "S-1-5-21-1-2-3-512");
+        }
+
+        #[test]
+        fn a_malformed_whoami_line_is_rejected() {
+            assert!(parse_identity("not csv at all").is_err());
+            assert!(parse_identity("\"only-one-field\"").is_err());
+        }
+
+        #[test]
+        fn one_explicit_grant_to_the_owner_is_owner_only() {
+            let output = "C:\\Users\\you\\.oboro\\vault.db DESKTOP-X\\you:(R,W)\n\n\
+                           Successfully processed 1 files; Failed processing 0 files";
+            assert_eq!(
+                interpret(output, "C:\\Users\\you\\.oboro\\vault.db", "DESKTOP-X\\you"),
+                Protection::OwnerOnly
+            );
+        }
+
+        #[test]
+        fn an_inherited_entry_is_inherited() {
+            let output = "C:\\Users\\you\\.oboro\\vault.db DESKTOP-X\\you:(I)(R,W)\n\n\
+                           Successfully processed 1 files; Failed processing 0 files";
+            assert_eq!(
+                interpret(output, "C:\\Users\\you\\.oboro\\vault.db", "DESKTOP-X\\you"),
+                Protection::Inherited
+            );
+        }
+
+        #[test]
+        fn a_second_principal_is_shared() {
+            let output = "C:\\Users\\you\\.oboro\\vault.db BUILTIN\\Users:(R)\n                              DESKTOP-X\\you:(R,W)\n\n\
+                           Successfully processed 1 files; Failed processing 0 files";
+            assert_eq!(
+                interpret(output, "C:\\Users\\you\\.oboro\\vault.db", "DESKTOP-X\\you"),
+                Protection::Shared
+            );
+        }
+
+        #[test]
+        fn a_directory_ace_with_inheritance_flags_is_owner_only() {
+            let output = "C:\\Users\\you\\.oboro DESKTOP-X\\you:(OI)(CI)(F)\n\n\
+                           Successfully processed 1 files; Failed processing 0 files";
+            assert_eq!(
+                interpret(output, "C:\\Users\\you\\.oboro", "DESKTOP-X\\you"),
+                Protection::OwnerOnly
+            );
+        }
+
+        #[test]
+        fn empty_and_truncated_output_are_unreadable() {
+            assert_eq!(
+                interpret("", "C:\\Users\\you\\.oboro\\vault.db", "DESKTOP-X\\you"),
+                Protection::Unreadable
+            );
+            assert_eq!(
+                interpret(
+                    "C:\\Users\\you\\.oboro\\vault.db no colon here",
+                    "C:\\Users\\you\\.oboro\\vault.db",
+                    "DESKTOP-X\\you"
+                ),
+                Protection::Unreadable
+            );
+            assert_eq!(
+                interpret(
+                    "an unrelated first line",
+                    "C:\\Users\\you\\.oboro\\vault.db",
+                    "DESKTOP-X\\you"
+                ),
+                Protection::Unreadable
+            );
+        }
+    }
 }
 
 #[cfg(test)]
@@ -757,5 +1132,70 @@ mod tests {
             .permissions()
             .mode();
         assert_eq!(mode & 0o777, 0o600, "key file must be owner-only");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_freshly_created_key_reports_owner_only() {
+        let fixture = TestVault::new();
+        let protection = describe_protection(&fixture.key()).expect("the key exists");
+        assert_eq!(protection, "owner-only (ok)");
+    }
+
+    // Opening the same vault a second time takes the `existed` branch in
+    // `Vault::open`, which on Windows must not spawn `icacls` at all: this
+    // proves the branch itself is harmless, since the no-spawn cost saving
+    // is invisible to a test and only the absence of a hang or an error is
+    // observable here.
+    #[cfg(windows)]
+    #[test]
+    fn opening_an_existing_vault_twice_succeeds() {
+        let fixture = TestVault::new();
+        let db = fixture.db();
+        let key = fixture.key();
+        drop(fixture.vault);
+
+        let reopened = Vault::open(&db, &key);
+        assert!(reopened.is_ok(), "reopening an existing vault must succeed");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_file_with_inheritance_restored_is_too_permissive() {
+        let fixture = TestVault::new();
+        let key = fixture.key();
+
+        let status = std::process::Command::new("icacls")
+            .arg(&key)
+            .arg("/inheritance:e")
+            .status()
+            .expect("running icacls to restore inheritance");
+        assert!(status.success(), "icacls /inheritance:e must succeed");
+
+        let protection = describe_protection(&key).expect("the key exists");
+        assert_eq!(protection, "inherited access (too permissive)");
+    }
+
+    /// The Windows mirror of `a_vault_opens_in_a_directory_it_did_not_create`:
+    /// a pre-existing directory gets no inheritable grant, so it is left
+    /// exactly as it is, but the key inside it must still end up owner-only.
+    #[cfg(windows)]
+    #[test]
+    fn a_vault_opens_in_a_directory_it_did_not_create_on_windows() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let store = dir.path().join("mounted");
+        std::fs::create_dir(&store).expect("creating the directory first");
+
+        let mut vault = Vault::open(&store.join("vault.db"), &store.join("key"))
+            .expect("a directory we did not create must not stop the vault opening");
+        vault
+            .placeholder_for(&EntityKind::Person, "Jean Dupont")
+            .expect("allocating");
+
+        assert_eq!(
+            describe_protection(&store.join("key")).as_deref(),
+            Some("owner-only (ok)"),
+            "the key must still be owner-only regardless of the directory's ACL"
+        );
     }
 }

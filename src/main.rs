@@ -1375,17 +1375,9 @@ fn doctor(store: &StoreArgs) -> Result<()> {
     writeln!(report, "vault:      {}", db.display())?;
     writeln!(report, "key:        {}", key.display())?;
 
-    #[cfg(unix)]
     for path in [&db, &key] {
-        use std::os::unix::fs::PermissionsExt;
-        if let Ok(metadata) = std::fs::metadata(path) {
-            let mode = metadata.permissions().mode() & 0o777;
-            let state = if mode == 0o600 {
-                "ok"
-            } else {
-                "too permissive"
-            };
-            writeln!(report, "  {} mode {mode:04o} ({state})", path.display())?;
+        if let Some(protection) = vault::describe_protection(path) {
+            writeln!(report, "  {} {protection}", path.display())?;
         }
     }
 

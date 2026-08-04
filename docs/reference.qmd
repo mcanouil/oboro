@@ -392,6 +392,8 @@ skill       /Users/you/.claude/skills/oboro/SKILL.md (not installed)
 completion  /Users/you/.zfunc/_oboro (current)
 ```
 
+On Windows the two protection lines read from the file's ACL instead of a mode, for example `C:\Users\you\.oboro\vault.db owner-only (ok)` or `... inherited access (too permissive)` for one that has not been restricted.
+
 Start here when something is not being detected: it shows whether the model is installed, which configuration was found, and which formats this build reads.
 
 The four lines before the last answer a different question: whether the agent side is wired up.
