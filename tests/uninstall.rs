@@ -121,6 +121,12 @@ fn install_everything(workspace: &Workspace) {
         .expect("planting a default-location key");
 }
 
+// Unix only, for the reason given above every other `--user` test in this
+// crate: `install_everything` installs into the user scope, and
+// `dirs::home_dir` reads `$HOME` on Unix but asks the shell for the profile
+// folder on Windows, ignoring it. On Windows this would write into, and then
+// fail to find its own writes in, the runner's real profile.
+#[cfg(unix)]
 #[test]
 fn dry_run_leaves_everything_in_place() {
     let workspace = Workspace::new();
@@ -174,6 +180,9 @@ fn dry_run_leaves_everything_in_place() {
 /// The confirmation this command asks for exists so that a script cannot
 /// stumble into deleting a vault by piping input into the wrong command; the
 /// default answer, with no terminal to answer from, has to be "do nothing".
+// Unix only, for the same reason as above: `install_everything` writes to the
+// user scope.
+#[cfg(unix)]
 #[test]
 fn no_terminal_and_no_yes_refuses_and_removes_nothing() {
     let workspace = Workspace::new();

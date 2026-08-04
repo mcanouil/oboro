@@ -551,7 +551,11 @@ fn remove_hook(settings: &mut serde_json::Value, event: &Event, file: &Path) -> 
     };
 
     let mut removed: Option<Option<String>> = None;
-    for group in groups.iter_mut() {
+    // Indices this call emptied, so only those are pruned below: a group that
+    // already held an empty `hooks` list, another tool's own placeholder, is
+    // not this removal's business and must survive it.
+    let mut emptied = Vec::new();
+    for (index, group) in groups.iter_mut().enumerate() {
         let matcher = group
             .get("matcher")
             .and_then(serde_json::Value::as_str)
@@ -571,8 +575,13 @@ fn remove_hook(settings: &mut serde_json::Value, event: &Event, file: &Path) -> 
             found_here |= is_ours;
             !is_ours
         });
-        if found_here && removed.is_none() {
-            removed = Some(matcher);
+        if found_here {
+            if removed.is_none() {
+                removed = Some(matcher);
+            }
+            if entries.is_empty() {
+                emptied.push(index);
+            }
         }
     }
 
@@ -580,12 +589,9 @@ fn remove_hook(settings: &mut serde_json::Value, event: &Event, file: &Path) -> 
         return Ok(Removal::Absent);
     };
 
-    groups.retain(|group| {
-        group
-            .get("hooks")
-            .and_then(serde_json::Value::as_array)
-            .is_none_or(|entries| !entries.is_empty())
-    });
+    for index in emptied.into_iter().rev() {
+        groups.remove(index);
+    }
     if groups.is_empty() {
         hooks_obj.remove(event.name);
     }
@@ -984,6 +990,29 @@ mod tests {
         assert_eq!(groups[0]["hooks"][0]["command"], "cargo fmt");
     }
 
+    /// A foreign group that already held an empty `hooks` list, someone
+    /// else's placeholder, is not this removal's business: pruning must drop
+    /// only the group Oboro's own removal just emptied, not every group that
+    /// happens to be empty by the time it looks.
+    #[test]
+    fn a_foreign_group_that_was_already_empty_survives() {
+        let project = tempfile::tempdir().expect("temporary directory");
+        write_settings(
+            project.path(),
+            r#"{"hooks": {"PostToolUse": [{"matcher": "Write", "hooks": []}]}}"#,
+        );
+        install_into(project.path()).expect("installing");
+
+        uninstall_from(project.path()).expect("uninstalling");
+
+        let groups = settings_in(project.path())["hooks"]["PostToolUse"]
+            .as_array()
+            .expect("a list")
+            .clone();
+        assert_eq!(groups.len(), 1, "the pre-existing empty group survives");
+        assert_eq!(groups[0]["matcher"], "Write");
+    }
+
     /// Every other key in the file keeps its place, the same guarantee the
     /// install side gives.
     #[test]
@@ -1017,6 +1046,28 @@ mod tests {
             settings_in(project.path()),
             serde_json::json!({"model": "opus"})
         );
+    }
+
+    /// The removal side refuses the same malformed shapes the install side
+    /// does, for the same reason: a settings file Oboro cannot understand is
+    /// not one it should rewrite, in either direction.
+    #[test]
+    fn settings_shaped_wrongly_are_refused_on_removal() {
+        for (text, expected) in [
+            ("[1, 2, 3]", "a list"),
+            (r#"{"hooks": []}"#, "a list"),
+            (r#"{"hooks": {"PostToolUse": {}}}"#, "an object"),
+        ] {
+            let project = tempfile::tempdir().expect("temporary directory");
+            write_settings(project.path(), text);
+
+            let error = uninstall_from(project.path()).expect_err("must refuse");
+
+            assert!(
+                format!("{error:#}").contains(expected),
+                "{text} must be refused as {expected}: {error:#}"
+            );
+        }
     }
 
     #[cfg(unix)]

@@ -670,7 +670,10 @@ fn describe_store(vault_path: &Path, key_path: &Path, home: Option<&Path>, keep_
         ),
     }
     for path in [vault_path, key_path] {
-        if home.is_none_or(|home| !is_within(path, home)) && path.exists() {
+        // `is_file`, matching what `remove_vault_file` below actually removes:
+        // a `--vault` pointed at a directory by mistake is not something this
+        // report should promise to take with it.
+        if home.is_none_or(|home| !is_within(path, home)) && path.is_file() {
             oboro::note!("store   {}", path.display());
         }
     }
@@ -713,8 +716,8 @@ fn remove_vault_file(path: &Path) -> Result<()> {
         std::fs::remove_file(path).with_context(|| format!("removing {}", path.display()))?;
     }
     for sidecar in vault::sidecars(path) {
-        if sidecar.is_file() {
-            let _ = std::fs::remove_file(&sidecar);
+        if sidecar.is_file() && std::fs::remove_file(&sidecar).is_err() {
+            oboro::note!("store   could not remove {}", sidecar.display());
         }
     }
     Ok(())
