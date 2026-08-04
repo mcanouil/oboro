@@ -27,13 +27,16 @@ pub const SKILL: &str = include_str!("../skills/oboro/SKILL.md");
 ///
 /// Returns an error for the same reason [`Scope::root`] does.
 pub fn path(scope: Scope, cwd: &Path) -> Result<PathBuf> {
-    Ok(scope
-        .root(cwd)?
-        .join(SKILL_PATH.iter().collect::<PathBuf>()))
+    Ok(below(&scope.root(cwd)?))
 }
 
 /// Where the skill sits below a scope's root.
 const SKILL_PATH: [&str; 4] = [".claude", "skills", "oboro", "SKILL.md"];
+
+/// `root` joined with [`SKILL_PATH`], the one place that path is assembled.
+fn below(root: &Path) -> PathBuf {
+    root.join(SKILL_PATH.iter().collect::<PathBuf>())
+}
 
 /// What is at a scope's path.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -103,7 +106,7 @@ pub fn status(path: &Path) -> Status {
 pub fn plan(scope: Scope, cwd: &Path, force: bool) -> Result<Plan> {
     let root = scope.root(cwd)?;
     refuse_symlinks(&root, &SKILL_PATH)?;
-    let path = root.join(SKILL_PATH.iter().collect::<PathBuf>());
+    let path = below(&root);
 
     if force {
         return Ok(Plan::Write(path));
@@ -145,6 +148,62 @@ fn write(path: &Path) -> Result<()> {
             .with_context(|| format!("creating {}", parent.display()))?;
     }
     std::fs::write(path, SKILL).with_context(|| format!("writing {}", path.display()))
+}
+
+/// What removing the skill from a scope would leave.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum Removal {
+    /// Nothing is at this path.
+    Absent(PathBuf),
+    /// This path is removed, edited copy or not: the point of uninstalling is
+    /// to leave nothing, not to preserve an edit nobody will read again.
+    Remove(PathBuf),
+}
+
+/// What removing the skill from `scope` would do, without doing it.
+///
+/// # Errors
+///
+/// Returns an error for the same reason [`plan`] does: a symbolic link
+/// anywhere below the scope's root.
+pub fn removal_plan(scope: Scope, cwd: &Path) -> Result<Removal> {
+    let root = scope.root(cwd)?;
+    refuse_symlinks(&root, &SKILL_PATH)?;
+    let path = below(&root);
+
+    Ok(match status(&path) {
+        Status::Missing => Removal::Absent(path),
+        Status::Current | Status::Edited | Status::Unreadable => Removal::Remove(path),
+    })
+}
+
+/// Carries out a [`Removal`], returning it so the caller can report what
+/// happened.
+///
+/// Also removes a `.oboro-proposed` sibling left by a previous install that
+/// found an edited copy, since that file is Oboro's too. The directory above
+/// the skill goes as well, once it is empty: Oboro created and owns exactly
+/// that directory, not `.claude/skills` above it, which another skill may
+/// still be using.
+///
+/// # Errors
+///
+/// Returns an error when the skill file exists but cannot be removed.
+pub fn uninstall(removal: Removal) -> Result<Removal> {
+    if let Removal::Remove(path) = &removal {
+        std::fs::remove_file(path).with_context(|| format!("removing {}", path.display()))?;
+        let proposed = proposed_path(path);
+        if proposed.is_file() {
+            let _ = std::fs::remove_file(&proposed);
+        }
+        if let Some(dir) = path.parent() {
+            // Best effort: a directory that is not empty, or that a race
+            // repopulated, is left alone rather than turned into a failure
+            // over what is otherwise a cosmetic cleanup.
+            let _ = std::fs::remove_dir(dir);
+        }
+    }
+    Ok(removal)
 }
 
 #[cfg(test)]
@@ -283,5 +342,75 @@ mod tests {
                 "nothing is written through the link at {link_at}"
             );
         }
+    }
+
+    /// Uninstalls from a temporary project, the way the command does.
+    fn uninstall_from(cwd: &Path) -> Result<Removal> {
+        uninstall(removal_plan(Scope::Project, cwd)?)
+    }
+
+    #[test]
+    fn a_missing_skill_has_nothing_to_remove() {
+        let home = tempfile::tempdir().expect("temporary directory");
+        let path = path(Scope::Project, home.path()).expect("a path");
+
+        let done = uninstall_from(home.path()).expect("uninstalling");
+
+        assert_eq!(done, Removal::Absent(path));
+    }
+
+    #[test]
+    fn a_current_skill_is_removed_along_with_its_directory() {
+        let home = tempfile::tempdir().expect("temporary directory");
+        install_into(home.path(), false).expect("installing");
+        let path = path(Scope::Project, home.path()).expect("a path");
+
+        let done = uninstall_from(home.path()).expect("uninstalling");
+
+        assert_eq!(done, Removal::Remove(path.clone()));
+        assert!(!path.exists());
+        assert!(
+            !path.parent().expect("a parent").exists(),
+            "the directory Oboro owns is removed once it is empty"
+        );
+    }
+
+    /// The point of uninstalling is to leave nothing, not to preserve an edit
+    /// nobody will read again.
+    #[test]
+    fn an_edited_skill_is_removed_too() {
+        let home = tempfile::tempdir().expect("temporary directory");
+        let path = plant_an_edited_skill(home.path());
+
+        let done = uninstall_from(home.path()).expect("uninstalling");
+
+        assert_eq!(done, Removal::Remove(path.clone()));
+        assert!(!path.exists());
+    }
+
+    /// A proposal left behind by a previous install is Oboro's file too.
+    #[test]
+    fn a_leftover_proposal_is_removed_with_the_skill() {
+        let home = tempfile::tempdir().expect("temporary directory");
+        let path = plant_an_edited_skill(home.path());
+        install_into(home.path(), false).expect("installing, which proposes beside it");
+        assert!(proposed_path(&path).exists());
+
+        uninstall_from(home.path()).expect("uninstalling");
+
+        assert!(!proposed_path(&path).exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn nothing_is_removed_through_a_symbolic_link() {
+        let home = tempfile::tempdir().expect("temporary directory");
+        let elsewhere = home.path().join("elsewhere");
+        std::fs::create_dir_all(&elsewhere).expect("creating the link target");
+        std::os::unix::fs::symlink(&elsewhere, home.path().join(".claude")).expect("linking");
+
+        let error = uninstall_from(home.path()).expect_err("must refuse");
+
+        assert!(format!("{error:#}").contains("symbolic link"), "{error:#}");
     }
 }

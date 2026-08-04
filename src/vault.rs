@@ -445,10 +445,7 @@ fn reharden(path: &Path) -> Result<()> {
 #[cfg_attr(not(unix), allow(clippy::unnecessary_wraps))]
 fn restrict_sidecars(db_path: &Path) -> Result<()> {
     #[cfg(unix)]
-    for suffix in ["-wal", "-shm"] {
-        let mut name = db_path.as_os_str().to_owned();
-        name.push(suffix);
-        let sidecar = PathBuf::from(name);
+    for sidecar in sidecars(db_path) {
         if sidecar.exists() {
             restrict_permissions(&sidecar)?;
         }
@@ -456,6 +453,21 @@ fn restrict_sidecars(db_path: &Path) -> Result<()> {
     #[cfg(not(unix))]
     let _ = db_path;
     Ok(())
+}
+
+/// The WAL and SHM sidecars WAL mode creates beside `db_path`, named whether
+/// or not either currently exists.
+///
+/// Public so `oboro uninstall`, which has to remove them explicitly when
+/// `--vault` points outside the directory it sweeps wholesale, names them the
+/// same way this module does rather than re-deriving the suffixes.
+#[must_use]
+pub fn sidecars(db_path: &Path) -> [PathBuf; 2] {
+    ["-wal", "-shm"].map(|suffix| {
+        let mut name = db_path.as_os_str().to_owned();
+        name.push(suffix);
+        PathBuf::from(name)
+    })
 }
 
 /// Describes whether `path` is protected from other accounts, for `oboro
@@ -493,7 +505,7 @@ pub fn describe_protection(path: &Path) -> Option<String> {
 ///
 /// Returns an error if the home directory cannot be determined.
 pub fn default_db_path() -> Result<PathBuf> {
-    Ok(oboro_home()?.join("vault.db"))
+    Ok(home()?.join("vault.db"))
 }
 
 /// The default key location, `~/.oboro/key`.
@@ -502,10 +514,20 @@ pub fn default_db_path() -> Result<PathBuf> {
 ///
 /// Returns an error if the home directory cannot be determined.
 pub fn default_key_path() -> Result<PathBuf> {
-    Ok(oboro_home()?.join("key"))
+    Ok(home()?.join("key"))
 }
 
-fn oboro_home() -> Result<PathBuf> {
+/// Where Oboro keeps everything it stores for this user: the vault, the key,
+/// and the recognition model when the `ner` feature has fetched one.
+///
+/// Public so `oboro uninstall` can name the whole directory without needing
+/// the `ner` feature, which is the only build `crate::models::directory` is
+/// compiled into.
+///
+/// # Errors
+///
+/// Returns an error if the home directory cannot be determined.
+pub fn home() -> Result<PathBuf> {
     let home = dirs::home_dir()
         .ok_or_else(|| anyhow!("cannot determine the home directory; pass --vault explicitly"))?;
     Ok(home.join(".oboro"))

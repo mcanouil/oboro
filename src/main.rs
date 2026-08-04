@@ -177,6 +177,25 @@ enum Command {
         #[arg(long, requires = "action")]
         dry_run: bool,
     },
+    /// Remove everything Oboro wrote: completions, agent hooks and skill, the
+    /// vault, the recognition model, and the binary itself
+    ///
+    /// Prints everything that would go, asks for confirmation, and only then
+    /// removes it. Without `--keep-vault` the vault and its key go too, and
+    /// restoring anything cleaned earlier becomes impossible from then on.
+    Uninstall {
+        /// Report everything that would be removed, and remove nothing
+        #[arg(long)]
+        dry_run: bool,
+        /// Skip the confirmation prompt
+        #[arg(long)]
+        yes: bool,
+        /// Leave the vault and its key in place
+        #[arg(long)]
+        keep_vault: bool,
+        #[command(flatten)]
+        store: StoreArgs,
+    },
 }
 
 #[derive(Subcommand)]
@@ -398,6 +417,12 @@ fn run() -> Result<()> {
             uninstall,
             dry_run,
         } => completions(shell, install, uninstall, dry_run),
+        Command::Uninstall {
+            dry_run,
+            yes,
+            keep_vault,
+            store,
+        } => uninstall_everything(dry_run, yes, keep_vault, &store),
     }
 }
 
@@ -451,6 +476,303 @@ fn completions(
 
     print_stdout(&oboro::completions::script(shell, &mut command))?;
     oboro::note!("{}", oboro::completions::hint(shell, &name).trim_end());
+    Ok(())
+}
+
+/// Removes everything Oboro wrote, having said so first and been told to
+/// proceed.
+///
+/// The hook and skill removals are decided once, as [`oboro::hooks::plan`] and
+/// [`oboro::skill::plan`] are for an install, so the report printed before
+/// confirmation and the removal carried out after it cannot disagree. The
+/// completion scripts are the exception: [`oboro::completions::uninstall`]
+/// already combines deciding and doing behind its own `dry_run` flag, so the
+/// report calls it once that way and, once confirmed, calls it again to act.
+fn uninstall_everything(
+    dry_run: bool,
+    yes: bool,
+    keep_vault: bool,
+    store: &StoreArgs,
+) -> Result<()> {
+    let cwd = std::env::current_dir().context("reading the working directory")?;
+    let (vault_path, key_path) = store.paths()?;
+    let home = vault::home().ok();
+
+    let mut hook_plans = Vec::new();
+    let mut skill_removals = Vec::new();
+    for scope in SCOPES {
+        match oboro::hooks::removal_plan(scope, &cwd) {
+            Ok(plan) => hook_plans.push((scope, plan)),
+            Err(error) => oboro::note!("hooks   {}: {error:#}", describe_scope(scope)),
+        }
+        match oboro::skill::removal_plan(scope, &cwd) {
+            Ok(removal) => skill_removals.push((scope, removal)),
+            Err(error) => oboro::note!("skill   {}: {error:#}", describe_scope(scope)),
+        }
+    }
+
+    // The name alone, not the whole command tree `completions()` builds when it
+    // also has to render a script: `env!` names the same binary the `#[command]`
+    // attribute on `Cli` does, without walking every subcommand for it.
+    let completions_environment =
+        oboro::completions::Environment::from_env(env!("CARGO_PKG_NAME")).ok();
+
+    oboro::note!("oboro uninstall would remove:");
+    for (scope, plan) in &hook_plans {
+        describe_hook_removal(*scope, plan);
+    }
+    for (scope, removal) in &skill_removals {
+        describe_skill_removal(*scope, removal);
+    }
+    if let Some(environment) = &completions_environment {
+        for shell in oboro::completions::FILE_BACKED_SHELLS {
+            let report = oboro::completions::uninstall(environment, shell, true)?;
+            // `completions::uninstall` closes its own report with the same
+            // trailer this command's own `--dry-run` line prints once at the
+            // end; keeping both would repeat it and misplace it ahead of the
+            // store and binary lines that still follow.
+            let report = report
+                .strip_suffix(oboro::completions::DRY_RUN_TRAILER)
+                .map_or(report.as_str(), str::trim_end);
+            if !report.is_empty() && !report.starts_with("Nothing to remove") {
+                oboro::note!("{report}");
+            }
+        }
+    } else {
+        oboro::note!("completions   no home directory");
+    }
+    describe_store(&vault_path, &key_path, home.as_deref(), keep_vault);
+    // Resolved once and carried through to the removal below, rather than
+    // asking the OS for the running binary's path twice for one command.
+    let exe = std::env::current_exe();
+    match &exe {
+        Ok(exe) => oboro::note!("binary  {}", exe.display()),
+        Err(error) => oboro::note!("binary  could not be found: {error:#}"),
+    }
+    note_what_cannot_be_reached_here(&cwd);
+
+    if dry_run {
+        oboro::note!("--dry-run: nothing was removed.");
+        return Ok(());
+    }
+
+    if !yes && !confirmed()? {
+        oboro::note!("nothing was removed");
+        return Ok(());
+    }
+
+    for (_, plan) in hook_plans {
+        oboro::hooks::uninstall(plan)?;
+    }
+    for (_, removal) in skill_removals {
+        oboro::skill::uninstall(removal)?;
+    }
+    if let Some(environment) = &completions_environment {
+        for shell in oboro::completions::FILE_BACKED_SHELLS {
+            oboro::completions::uninstall(environment, shell, false)?;
+        }
+    }
+    remove_store(&vault_path, &key_path, home.as_deref(), keep_vault)?;
+    if let Ok(exe) = &exe {
+        finish_binary(exe)?;
+    }
+
+    oboro::note!("oboro has been uninstalled.");
+    Ok(())
+}
+
+/// Asks whether to proceed, refusing outright when there is no terminal to
+/// answer from: a script piping this command has to say `--yes` on purpose
+/// rather than have a missing prompt read as one.
+fn confirmed() -> Result<bool> {
+    if !std::io::stdin().is_terminal() {
+        bail!(
+            "there is no terminal to confirm from; pass --yes to remove everything \
+             listed above, or --dry-run to only see it"
+        );
+    }
+    oboro::note!("Remove everything listed above? [y/N]");
+    let mut answer = String::new();
+    std::io::stdin()
+        .read_line(&mut answer)
+        .context("reading your answer")?;
+    Ok(matches!(answer.trim(), "y" | "Y" | "yes" | "Yes" | "YES"))
+}
+
+/// Says what removing a scope's hooks would do, and nothing when there is
+/// nothing to remove there.
+fn describe_hook_removal(scope: Scope, plan: &oboro::hooks::RemovalPlan) {
+    let removed: Vec<String> = plan
+        .changes
+        .iter()
+        .filter_map(|(name, change)| match change {
+            oboro::hooks::Removal::Remove(matcher) => Some(format!(
+                "{name} ({})",
+                matcher.as_deref().unwrap_or("every tool")
+            )),
+            oboro::hooks::Removal::Absent => None,
+        })
+        .collect();
+    if removed.is_empty() {
+        return;
+    }
+    oboro::note!(
+        "hooks   {} ({}): {}",
+        describe_scope(scope),
+        removed.join(", "),
+        plan.file.display()
+    );
+}
+
+/// Says what removing a scope's skill would do, and nothing when there is
+/// nothing to remove there.
+fn describe_skill_removal(scope: Scope, removal: &oboro::skill::Removal) {
+    if let oboro::skill::Removal::Remove(path) = removal {
+        oboro::note!("skill   {}: {}", describe_scope(scope), path.display());
+    }
+}
+
+/// Whether `path` sits inside `home`: the vault and key default to
+/// `~/.oboro`, which the directory sweep below already reaches, so pointing
+/// this at a path outside it, with `--vault` or `--key`, is the only case that
+/// needs naming on its own.
+fn is_within(path: &Path, home: &Path) -> bool {
+    path.starts_with(home)
+}
+
+/// Says what removing the vault, the key and the recognition model would do.
+fn describe_store(vault_path: &Path, key_path: &Path, home: Option<&Path>, keep_vault: bool) {
+    if keep_vault {
+        if let Some(models) = home
+            .map(|home| home.join("models"))
+            .filter(|dir| dir.is_dir())
+        {
+            oboro::note!("model   {}", models.display());
+        }
+        oboro::note!(
+            "vault   kept, as --keep-vault asked: {} and {}",
+            vault_path.display(),
+            key_path.display()
+        );
+        return;
+    }
+
+    match home {
+        Some(home) if home.is_dir() => oboro::note!(
+            "store   {} (the vault, the key and the recognition model)",
+            home.display()
+        ),
+        // Nothing under ~/.oboro yet is the ordinary case for a build that
+        // never opened a vault there, and not worth a line of its own.
+        Some(_) => {}
+        None => oboro::note!(
+            "store   no home directory; only --vault and --key can be found and removed"
+        ),
+    }
+    for path in [vault_path, key_path] {
+        // `is_file`, matching what `remove_vault_file` below actually removes:
+        // a `--vault` pointed at a directory by mistake is not something this
+        // report should promise to take with it.
+        if home.is_none_or(|home| !is_within(path, home)) && path.is_file() {
+            oboro::note!("store   {}", path.display());
+        }
+    }
+}
+
+/// Carries out what [`describe_store`] said.
+fn remove_store(
+    vault_path: &Path,
+    key_path: &Path,
+    home: Option<&Path>,
+    keep_vault: bool,
+) -> Result<()> {
+    if keep_vault {
+        if let Some(models) = home
+            .map(|home| home.join("models"))
+            .filter(|dir| dir.is_dir())
+        {
+            std::fs::remove_dir_all(&models)
+                .with_context(|| format!("removing {}", models.display()))?;
+        }
+        return Ok(());
+    }
+
+    if let Some(home) = home.filter(|home| home.is_dir()) {
+        std::fs::remove_dir_all(home).with_context(|| format!("removing {}", home.display()))?;
+    }
+    for path in [vault_path, key_path] {
+        if home.is_none_or(|home| !is_within(path, home)) {
+            remove_vault_file(path)?;
+        }
+    }
+    Ok(())
+}
+
+/// Removes a vault or key file and its WAL/SHM sidecars, for the case where
+/// `--vault` or `--key` names somewhere outside `~/.oboro` that the directory
+/// sweep in [`remove_store`] does not reach.
+fn remove_vault_file(path: &Path) -> Result<()> {
+    if path.is_file() {
+        std::fs::remove_file(path).with_context(|| format!("removing {}", path.display()))?;
+    }
+    for sidecar in vault::sidecars(path) {
+        if sidecar.is_file() && std::fs::remove_file(&sidecar).is_err() {
+            oboro::note!("store   could not remove {}", sidecar.display());
+        }
+    }
+    Ok(())
+}
+
+/// Says what `oboro uninstall` cannot reach on its own, so it is not mistaken
+/// for something it silently skipped.
+fn note_what_cannot_be_reached_here(cwd: &Path) {
+    for plugin in oboro::hooks::enabled_plugins_from(cwd) {
+        oboro::note!(
+            "plugin  {} is enabled in {}; this does not reach the Claude Code plugin \
+             cache, only the settings naming it. Disable or remove the plugin separately.",
+            plugin.key,
+            plugin.file.display()
+        );
+    }
+    oboro::note!(
+        "docker  a persisted volume or image is not reachable from here; if you used \
+         one, remove it yourself: `docker volume rm oboro-vault`, \
+         `docker rmi ghcr.io/mcanouil/oboro`"
+    );
+}
+
+/// Removes the running binary, or says why it could not.
+///
+/// Unix can unlink an executable while it is running, so `exe` goes here.
+/// Windows, and anywhere else this crate is not known to run, locks a running
+/// image instead, so the path and the command to finish the job are printed
+/// rather than attempted.
+fn finish_binary(exe: &Path) -> Result<()> {
+    #[cfg(unix)]
+    {
+        match std::fs::remove_file(exe) {
+            Ok(()) => oboro::note!("binary  removed {}", exe.display()),
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => oboro::note!(
+                "binary  {} needs elevated rights to remove; run: sudo rm {}",
+                exe.display(),
+                exe.display()
+            ),
+            Err(error) => {
+                return Err(error).with_context(|| format!("removing {}", exe.display()));
+            }
+        }
+        if let Some(home) = dirs::home_dir()
+            && exe.starts_with(home.join(".cargo/bin"))
+        {
+            oboro::note!("binary  installed with cargo; `cargo uninstall oboro` also works");
+        }
+    }
+    #[cfg(not(unix))]
+    oboro::note!(
+        "binary  {} is still running this command; remove it once you are done: del \"{}\"",
+        exe.display(),
+        exe.display()
+    );
     Ok(())
 }
 

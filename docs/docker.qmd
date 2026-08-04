@@ -38,6 +38,14 @@ docker volume create oboro-vault
 Then mount it on every run.
 The image sets `OBORO_VAULT` and `OBORO_KEY_FILE` to point inside it, so no command has to repeat the paths.
 
+`oboro uninstall` is a host command: it cannot see, and does not touch, anything a container run left behind.
+Remove the volume, and the image if you pulled one, yourself:
+
+```bash
+docker volume rm oboro-vault
+docker rmi ghcr.io/mcanouil/oboro:latest ghcr.io/mcanouil/oboro:ner
+```
+
 ## Cleaning a document
 
 ```bash

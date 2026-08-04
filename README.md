@@ -65,6 +65,8 @@ cargo build --release --features "ner,ocr"   # names and image OCR
 
 **Devcontainer** — for building or contributing with only Docker on the host; it carries the pinned toolchain, Tesseract and the OCR libraries. Reopen the folder in the container in Visual Studio Code or a GitHub Codespace; see [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
+**Uninstalling** — `oboro uninstall` removes everything the tool wrote, the vault included; see the [reference](https://m.canouil.dev/oboro/reference.html#uninstall).
+
 The default prebuilt binary and Docker image carry no optional feature. Name recognition (`ner`) links ONNX Runtime, which has no musl build, so its prebuilt forms are separate: glibc release archives via the install script, and the `:ner` image. Optical character recognition (`ocr`) needs the Tesseract shared libraries at run time, so it stays a source build.
 
 ## In Claude Code

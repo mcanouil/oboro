@@ -3,7 +3,7 @@ title: "Command reference"
 description: "Every oboro command and the options it accepts: clean, review, restore, map, models, doctor, and completions."
 ---
 
-Every command that opens the vault accepts `--vault` and `--key` to point at a store other than the default, which is useful for keeping one vault per project: [`clean`](#clean), [`review`](#review), [`restore`](#restore), [`map`](#map), [`hook post-tool-use` and `hook pre-tool-use`](#hook), [`mcp`](#mcp) and [`doctor`](#doctor).
+Every command that opens the vault accepts `--vault` and `--key` to point at a store other than the default, which is useful for keeping one vault per project: [`clean`](#clean), [`review`](#review), [`restore`](#restore), [`map`](#map), [`hook post-tool-use` and `hook pre-tool-use`](#hook), [`mcp`](#mcp), [`doctor`](#doctor) and [`uninstall`](#uninstall).
 They go after the command that uses them, and `OBORO_VAULT` and `OBORO_KEY_FILE` do the same job without repeating a flag.
 The commands that never open a vault, [`skill`](#skill), [`hook install`](#hook), [`models`](#models) and [`completions`](#completions), refuse them.
 
@@ -464,3 +464,30 @@ oboro completions powershell | Out-String | Invoke-Expression
 
 A completion script is a copy of the command surface from the moment it was generated, so an upgrade that adds a command leaves it offering the old set.
 [`doctor`](#doctor) says when that has happened, and the install script says so at the moment it happens.
+
+## `uninstall`
+
+Removes everything Oboro wrote: completion scripts, the agent hooks and skill in both scopes, the vault, the recognition model, and the binary itself.
+
+```bash
+oboro uninstall [--dry-run] [--yes] [--keep-vault]
+```
+
+Without a flag it prints everything that would go and asks to confirm, the same shape `map purge` uses.
+`--dry-run` prints the same report and stops there.
+`--yes` skips the prompt, for a script that already knows what it wants.
+`--keep-vault` leaves the vault and its key in place; without it they go too, and restoring anything cleaned earlier becomes impossible from then on.
+
+An agent hook is taken out of a settings file rather than the file itself being deleted, since the file is yours: another tool's hook on the same event, and every other key, are left exactly as written.
+A settings file that held nothing else of Oboro's ends as `{}`.
+The skill file and the `oboro` directory it sits in go outright, since Oboro created and owns exactly that directory; `.claude/skills` above it does not, since another skill may still be using it.
+
+The running binary removes itself once everything else is gone, on macOS and Linux.
+On Windows the running image is locked, so the path and the command to finish the job are printed instead.
+
+A Claude Code plugin, if one is enabled, and a persisted Docker volume or image are outside what this command can reach; it names them rather than pretending they were never there.
+
+```bash
+oboro uninstall --dry-run
+oboro uninstall --yes --keep-vault
+```
