@@ -133,7 +133,14 @@ Check what your build can do:
 oboro doctor
 ```
 
-However you installed it, `oboro completions <shell>` prints a completion script and tells you where it belongs; the destinations are in the [command reference](reference.qmd#completions).
+However you installed it, `oboro completions --install` puts a completion script where your shell reads it, taking the shell from `$SHELL` unless you name one:
+
+```bash
+oboro completions --install
+```
+
+Without `--install` the script goes to standard output and where it belongs to standard error, so a redirect captures the script alone.
+[Shells](shells.qmd) sets out every destination and how to do it by hand.
 
 ## Wire it into Claude Code
 

@@ -139,24 +139,43 @@ enum Command {
         #[command(flatten)]
         store: StoreArgs,
     },
-    /// Print a shell completion script
+    /// Print a shell completion script, or install one
     ///
     /// The script goes to standard output and the destination it belongs in
     /// goes to standard error alongside it, so `oboro completions zsh >
     /// _oboro` writes a file the shell can read and still tells you where to
     /// put it. Redirect standard error away to suppress that.
     ///
+    /// --install writes it where the shell reads it instead, editing your
+    /// shell's configuration only where the file alone is not enough. A script
+    /// already on disk is updated wherever it is, rather than moved.
+    ///
     /// The destinations are listed at
-    /// https://m.canouil.dev/oboro/reference.html#completions
+    /// https://m.canouil.dev/oboro/shells.html
     // This doc comment is help text before it is documentation, and the fix
     // `doc_markdown` asks for, wrapping the URL in angle brackets, would print
     // them to anyone running `oboro completions --help`, where they read as a
     // placeholder to substitute rather than as a link to follow.
     #[expect(clippy::doc_markdown, reason = "a bare URL is what the help shows")]
+    // The group exists so that --dry-run can require one of the two actions:
+    // there is nothing to preview about printing a script to standard output.
+    #[command(group = clap::ArgGroup::new("action").args(["install", "uninstall"]))]
     Completions {
-        /// The shell to generate for
+        /// The shell to generate for, taken from $SHELL when left out
         #[arg(value_name = "SHELL")]
-        shell: clap_complete::Shell,
+        shell: Option<clap_complete::Shell>,
+
+        /// Write the script where the shell reads it, rather than printing it
+        #[arg(long, conflicts_with = "uninstall")]
+        install: bool,
+
+        /// Remove the installed script, and the managed block that reaches it
+        #[arg(long)]
+        uninstall: bool,
+
+        /// Report every path that would change, and change nothing
+        #[arg(long, requires = "action")]
+        dry_run: bool,
     },
 }
 
@@ -373,7 +392,12 @@ fn run() -> Result<()> {
             store,
         } => mcp(config.as_deref(), &root, unconfined, &store),
         Command::Doctor { store } => doctor(&store),
-        Command::Completions { shell } => completions(shell),
+        Command::Completions {
+            shell,
+            install,
+            uninstall,
+            dry_run,
+        } => completions(shell, install, uninstall, dry_run),
     }
 }
 
@@ -384,9 +408,47 @@ fn run() -> Result<()> {
 /// one command do both: the redirect captures the script, the hint stays on the
 /// terminal where it is useful at that moment, and `2>/dev/null` drops it for
 /// anyone scripting this.
-fn completions(shell: clap_complete::Shell) -> Result<()> {
+/// `--install` and `--uninstall` carry out what the hint describes, so that
+/// "where" stops being work the reader has to do. Printing stays the default,
+/// since a redirect, a pipe into `Invoke-Expression`, and a look at the script
+/// itself all start there.
+fn completions(
+    shell: Option<clap_complete::Shell>,
+    install: bool,
+    uninstall: bool,
+    dry_run: bool,
+) -> Result<()> {
     let mut command = Cli::command();
     let name = command.get_name().to_owned();
+    let shell = match shell {
+        Some(shell) => shell,
+        None => oboro::completions::shell_from_env()?,
+    };
+
+    // The reports are printed with a line break of their own: `print_stdout`
+    // writes exactly what it is handed, which is what the script needs and not
+    // what a paragraph of prose does.
+    if uninstall {
+        let environment = oboro::completions::Environment::from_env(&name)?;
+        let report = oboro::completions::uninstall(&environment, shell, dry_run)?;
+
+        return print_stdout(&format!("{report}\n"));
+    }
+
+    if install {
+        let environment = oboro::completions::Environment::from_env(&name)?;
+        let plan = oboro::completions::plan(&environment, shell)?;
+
+        if dry_run {
+            return print_stdout(&format!("{}\n", oboro::completions::describe(&plan)));
+        }
+
+        let script = oboro::completions::script(shell, &mut command);
+        let report = oboro::completions::install(&environment, &plan, &script)?;
+
+        return print_stdout(&format!("{report}\n"));
+    }
+
     print_stdout(&oboro::completions::script(shell, &mut command))?;
     oboro::note!("{}", oboro::completions::hint(shell, &name).trim_end());
     Ok(())
@@ -1541,7 +1603,12 @@ fn describe_completions(command: &mut clap::Command) -> Result<String> {
     let mut report = String::new();
     let mut found = false;
 
-    for location in oboro::completions::conventional_paths(&name) {
+    let Ok(environment) = oboro::completions::Environment::from_env(&name) else {
+        writeln!(report, "completion  no home directory")?;
+        return Ok(report);
+    };
+
+    for location in oboro::completions::conventional_paths(&environment) {
         let Ok(installed) = std::fs::read(&location.path) else {
             // Either nothing is there, which is the ordinary case and not worth
             // a line, or it cannot be read, which the next stat tells apart.
@@ -1561,19 +1628,19 @@ fn describe_completions(command: &mut clap::Command) -> Result<String> {
             continue;
         }
         writeln!(report, "completion  {} (stale)", location.path.display())?;
+        // The command rather than the path: `--install` finds the file itself,
+        // and updates it where it is rather than moving it.
         writeln!(
             report,
-            "{:LABEL$}{name} completions {} > {}",
-            "",
-            location.shell,
-            location.path.display()
+            "{:LABEL$}{name} completions {} --install",
+            "", location.shell
         )?;
     }
 
     if !found {
         writeln!(
             report,
-            "completion  not installed; run `{name} completions <shell>`"
+            "completion  not installed; run `{name} completions <shell> --install`"
         )?;
     }
     Ok(report)
