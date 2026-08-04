@@ -421,20 +421,20 @@ Each is regenerated and compared byte for byte against this binary, so `current`
 
 ```text
 completion  /Users/you/.config/fish/completions/oboro.fish (stale)
-            oboro completions fish > /Users/you/.config/fish/completions/oboro.fish
+            oboro completions fish --install
 ```
 
 ## `completions`
 
-Prints a shell completion script.
+Prints a shell completion script, or installs one.
 
 ```bash
-oboro completions <SHELL>
+oboro completions [SHELL] [--install|--uninstall] [--dry-run]
 ```
 
-`<SHELL>` is one of `bash`, `zsh`, `fish`, `elvish` or `powershell`.
+`SHELL` is one of `bash`, `zsh`, `fish`, `elvish` or `powershell`, and is taken from `$SHELL` when you leave it out.
 
-The script goes to standard output and the destination it belongs in goes to standard error, so one command answers both halves of the question:
+Printing is what happens without a flag: the script goes to standard output and the destination it belongs in goes to standard error, so one command answers both halves of the question.
 
 ```bash
 oboro completions zsh > ~/.oh-my-zsh/custom/completions/_oboro
@@ -443,32 +443,22 @@ oboro completions zsh > ~/.oh-my-zsh/custom/completions/_oboro
 The redirect captures the script alone, leaving a file with nothing in front of it for the shell to trip over, while the instructions still reach the terminal.
 Add `2>/dev/null` to drop them when you are scripting this.
 
-| Shell | Destination | Follow-up |
-| --- | --- | --- |
-| bash | `~/.local/share/bash-completion/completions/oboro` | None. |
-| zsh | `_oboro` in a directory on `$fpath` | `compinit` has to run after that directory is added. |
-| fish | `~/.config/fish/completions/oboro.fish` | None. |
-| elvish | `~/.config/elvish/lib/oboro.elv` | Add `use oboro` to `~/.config/elvish/rc.elv`. |
-| powershell | Usually no file | Pipe into `Invoke-Expression` from `$PROFILE`. |
-
-`$XDG_DATA_HOME` and `$XDG_CONFIG_HOME` are honoured where they apply.
-Note the leading underscore in the zsh filename, and that zsh has no fixed directory: any on `$fpath` will do.
-
-With oh-my-zsh there is nothing to do beyond writing the file, since it puts `$ZSH_CUSTOM/completions`, by default `~/.oh-my-zsh/custom/completions`, on `$fpath` and runs `compinit` itself.
-Without it, pick a directory such as `~/.zfunc` and add both lines to `~/.zshrc`:
+`--install` picks the destination and writes it for you, editing your shell's configuration only where the file alone is not enough:
 
 ```bash
-fpath=(~/.zfunc $fpath)
-autoload -Uz compinit && compinit
+oboro completions --install
+oboro completions zsh --install --dry-run
+oboro completions zsh --uninstall
 ```
 
-PowerShell is usually evaluated rather than saved:
+A script already on disk is updated where it is rather than moved, and copies left in the other known places are swept.
+[Shells](shells.qmd) sets out every destination, the configuration each shell needs, and how to do it by hand.
+
+PowerShell is the one shell with nothing to write: it evaluates the script from `$PROFILE` instead, so `--install` refuses and says what to run.
 
 ```powershell
 oboro completions powershell | Out-String | Invoke-Expression
 ```
-
-Put that in `$PROFILE` to have it in every session.
 
 A completion script is a copy of the command surface from the moment it was generated, so an upgrade that adds a command leaves it offering the old set.
 [`doctor`](#doctor) says when that has happened, and the install script says so at the moment it happens.

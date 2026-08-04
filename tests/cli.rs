@@ -1635,10 +1635,8 @@ fn doctor_reports_a_completion_script_as_current_then_stale() {
         .assert()
         .success()
         .stdout(predicate::str::contains("(stale)"))
-        .stdout(predicate::str::contains(format!(
-            "oboro completions zsh > {}",
-            script.display()
-        )));
+        // The command rather than the path: `--install` finds the file itself.
+        .stdout(predicate::str::contains("oboro completions zsh --install"));
 }
 
 /// The installer checks the same places in shell that `conventional_paths`
@@ -1647,12 +1645,26 @@ fn doctor_reports_a_completion_script_as_current_then_stale() {
 /// it compares the part of each path that neither of them changes.
 #[test]
 fn the_installer_checks_every_conventional_directory() {
+    // The installer writes the binary's name through a variable, which is the
+    // right thing for a shell script and unreadable to a plain search, so it is
+    // expanded here rather than spelled out twice there.
     let installer = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/install.sh"),
     )
-    .expect("reading docs/install.sh");
+    .expect("reading docs/install.sh")
+    .replace("${BINARY_NAME}", "oboro");
 
-    for location in oboro::completions::conventional_paths("oboro") {
+    let home = std::path::Path::new("/home/someone");
+    let environment = oboro::completions::Environment {
+        name: "oboro".to_owned(),
+        home: home.to_owned(),
+        data: home.join(".local/share"),
+        config: home.join(".config"),
+        oh_my_zsh: home.join(".oh-my-zsh/custom"),
+        homebrew: Some(std::path::PathBuf::from("/opt/homebrew")),
+    };
+
+    for location in oboro::completions::conventional_paths(&environment) {
         assert!(
             installer.contains(location.convention),
             "docs/install.sh does not look in {}, which {} reads",

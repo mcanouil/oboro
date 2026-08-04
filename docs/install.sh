@@ -196,49 +196,79 @@ verify_provenance() {
 	fi
 }
 
-# Names any completion script already on disk, with the command that rewrites
-# it.
+# Every place an installed completion script is read from.
+#
+# Kept in step with `known_locations` in src/completions.rs, which a test
+# compares against this file. The paths are listed rather than derived from the
+# user's shell: a `curl | bash` pipe runs under bash whatever the login shell
+# is, so $SHELL is unreliable here and $fpath is not available at all.
+# PowerShell is left out because it evaluates completion from $PROFILE rather
+# than reading a file, so it regenerates itself and can never be stale.
+completion_locations() {
+	local xdg_data="${XDG_DATA_HOME:-${HOME:-}/.local/share}"
+	local xdg_config="${XDG_CONFIG_HOME:-${HOME:-}/.config}"
+	local zsh_custom="${ZSH_CUSTOM:-${HOME:-}/.oh-my-zsh/custom}"
+
+	printf '%s\t%s\n' \
+		bash "${xdg_data}/bash-completion/completions/${BINARY_NAME}" \
+		bash "${xdg_data}/${BINARY_NAME}-completions/${BINARY_NAME}.bash" \
+		zsh "${zsh_custom}/completions/_${BINARY_NAME}" \
+		zsh "${HOME:-}/.zfunc/_${BINARY_NAME}" \
+		zsh "${xdg_data}/zsh/site-functions/_${BINARY_NAME}" \
+		fish "${xdg_config}/fish/completions/${BINARY_NAME}.fish" \
+		elvish "${xdg_config}/elvish/lib/${BINARY_NAME}.elv"
+
+	# Homebrew's own share/zsh/site-functions, which its shell setup puts on
+	# $fpath. Only $HOMEBREW_PREFIX is consulted here: probing /opt/homebrew and
+	# /usr/local, as the binary does, would report on a prefix this installer
+	# never wrote to.
+	if [ -n "${HOMEBREW_PREFIX:-}" ]; then
+		printf '%s\t%s\n' zsh "${HOMEBREW_PREFIX}/share/zsh/site-functions/_${BINARY_NAME}"
+	fi
+}
+
+# Names the completion scripts the version just installed would generate
+# differently, with the command that rewrites each.
 #
 # A completion script is a copy of the command surface from whenever it was last
 # generated, so a release that adds a command leaves it offering the old set and
 # nothing says so. This installer is the moment that knows a version changed,
-# which makes it the moment to say it. Nothing is printed when no script is
-# found, so a first install stays quiet.
-#
-# The paths are checked directly rather than derived from the user's shell: a
-# `curl | bash` pipe runs under bash whatever the login shell is, so $SHELL is
-# unreliable here and $fpath is not available at all. PowerShell is left out
-# because it evaluates completion from $PROFILE rather than reading a file.
-#
-# Kept in step with `conventional_paths` in src/completions.rs, which a test
-# compares against this file.
-report_installed_completions() {
-	local xdg_data="${XDG_DATA_HOME:-${HOME:-}/.local/share}"
-	local xdg_config="${XDG_CONFIG_HOME:-${HOME:-}/.config}"
-	local zsh_custom="${ZSH_CUSTOM:-${HOME:-}/.oh-my-zsh/custom}"
-	local found=0
-	local entry shell path
+# which makes it the moment to say it. Comparing against the binary just
+# installed, rather than assuming every script is now stale, keeps a reinstall
+# of the same version silent, and a first install prints nothing at all.
+report_stale_completions() {
+	local binary="$1"
+	local shell path generated announced=0 announced_shells=""
 
-	for entry in \
-		"bash:${xdg_data}/bash-completion/completions/${BINARY_NAME}" \
-		"zsh:${zsh_custom}/completions/_${BINARY_NAME}" \
-		"zsh:${HOME:-}/.zfunc/_${BINARY_NAME}" \
-		"fish:${xdg_config}/fish/completions/${BINARY_NAME}.fish" \
-		"elvish:${xdg_config}/elvish/lib/${BINARY_NAME}.elv"; do
-		shell="${entry%%:*}"
-		path="${entry#*:}"
+	# No HOME means no conventional location to look in, and `set -u` would trip
+	# on the lookups below.
+	[ -n "${HOME:-}" ] || return 0
+
+	while IFS=$'\t' read -r shell path; do
 		[ -f "${path}" ] || continue
-		if [ "${found}" -eq 0 ]; then
-			echo "A completion script is already installed. This version may offer commands"
-			echo "it does not know about, so rewrite it:"
-			found=1
-		fi
-		echo "  ${BINARY_NAME} completions ${shell} > ${path}"
-	done
+		# A binary that cannot run here says nothing about the script; the
+		# install already reported what it could, and `doctor` will say more.
+		generated=$("${binary}" completions "${shell}" 2>/dev/null) || continue
+		[ "${generated}" = "$(cat "${path}")" ] && continue
 
-	if [ "${found}" -ne 0 ]; then
+		if [ "${announced}" -eq 0 ]; then
+			warn "Completion scripts do not update themselves. Regenerate:"
+			announced=1
+		fi
+		# One command per shell rather than per file: --install finds the file
+		# itself, so two stale copies of one shell's script are one command.
+		case " ${announced_shells} " in
+		*" ${shell} "*) ;;
+		*)
+			announced_shells="${announced_shells} ${shell}"
+			echo "  ${BINARY_NAME} completions ${shell} --install"
+			;;
+		esac
+	done < <(completion_locations)
+
+	if [ "${announced}" -ne 0 ]; then
 		echo
-		echo "\`${BINARY_NAME} doctor\` compares them against this binary and says which are stale."
+		echo "\`${BINARY_NAME} doctor\` compares every script it finds against this binary."
 		echo
 	fi
 }
@@ -382,8 +412,9 @@ main() {
 	fi
 	echo "  ${BINARY_NAME} doctor   # Report what this build can do"
 	echo "  ${BINARY_NAME} --help   # List the commands"
+	echo "  ${BINARY_NAME} completions --install   # Complete commands in your shell"
 	echo
-	report_installed_completions
+	report_stale_completions "${install_dir}/${BINARY_NAME}"
 	if [ "${features}" = "ner" ]; then
 		if [ "$(uname -s)" = "Linux" ]; then
 			echo "The ner binary links glibc: it needs glibc 2.39 or newer (Ubuntu 24.04+,"
