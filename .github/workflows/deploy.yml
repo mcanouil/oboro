@@ -60,6 +60,28 @@ jobs:
           path: docs/_site
           retention-days: 1
 
+  lint-installer:
+    name: Lint install.ps1
+    # docs/install.ps1 only changes on a pull request; the workflow_call at
+    # release time would otherwise spend a Windows runner minute re-linting a
+    # file that has not moved.
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Invoke-ScriptAnalyzer
+        shell: pwsh
+        run: |
+          Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser
+          $findings = Invoke-ScriptAnalyzer -Path docs/install.ps1 -Severity Warning
+          if ($findings) {
+            $findings | Format-Table -AutoSize
+            exit 1
+          }
+
   deploy:
     name: Deploy to GitHub Pages
     needs: build
