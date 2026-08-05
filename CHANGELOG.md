@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- feat: Add `docs/install.ps1`, the Windows counterpart to `install.sh`: `powershell -ExecutionPolicy ByPass -c "irm https://m.canouil.dev/oboro/install.ps1 | iex"` downloads the `x86_64-pc-windows-msvc` release archive, verifies it against `SHA256SUMS` (and against build provenance with `OBORO_VERIFY_PROVENANCE=1`), and installs into `%LOCALAPPDATA%\Programs\oboro\bin`, adding it to the user `PATH` if missing; no administrator rights needed. Arm64 and `--features ner`/`--features ocr` are refused, since no prebuilt Windows build carries them, and `cargo build --release --features <name>` is pointed at instead. Published alongside `install.sh` in `docs/_quarto.yml`, with an `Invoke-ScriptAnalyzer` lint job on `windows-latest`. (#109)
 - feat: Add `oboro uninstall`, which removes everything the tool wrote: completion scripts, the agent hooks and skill in both scopes, the vault, the recognition model, and the binary itself. It prints everything that would go and asks to confirm; `--dry-run` stops after printing, `--yes` skips the prompt, and `--keep-vault` leaves the vault and its key in place. A settings file keeps everything but Oboro's own hook, ending as `{}` rather than being deleted, and the running binary removes itself on macOS and Linux; on Windows, which locks a running image, the path and the command to finish the job are printed instead. (#108)
 
 ## 0.7.0 (2026-08-04)

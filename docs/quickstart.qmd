@@ -28,6 +28,24 @@ oboro models pull   # about 348 MB, once
 
 On Linux the ner binary needs glibc 2.39 or newer (Ubuntu 24.04+, Debian 13+); the default binary is static and runs anywhere.
 
+### Windows
+
+Downloads the prebuilt binary and verifies it against the release checksums:
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://m.canouil.dev/oboro/install.ps1 | iex"
+```
+
+Installs into `%LOCALAPPDATA%\Programs\oboro\bin`, no administrator rights needed, and adds that directory to your user `PATH` if it is missing; open a new terminal for it to take effect.
+`irm | iex` cannot take arguments, so pin a version with the parameterised form instead:
+
+```powershell
+& ([scriptblock]::Create((irm https://m.canouil.dev/oboro/install.ps1))) -Version 0.7.0
+```
+
+`-Dir` picks an install directory and `-Help` lists the rest; `OBORO_VERSION`, `OBORO_INSTALL_DIR`, `OBORO_SKIP_CHECKSUM` and `OBORO_VERIFY_PROVENANCE` do the same jobs as their `install.sh` counterparts.
+No prebuilt Windows build offers `ner` or `ocr` yet: both stay a [source build](#from-source) there, same as everywhere else.
+
 ### Docker
 
 No toolchain needed; the image is one static binary on `distroless`.
