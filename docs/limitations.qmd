@@ -194,6 +194,14 @@ Your own words are not, in any tool, by any configuration.
 
 Paste a document rather than retyping its contents, and the hook covers it.
 
+## The plugin does not run on native Windows
+
+`hooks/oboro-hook.sh`, which the Claude Code plugin installs, is a Bash script.
+Native Windows has no Bash, so `/plugin install oboro@oboro` there wires up a hook that cannot run.
+
+`oboro hook install` does not have this problem: it writes a command string into `settings.json` rather than a script, so it is the way in on native Windows.
+Use it, and `oboro skill install`, in place of the plugin there.
+
 ## The MCP server is reach, not protection
 
 The hook and `oboro mcp` look like two ways of doing one thing.

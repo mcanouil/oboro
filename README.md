@@ -40,6 +40,14 @@ curl -fsSL https://m.canouil.dev/oboro/install.sh | bash -s -- --features ner
 oboro models pull   # about 348 MB, once
 ```
 
+**Windows** — the prebuilt binary, verified against the release checksums:
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://m.canouil.dev/oboro/install.ps1 | iex"
+```
+
+Installs into `%LOCALAPPDATA%\Programs\oboro\bin` and adds it to your user `PATH` if it is missing; no administrator rights needed. Name recognition (`ner`) and image reading (`ocr`) have no prebuilt Windows build yet, so both need `cargo build --release --features ner` (or `ocr`) from source.
+
 **Docker** — no toolchain, one static binary; the vault volume holds the mapping, so it is not optional:
 
 ```bash
