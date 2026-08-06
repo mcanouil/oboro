@@ -2,6 +2,8 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
 ## 0.8.1 (2026-08-06)
 
 - fix: Make `docs/install.ps1` run the way it is advertised. Both published one-liners failed in 0.8.0: the file's byte order mark came back inside the string fetched over HTTP and broke the opening line. A failure now also reports what went wrong rather than a missing `Path`. CI runs the script the way the documentation says to, so this cannot ship again. (#113)
