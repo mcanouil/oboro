@@ -356,3 +356,46 @@ fn a_foreign_hook_survives_and_the_settings_stay_valid_json() {
         "only Oboro's own group is removed: {settings}"
     );
 }
+
+/// A hook hand-copied into a project's shared `.claude/settings.json` is one
+/// `oboro hook install` never writes, so `oboro uninstall` leaves it where it
+/// is and says so, rather than rewriting a committed file or letting the user
+/// believe a hook that still runs is gone.
+#[cfg(unix)]
+#[test]
+fn a_hook_in_the_shared_settings_is_kept_and_reported() {
+    let workspace = Workspace::new();
+    std::fs::create_dir_all(workspace.path().join(".claude")).expect("creating .claude");
+    std::fs::write(
+        workspace.path().join(".claude/settings.json"),
+        r#"{"hooks": {"PostToolUse": [{"matcher": "Read", "hooks": [{"type": "command", "command": "oboro hook post-tool-use"}]}]}}"#,
+    )
+    .expect("planting a hook in the shared settings");
+    let binary = private_binary(&workspace);
+
+    let output = run_private_binary(
+        uninstall_command(&binary, &workspace)
+            .arg("uninstall")
+            .arg("--yes"),
+    );
+    assert!(
+        output.status.success(),
+        "uninstalling failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let settings = std::fs::read_to_string(workspace.path().join(".claude/settings.json"))
+        .expect("reading the shared settings");
+    let parsed: serde_json::Value = serde_json::from_str(&settings).expect("still valid JSON");
+    assert_eq!(
+        parsed["hooks"]["PostToolUse"][0]["hooks"][0]["command"],
+        serde_json::json!("oboro hook post-tool-use"),
+        "the hook is left exactly as it was written: {settings}"
+    );
+
+    let report = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        report.contains(".claude/settings.json") && report.contains("PostToolUse"),
+        "the report names the file and the event it could not reach: {report}"
+    );
+}

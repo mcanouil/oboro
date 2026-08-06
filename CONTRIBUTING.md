@@ -29,19 +29,24 @@ docker run --rm -it -v "$PWD":/work -w /work -u vscode oboro-dev bash
 
 The toolchain is pinned by `rust-toolchain.toml`, so the container, CI and a host build all use the same compiler.
 
-Run the three checks before opening a pull request:
+Run the four checks before opening a pull request, the same ones CI runs:
 
 ```bash
-cargo test
+cargo test --all-targets
 cargo clippy --all-targets -- -D warnings
 cargo fmt --all --check
+RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
 ```
 
-Each feature flag compiles different code, so lint them too:
+`cargo doc` is easy to forget and fails on its own terms: a doc comment on a public item that links to a private one is an error there and nowhere else.
+
+Each feature flag compiles different code, so lint and test them too:
 
 ```bash
 cargo clippy --all-targets --features ner -- -D warnings
+cargo test --all-targets --features ner
 cargo clippy --all-targets --features ocr -- -D warnings
+cargo test --all-targets --features ocr
 ```
 
 The test that must stay green is `tests/leak.rs`.

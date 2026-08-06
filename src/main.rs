@@ -726,6 +726,14 @@ fn remove_vault_file(path: &Path) -> Result<()> {
 /// Says what `oboro uninstall` cannot reach on its own, so it is not mistaken
 /// for something it silently skipped.
 fn note_what_cannot_be_reached_here(cwd: &Path) {
+    for hook in oboro::hooks::unremovable_from(cwd) {
+        oboro::note!(
+            "hooks   {} is named in {}, which `oboro hook install` never writes, so it stays \
+             and will keep running. Take that entry out yourself.",
+            hook.event,
+            hook.file.display()
+        );
+    }
     for plugin in oboro::hooks::enabled_plugins_from(cwd) {
         oboro::note!(
             "plugin  {} is enabled in {}; this does not reach the Claude Code plugin \
@@ -1810,6 +1818,13 @@ fn describe_hooks(cwd: &Path, plugins: &[EnabledPlugin]) -> Result<String> {
     use std::fmt::Write as _;
 
     let installed = oboro::hooks::installed_from(cwd);
+    // The files `oboro uninstall` will not take a hook out of, resolved once
+    // rather than per event, so a hook that survives an uninstall is visible
+    // here rather than only in that command's own report.
+    let unremovable: Vec<_> = oboro::hooks::unremovable_from(cwd)
+        .into_iter()
+        .map(|hook| hook.file)
+        .collect();
     let mut report = String::new();
 
     for plugin in plugins {
@@ -1840,9 +1855,14 @@ fn describe_hooks(cwd: &Path, plugins: &[EnabledPlugin]) -> Result<String> {
             } else {
                 "NOT REACHABLE"
             };
+            let kept = if unremovable.contains(&hook.file) {
+                ", `oboro uninstall` leaves this file"
+            } else {
+                ""
+            };
             writeln!(
                 report,
-                "{name:<11} {} ({matcher}, {reachable})",
+                "{name:<11} {} ({matcher}, {reachable}{kept})",
                 hook.file.display()
             )?;
         }
