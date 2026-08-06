@@ -104,7 +104,7 @@ pub fn installed_from(cwd: &Path) -> Vec<Installed> {
 ///
 /// [`install`] only ever writes the two files [`settings_path`] names, one per
 /// [`Scope`], and [`removal_plan`] takes hooks out of exactly those two.
-/// [`settings_files`] reads a third, a project's shared `.claude/settings.json`,
+/// [`installed_from`] reads a third, a project's shared `.claude/settings.json`,
 /// because a hook there is a hook that runs whoever wrote it.
 ///
 /// A hook that ended up in that third file, hand-copied rather than installed,
