@@ -76,10 +76,48 @@ jobs:
         shell: pwsh
         run: |
           Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser
-          $findings = Invoke-ScriptAnalyzer -Path docs/install.ps1 -Severity Warning
+          # PSUseBOMForUnicodeEncodedFile is excluded on purpose. The file holds
+          # one non-ASCII word, the author's name in the header, so the rule asks
+          # for a byte order mark. This script is fetched over HTTP and run as a
+          # string, and Invoke-RestMethod hands that mark back as a literal
+          # U+FEFF: it welds onto the first `#`, the opening comment becomes an
+          # unknown command, and the advertised one-liner stops working. The
+          # step below is what holds the file to that, and it is the check that
+          # matters here.
+          $findings = Invoke-ScriptAnalyzer -Path docs/install.ps1 -Severity Warning -ExcludeRule PSUseBOMForUnicodeEncodedFile
           if ($findings) {
             $findings | Format-Table -AutoSize
             exit 1
+          }
+
+      # Lint alone passed the release that shipped an installer nobody could
+      # run: the script was only ever loaded from disk, where Get-Content strips
+      # a byte order mark, so the path every user takes went untested. This runs
+      # it the way the documentation tells people to.
+      - name: Run install.ps1 the way it is advertised
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # Decoded from the bytes rather than read with Get-Content, which
+          # strips a byte order mark and would hide exactly what broke before.
+          $text = [System.Text.Encoding]::UTF8.GetString([System.IO.File]::ReadAllBytes("docs/install.ps1"))
+          if ($text[0] -eq [char]0xFEFF) {
+            throw "docs/install.ps1 starts with a byte order mark; fetched with irm it becomes a literal U+FEFF and the advertised one-liner cannot run."
+          }
+          $installer = [scriptblock]::Create($text)
+
+          # -Help exercises the parse and the parameters without touching the
+          # network, which is the half that broke.
+          & $installer -Help
+
+          # A refusal has to arrive as its own message. Reading a property that
+          # is not there is a terminating error under Set-StrictMode -Version
+          # Latest, so an unguarded one in the error path would replace the
+          # reason with a complaint about that property.
+          $refusal = $null
+          try { & $installer -Features ner } catch { $refusal = $_.Exception.Message }
+          if ($refusal -notmatch 'Unsupported feature build') {
+            throw "-Features ner should refuse in its own words; got: $refusal"
           }
 
   deploy:

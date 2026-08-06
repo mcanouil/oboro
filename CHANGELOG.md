@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- fix: Make `docs/install.ps1` run the way it is advertised. Both published one-liners failed in 0.8.0: the file's byte order mark came back inside the string fetched over HTTP and broke the opening line. A failure now also reports what went wrong rather than a missing `Path`. CI runs the script the way the documentation says to, so this cannot ship again. (#113)
+
 ## 0.8.0 (2026-08-06)
 
 - fix: Name the agent hook `oboro uninstall` will not remove, rather than reporting everything as gone. The command sweeps the two settings files `oboro hook install` writes, `.claude/settings.local.json` for a project and `~/.claude/settings.json` for a user, but `oboro doctor` reads a third, a project's shared `.claude/settings.json`, so a hook pasted there by hand survived an uninstall that had just said it removed everything and went on running. That file stays untouched, since it is committed and shared with colleagues and Oboro never wrote it, but it is now listed in the uninstall report alongside the plugin and the Docker volume, and `oboro doctor` marks the hook as one an uninstall leaves behind. (#111)
