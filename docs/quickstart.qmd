@@ -383,4 +383,5 @@ oboro uninstall
 
 It prints everything that would go and asks to confirm; `--dry-run` prints the same report and stops there.
 Without `--keep-vault` the vault and its key go too, and restoring anything cleaned earlier becomes impossible from then on.
+A hook you pasted by hand into a project's shared `.claude/settings.json` is named rather than removed, since that is a committed file Oboro never wrote.
 See the [`uninstall` reference](reference.qmd#uninstall) for the flags, and the [Docker guide](docker.qmd) for the volume and image this command cannot reach.

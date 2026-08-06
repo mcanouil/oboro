@@ -957,6 +957,49 @@ fn doctor_reports_whether_the_hooks_are_installed() {
         .stdout(predicate::str::contains("PreToolUse  not installed"));
 }
 
+/// A hook in a project's shared settings runs like any other and is reported
+/// like any other, but `oboro uninstall` never writes that file and so never
+/// takes it out again. Saying so here is what stops a full uninstall being read
+/// as having removed it.
+#[test]
+fn doctor_marks_a_hook_an_uninstall_will_leave_behind() {
+    let workspace = Workspace::new();
+    let settings = workspace.path().join(".claude");
+    std::fs::create_dir_all(&settings).expect("creating the settings directory");
+    std::fs::write(
+        settings.join("settings.json"),
+        r#"{"hooks":{"PostToolUse":[{"matcher":"Read","hooks":[{"type":"command","command":"oboro hook post-tool-use"}]}]}}"#,
+    )
+    .expect("planting a hook by hand");
+
+    workspace
+        .command()
+        .arg("doctor")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "`oboro uninstall` leaves this file",
+        ));
+
+    // The file a project install writes carries no such marker: an uninstall
+    // does take that one out, and a marker on every hook would say nothing.
+    std::fs::remove_file(settings.join("settings.json")).expect("removing the planted hook");
+    workspace
+        .command()
+        .arg("hook")
+        .arg("install")
+        .arg("--project")
+        .assert()
+        .success();
+    workspace
+        .command()
+        .arg("doctor")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("settings.local.json"))
+        .stdout(predicate::str::contains("leaves this file").not());
+}
+
 /// The plugin brings its own hooks, and they live in the agent's plugin cache
 /// rather than in any settings file. Reporting them as missing would send a
 /// protected user to `oboro hook install` and leave them running two copies.

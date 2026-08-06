@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 
-use crate::claude::{Scope, refuse_symlinks, write_atomic};
+use crate::claude::{SCOPES, Scope, refuse_symlinks, write_atomic};
 
 /// An event Oboro answers.
 pub struct Event {
@@ -98,6 +98,38 @@ pub fn installed_from(cwd: &Path) -> Vec<Installed> {
         }
     }
     found
+}
+
+/// Every Oboro hook an uninstall will leave behind, with the file holding it.
+///
+/// [`install`] only ever writes the two files [`settings_path`] names, one per
+/// [`Scope`], and [`removal_plan`] takes hooks out of exactly those two.
+/// [`settings_files`] reads a third, a project's shared `.claude/settings.json`,
+/// because a hook there is a hook that runs whoever wrote it.
+///
+/// A hook that ended up in that third file, hand-copied rather than installed,
+/// is real and is not Oboro's to delete: it is the one of the three that is
+/// committed and shared with colleagues, and a command that never wrote it has
+/// no business rewriting it. It is named instead, so a full uninstall is not
+/// read as having taken away something still there.
+#[must_use]
+pub fn unremovable_from(cwd: &Path) -> Vec<Installed> {
+    installed_from(cwd)
+        .into_iter()
+        .filter(|hook| !is_removable(&hook.file, cwd))
+        .collect()
+}
+
+/// Whether a settings file is one [`install`] writes, and so one an uninstall
+/// takes hooks out of.
+///
+/// A scope whose root cannot be resolved names no file, which leaves a hook
+/// reported rather than assumed gone: the direction that cannot mislead.
+fn is_removable(file: &Path, cwd: &Path) -> bool {
+    SCOPES
+        .iter()
+        .filter_map(|scope| settings_path(*scope, cwd).ok())
+        .any(|path| path == file)
 }
 
 /// The Oboro plugin, where a settings file has it enabled.
@@ -754,6 +786,51 @@ mod tests {
 
         assert!(project.path().join(".claude/settings.local.json").exists());
         assert!(!project.path().join(".claude/settings.json").exists());
+    }
+
+    /// The other side of the file above: an uninstall removes from what an
+    /// install could have written, and `.claude/settings.json` in a project is
+    /// not that, however the hook got there.
+    ///
+    /// Asserted on `is_removable` rather than on `unremovable_from`, which goes
+    /// through `installed_from` and would read the developer's own `~/.claude`
+    /// as well.
+    #[test]
+    fn a_projects_shared_settings_are_not_a_file_an_uninstall_removes_from() {
+        let project = tempfile::tempdir().expect("temporary directory");
+        let cwd = project.path();
+
+        assert!(
+            !is_removable(&cwd.join(".claude/settings.json"), cwd),
+            "the shared file is read but never written, so it is left alone"
+        );
+        assert!(
+            is_removable(&cwd.join(".claude/settings.local.json"), cwd),
+            "the file a project install writes is the one it removes from"
+        );
+    }
+
+    /// A hook planted in the shared settings is reported as one an uninstall
+    /// will leave behind, and one in the file the install writes is not.
+    #[test]
+    fn a_hook_in_the_shared_settings_is_reported_as_left_behind() {
+        let project = tempfile::tempdir().expect("temporary directory");
+        std::fs::create_dir_all(project.path().join(".claude")).expect("creating .claude");
+        std::fs::write(
+            project.path().join(".claude/settings.json"),
+            r#"{"hooks": {"PreToolUse": [{"hooks": [{"type": "command", "command": "oboro hook pre-tool-use"}]}]}}"#,
+        )
+        .expect("planting a hook by hand");
+        install_into(project.path()).expect("installing");
+
+        let left: Vec<_> = unremovable_from(project.path())
+            .into_iter()
+            .filter(|hook| hook.file.starts_with(project.path()))
+            .collect();
+
+        assert_eq!(left.len(), 1, "only the hand-planted hook is left behind");
+        assert_eq!(left[0].event, "PreToolUse");
+        assert_eq!(left[0].file, project.path().join(".claude/settings.json"));
     }
 
     /// The settings file belongs to the user. Rewriting the keys they wrote,
