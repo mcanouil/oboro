@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## 0.8.0 (2026-08-06)
 
 - fix: Name the agent hook `oboro uninstall` will not remove, rather than reporting everything as gone. The command sweeps the two settings files `oboro hook install` writes, `.claude/settings.local.json` for a project and `~/.claude/settings.json` for a user, but `oboro doctor` reads a third, a project's shared `.claude/settings.json`, so a hook pasted there by hand survived an uninstall that had just said it removed everything and went on running. That file stays untouched, since it is committed and shared with colleagues and Oboro never wrote it, but it is now listed in the uninstall report alongside the plugin and the Docker volume, and `oboro doctor` marks the hook as one an uninstall leaves behind. (#111)
 - feat: Add `docs/install.ps1`, the Windows counterpart to `install.sh`: `powershell -ExecutionPolicy ByPass -c "irm https://m.canouil.dev/oboro/install.ps1 | iex"` downloads the `x86_64-pc-windows-msvc` release archive, verifies it against `SHA256SUMS` (and against build provenance with `OBORO_VERIFY_PROVENANCE=1`), and installs into `%LOCALAPPDATA%\Programs\oboro\bin`, adding it to the user `PATH` if missing; no administrator rights needed. Arm64 and `--features ner`/`--features ocr` are refused, since no prebuilt Windows build carries them, and `cargo build --release --features <name>` is pointed at instead. Published alongside `install.sh` in `docs/_quarto.yml`, with an `Invoke-ScriptAnalyzer` lint job on `windows-latest`. (#109)
