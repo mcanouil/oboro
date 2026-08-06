@@ -1,4 +1,4 @@
-﻿# @license MIT
+# @license MIT
 # @copyright 2026 Mickaël Canouil
 # @author Mickaël Canouil
 #
@@ -27,9 +27,6 @@
 
 #Requires -Version 5.1
 
-[Diagnostics.CodeAnalysis.SuppressMessageAttribute(
-	'PSAvoidUsingWriteHost', '',
-	Justification = 'Installer output belongs on the console with colour, mirroring install.sh; Write-Output would go to the pipeline instead.')]
 param(
 	[string]$Version = $env:OBORO_VERSION,
 	[string]$Dir = $env:OBORO_INSTALL_DIR,
@@ -49,12 +46,24 @@ if ($PSVersionTable.PSEdition -eq 'Desktop' -or $PSVersionTable.PSVersion.Major 
 $Repo = 'mcanouil/oboro'
 $BinaryName = 'oboro'
 
+# Every writer below suppresses PSAvoidUsingWriteHost for the same reason:
+# installer output belongs on the console with colour, mirroring install.sh,
+# where Write-Output would put it on the pipeline instead.
+#
+# Suppressed per function rather than once ahead of param(). An attribute
+# between #Requires and param() is legal in a file, but not in a script parsed
+# from a string, which is exactly how `irm | iex` and [scriptblock]::Create
+# parse this one: both then refuse the whole script.
 function Write-Info {
+	[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '',
+		Justification = 'Installer output belongs on the console with colour.')]
 	param([string]$Message)
 	Write-Host $Message -ForegroundColor Green
 }
 
 function Write-Warn {
+	[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '',
+		Justification = 'Installer output belongs on the console with colour.')]
 	param([string]$Message)
 	Write-Host $Message -ForegroundColor Yellow
 }
@@ -63,12 +72,17 @@ function Write-Warn {
 # session, by design, either piped into iex or invoked as a scriptblock, and
 # exit there would close that session rather than just stopping the install.
 function Write-Fail {
+	[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '',
+		Justification = 'Installer output belongs on the console with colour.')]
 	param([string]$Message)
 	Write-Host $Message -ForegroundColor Red
 	throw $Message
 }
 
 function Show-Usage {
+	[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '',
+		Justification = 'Installer output belongs on the console with colour.')]
+	param()
 	@"
 oboro installer
 
@@ -170,6 +184,8 @@ function Test-Provenance {
 }
 
 function Main {
+	[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '',
+		Justification = 'Installer output belongs on the console with colour.')]
 	param(
 		[string]$Version,
 		[string]$Dir,
@@ -288,10 +304,16 @@ function Main {
 try {
 	Main -Version $Version -Dir $Dir -Features $Features -Help:$Help
 } catch {
-	# $MyInvocation.MyCommand.Path is set only when this file is run directly
-	# (./install.ps1); piped through iex or invoked as a scriptblock it is
-	# empty, and exiting the process there would close the caller's session.
-	if ($MyInvocation.MyCommand.Path) {
+	# Path is set only when this file is run directly (./install.ps1); piped
+	# through iex or invoked as a scriptblock it is absent, and exiting the
+	# process there would close the caller's session.
+	#
+	# Asked for through PSObject.Properties rather than read straight off the
+	# object: under Set-StrictMode -Version Latest, reading a property that is
+	# not there is itself a terminating error, so `$MyInvocation.MyCommand.Path`
+	# would replace whatever went wrong above with a complaint about `Path`.
+	$command = $MyInvocation.MyCommand
+	if ($command.PSObject.Properties['Path'] -and $command.Path) {
 		exit 1
 	}
 	throw
