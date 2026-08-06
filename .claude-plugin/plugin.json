@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "oboro",
   "displayName": "Oboro",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "Anonymise what your agent reads and restore what it writes. Installs the two Oboro hooks and the skill that explains their placeholders. Needs the `oboro` binary on PATH: without it every matching tool call is withheld or refused rather than left unprotected.",
   "author": {
     "name": "Mickaël Canouil",
