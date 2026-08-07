@@ -32,17 +32,17 @@ website:
     title: "Oboro"
     left:
       # - href: index.qmd
-      #   text: "{{< iconify octicon:home-16 aria-hidden=true >}} Home"
+      #   text: "{{< iconify octicon:home-16 aria-hidden='true' >}} Home"
       - href: quickstart.qmd
-        text: "{{< iconify octicon:rocket-16 aria-hidden=true >}} Quickstart"
+        text: "{{< iconify octicon:rocket-16 aria-hidden='true' >}} Quickstart"
       - href: docker.qmd
-        text: "{{< iconify octicon:container-16 aria-hidden=true >}} Docker"
+        text: "{{< iconify octicon:container-16 aria-hidden='true' >}} Docker"
       - href: reference.qmd
-        text: "{{< iconify octicon:book-16 aria-hidden=true >}} Reference"
+        text: "{{< iconify octicon:book-16 aria-hidden='true' >}} Reference"
       - href: how-it-works.qmd
-        text: "{{< iconify octicon:gear-16 aria-hidden=true >}} How it works"
+        text: "{{< iconify octicon:gear-16 aria-hidden='true' >}} How it works"
       - href: changelog.qmd
-        text: "{{< iconify octicon:history-16 aria-hidden=true >}} Changelog"
+        text: "{{< iconify octicon:history-16 aria-hidden='true' >}} Changelog"
         aria-label: "Changelog"
     right:
       - text: "{{< iconify octicon:mark-github-16 title='GitHub' label='GitHub' >}}"
@@ -70,9 +70,9 @@ website:
       - changelog.qmd
   page-footer:
     left: |
-      Powered by [{{< iconify simple-icons:quarto aria-hidden=true >}} Quarto](https://quarto.org).
+      Powered by [{{< iconify simple-icons:quarto aria-hidden='true' >}} Quarto](https://quarto.org).
     center: |
-      &copy; []{#current-year} [Mickaël Canouil](https://mickael.canouil.fr). [{{< iconify octicon:heart-fill-16 aria-hidden=true >}} Sponsor](https://github.com/sponsors/mcanouil?o=esb).
+      &copy; []{#current-year} [Mickaël Canouil](https://mickael.canouil.fr). [{{< iconify octicon:heart-fill-16 aria-hidden='true' >}} Sponsor](https://github.com/sponsors/mcanouil?o=esb).
     right: |
       Licence: [MIT](https://github.com/mcanouil/oboro?tab=MIT-1-ov-file#readme).
 
