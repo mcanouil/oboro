@@ -14,6 +14,7 @@ on:
       - ".github/workflows/docker.yml"
       - ".github/dependabot.yml"
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths-ignore: *docs-paths
   workflow_dispatch:
 
@@ -35,6 +36,8 @@ jobs:
   test:
     name: Test on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    if: ${{ github.event.pull_request.draft != true }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       # Pull requests run ubuntu alone for faster feedback; pushes to main and
@@ -71,6 +74,8 @@ jobs:
   ocr:
     name: Test with OCR
     runs-on: ubuntu-latest
+    if: ${{ github.event.pull_request.draft != true }}
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7.0.0
 
@@ -96,6 +101,8 @@ jobs:
   ner:
     name: Test with the recognition model feature
     runs-on: ubuntu-latest
+    if: ${{ github.event.pull_request.draft != true }}
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7.0.0
 

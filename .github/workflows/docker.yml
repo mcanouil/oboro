@@ -18,6 +18,7 @@ on:
       - ".github/workflows/docker.yml"
   # Build without pushing, so a broken Dockerfile is caught before it lands.
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - "src/**"
       - "Cargo.toml"
@@ -45,6 +46,8 @@ jobs:
   build:
     name: Build ${{ matrix.variant }} ${{ matrix.platform }}
     runs-on: ${{ matrix.runner }}
+    if: ${{ github.event.pull_request.draft != true }}
+    timeout-minutes: 45
 
     strategy:
       fail-fast: false
@@ -129,6 +132,7 @@ jobs:
     needs: build
     if: ${{ github.event_name != 'pull_request' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     strategy:
       fail-fast: false

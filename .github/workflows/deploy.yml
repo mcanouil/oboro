@@ -9,6 +9,7 @@ name: Deploy Documentation
 # still render it, so a broken page is caught before it lands.
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - "docs/**"
       - "README.md"
@@ -37,6 +38,8 @@ jobs:
   build:
     name: Render site
     runs-on: ubuntu-latest
+    if: ${{ github.event.pull_request.draft != true }}
+    timeout-minutes: 20
 
     steps:
       - name: Checkout repository
@@ -65,8 +68,9 @@ jobs:
     # docs/install.ps1 only changes on a pull request; the workflow_call at
     # release time would otherwise spend a Windows runner minute re-linting a
     # file that has not moved.
-    if: ${{ github.event_name == 'pull_request' }}
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft != true }}
     runs-on: windows-latest
+    timeout-minutes: 10
 
     steps:
       - name: Checkout repository
@@ -124,6 +128,7 @@ jobs:
     name: Deploy to GitHub Pages
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     if: ${{ github.event_name != 'pull_request' }}
 
     permissions:
