@@ -4,8 +4,8 @@ description: "Every key oboro reads from oboro.toml, from regions and OCR langua
 ---
 
 `oboro` reads the nearest `oboro.toml`, searching upwards from the working directory.
-The name is matched exactly, in lower case, so a case-insensitive filesystem does not disagree with a case-sensitive one.
-Without one it uses the defaults below.
+Oboro matches the name exactly, in lower case, so a case-insensitive filesystem does not disagree with a case-sensitive one.
+Without one, it uses the defaults below.
 Every section is optional.
 
 ```toml
@@ -38,12 +38,12 @@ regex = "CT-[0-9]{6}"
 
 ## `regions`
 
-Two-letter region codes deciding how national phone numbers are read.
-A number is redacted when it is valid in any of them, so listing more regions widens what is caught and listing none narrows it.
+Two-letter region codes that decide how Oboro reads national phone numbers.
+Oboro redacts a number when it is valid in any of them. So listing more regions widens what is caught, and listing none narrows it.
 
 With `FR`, `06 12 34 56 78` is a valid mobile number.
-With `GB` alone it is not, and would be left alone.
-A number written in international form, `+33 6 12 34 56 78`, is read whatever this holds, including when it is empty.
+With `GB` alone, it is not, and Oboro leaves it alone.
+Oboro reads a number written in international form, such as `+33 6 12 34 56 78`, whatever this key holds, even when it is empty.
 
 Leave the key out and the region comes from the environment's locale (`LC_ALL`, then `LANG`), which `oboro doctor` reports:
 
@@ -53,8 +53,8 @@ regions:    FR, GB (from oboro.toml)
 regions:    none (international + numbers only)
 ```
 
-Set `regions = []` to say deliberately that only international numbers should be read.
-An unknown code is refused by name rather than ignored, since a typo would otherwise cost every national number in the document.
+Set `regions = []` to say deliberately that Oboro should read only international numbers.
+Oboro refuses an unknown code by name, rather than ignoring it, since a typo would otherwise cost every national number in the document.
 
 Nothing else in detection consults this.
 Street addresses, postcodes and every checksummed identifier are matched by shape, in any language.
@@ -64,10 +64,10 @@ Street addresses, postcodes and every checksummed identifier are matched by shap
 Languages requested from Tesseract when reading an image, in order of priority, using Tesseract's own three-letter codes (`fra`, `eng`, `deu`).
 Only used in a build with `--features ocr`.
 
-Leave it out and `oboro` reads whatever trained data is installed: up to four languages are loaded together, English first when it is there.
-Past four, one language is used, since Tesseract loses both speed and accuracy as languages pile up; that is the point at which naming what your documents are in is worth it.
+Leave it out, and `oboro` reads whatever trained data is installed. It loads up to four languages together, English first when it is there.
+Past four languages, Oboro uses only one, since Tesseract loses both speed and accuracy as languages pile up. That is the point at which naming what your documents are in is worth it.
 
-A language you ask for that has no trained data installed is reported, listing what is installed, rather than failing obscurely inside Tesseract.
+If you ask for a language with no trained data installed, Oboro reports it and lists what is installed, rather than failing obscurely inside Tesseract.
 
 ## `ner_enabled` and `ner_threshold`
 
@@ -79,12 +79,12 @@ The default of `0.15` errs towards redacting, for reasons set out in [Limitation
 
 ## `redact_filenames`
 
-Whether PII in the input filename is redacted in the output name, on by default.
-With it on, `jean@example.com.txt` is written as `EMAIL_1.clean.md` rather than leaking the address into the name.
+Whether Oboro redacts PII in the input filename, in the output name. On by default.
+With it on, `jean@example.com.txt` is written as `EMAIL_1.clean.md`, rather than leaking the address into the name.
 
-The filename shares placeholders with the document body, so a name appearing in both gets the same tag.
+The filename shares placeholders with the document body. So a name that appears in both gets the same tag.
 Workbook sheet names go through the same redaction, since each sheet's name becomes part of its output filename.
-Placeholders are rendered without their brackets in the name (`EMAIL_1`, not `[[EMAIL_1]]`) to stay shell-safe.
+Placeholders appear without their brackets in the name (`EMAIL_1`, not `[[EMAIL_1]]`), to stay shell-safe.
 Set it to `false` to keep the original filename.
 
 ## `allowlist`
@@ -92,7 +92,7 @@ Set it to `false` to keep the original filename.
 Values that must never be redacted, whatever finds them.
 Your own company name belongs here, and so does anything the model keeps misreading as a name.
 
-Matching ignores case and surrounding whitespace, and understands accents: an entry of `Société Générale` matches `SOCIÉTÉ GÉNÉRALE`.
+Matching ignores case and surrounding whitespace, and understands accents. So an entry of `Société Générale` matches `SOCIÉTÉ GÉNÉRALE`.
 
 ## `denylist`
 
@@ -109,13 +109,13 @@ term = "Bell"
 case_sensitive = true
 ```
 
-`kind` decides which placeholder the value gets, and defaults to `organisation`.
+`kind` decides which placeholder the value gets. It defaults to `organisation`.
 Recognised values are `person`, `organisation`, `address`, `phone` and `email`, along with a few synonyms such as `client`, `provider` and `company`.
 Anything else becomes a placeholder of its own name.
 
-Matching respects word boundaries, so `Acme` matches `ACME` but not `acmentioned`.
+Matching respects word boundaries. So `Acme` matches `ACME` but not `acmentioned`.
 It ignores case by default.
-Set `case_sensitive = true` on a term to match its exact case only, which is how you redact a short name such as `Bell` without also redacting the ordinary word `bell`.
+Set `case_sensitive = true` on a term to match only its exact case. Use this to redact a short name such as `Bell` without also redacting the ordinary word `bell`.
 
 ## `patterns`
 
@@ -127,8 +127,8 @@ name = "contract number"
 regex = "CT-[0-9]{6}"
 ```
 
-The name becomes the placeholder tag, so this one produces `[[CONTRACT_NUMBER_1]]`.
-Patterns you declare are treated as the most specific kind there is, because you declared them deliberately.
+The name becomes the placeholder tag. So this one produces `[[CONTRACT_NUMBER_1]]`.
+Oboro treats patterns you declare as the most specific kind there is, because you declared them deliberately.
 
 ::: {.callout-tip}
 
@@ -139,5 +139,5 @@ Prefer something with a distinctive prefix, or anchor it with `\b`.
 
 :::
 
-The regular expression syntax is [Rust's `regex` crate](https://docs.rs/regex/latest/regex/#syntax), which has no backreferences and no lookaround.
-An invalid expression is reported with the name of the pattern that contains it, rather than being ignored.
+The regular expression syntax is [Rust's `regex` crate](https://docs.rs/regex/latest/regex/#syntax). It has no backreferences and no lookaround.
+Oboro reports an invalid expression with the name of the pattern that contains it, rather than ignoring it.

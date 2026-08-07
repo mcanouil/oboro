@@ -3,7 +3,7 @@ title: "Shells"
 subtitle: "Where each completion script is installed, and how to do it by hand."
 ---
 
-`oboro completions <shell> --install` writes the script where the shell reads it and, where the shell cannot find that file on its own, adds a managed block to your shell's configuration:
+`oboro completions <shell> --install` writes the script where the shell reads it. Where the shell cannot find that file on its own, it adds a managed block to your shell's configuration:
 
 ```bash
 # >>> oboro completions >>>
@@ -14,7 +14,7 @@ Re-running replaces that block.
 `--uninstall` removes it, and nothing else.
 `--dry-run` reports every path either would touch, and touches none of them.
 
-Leave the shell out and it is taken from `$SHELL`:
+Leave the shell out, and Oboro takes it from `$SHELL`:
 
 ```bash
 oboro completions --install
@@ -23,8 +23,8 @@ oboro completions --install
 ## An install already in place stays where it is
 
 Each table below says where a *first* install goes.
-Once a script is on disk, that is the file `--install` updates, even when the machine has since gained oh-my-zsh, Homebrew, or bash-completion and a first install would now choose somewhere else.
-Copies in the other locations it knows about are removed on the way, so nothing is left behind to shadow the file that is kept.
+Once a script is on disk, `--install` updates that same file, even when the machine has since gained oh-my-zsh, Homebrew, or bash-completion, and a first install would now choose somewhere else.
+Oboro removes copies in the other locations it knows about on the way, so nothing is left behind to shadow the file that is kept.
 
 To move an install, remove it and install again:
 
@@ -57,20 +57,20 @@ oboro completions bash > ~/.local/share/bash-completion/completions/oboro
 | Configuration | None in the first two cases, an `fpath` line in `~/.zshrc` followed by `compinit` in the third |
 
 zsh loads completion functions from the directories on `fpath`, and only once `compinit` has run.
-zsh has no per-user directory of its own on that list, which is why the destination depends on what else is installed.
-Note the leading underscore in the filename: without it, zsh never reads the file.
+zsh has no per-user directory of its own on that list. That is why the destination depends on what else is installed.
+Note the leading underscore in the filename. Without it, zsh never reads the file.
 
 oh-my-zsh already puts `$ZSH_CUSTOM/completions` on `fpath` and calls `compinit` itself, both while `~/.zshrc` is still sourcing it.
-Anything appended below that runs too late to matter, so the file goes there and your configuration is left alone.
-`$ZSH_CUSTOM` defaults to `~/.oh-my-zsh/custom`, and is followed only when it points inside your home directory.
+Anything appended below that runs too late to matter. So the file goes there, and your configuration is left alone.
+`$ZSH_CUSTOM` defaults to `~/.oh-my-zsh/custom`. Oboro follows it only when it points inside your home directory.
 
-Homebrew's own shell setup puts `$HOMEBREW_PREFIX/share/zsh/site-functions` on `fpath` for the same reason, so a file written there also needs no configuration.
-It is used only when that directory already exists and you can write to it, and never with `sudo`.
+Homebrew's own shell setup puts `$HOMEBREW_PREFIX/share/zsh/site-functions` on `fpath` for the same reason. So a file written there also needs no configuration.
+Oboro uses it only when that directory already exists and you can write to it, and never with `sudo`.
 
 Otherwise the file goes to `~/.zfunc`, and the managed block adds that directory to `fpath` and calls `compinit -i`.
-It has to be `-i` rather than `-C`: `-C` omits the check for new completion functions and reuses the existing dump, and by the time the block runs your own `compinit` has usually written one, which would leave `_oboro` unseen.
+It has to be `-i`, not `-C`. `-C` omits the check for new completion functions and reuses the existing dump. By the time the block runs, your own `compinit` has usually already written that dump, which would leave `_oboro` unseen.
 
-Alongside those three, `$XDG_DATA_HOME/zsh/site-functions/_oboro` is found and cleaned up, since an earlier version of these instructions pointed there.
+Alongside those three, Oboro finds and cleans up `$XDG_DATA_HOME/zsh/site-functions/_oboro`, since an earlier version of these instructions pointed there.
 
 Manual install:
 
@@ -127,21 +127,21 @@ use oboro
 | Installed to | Nothing on disk |
 | Configuration | The line below in the file `$PROFILE` names |
 
-PowerShell evaluates the script rather than reading it from a completions directory, so `--install` has nothing to write and says so.
+PowerShell evaluates the script, rather than reading it from a completions directory. So `--install` has nothing to write, and says so.
 
 ```powershell
 oboro completions powershell | Out-String | Invoke-Expression
 ```
 
-Because it is regenerated at every session, it can never go stale, which is why [`doctor`](reference.qmd#doctor) does not report on it.
+Because it is regenerated at every session, it can never go stale. That is why [`doctor`](reference.qmd#doctor) does not report on it.
 
 ## Keeping them current
 
-A completion script is a copy of the command surface from the moment it was generated, so an upgrade that adds a command leaves it offering the old set.
+A completion script is a copy of the command surface from the moment it was generated. So an upgrade that adds a command leaves it offering the old set.
 
 ```bash
 oboro doctor
 ```
 
-Every script found is regenerated and compared byte for byte against this binary, so `current` and `stale` are measured rather than guessed, and a stale one is followed by the command that rewrites it.
-The installer says the same at the moment a new version lands.
+Oboro regenerates every script it finds, and compares it byte for byte against this binary. So `current` and `stale` are measured, not guessed. A stale line is followed by the command that rewrites it.
+The installer says the same, at the moment a new version lands.

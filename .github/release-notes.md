@@ -9,10 +9,10 @@ curl -fsSL https://m.canouil.dev/oboro/install.sh | bash
 curl -fsSL https://m.canouil.dev/oboro/install.sh | bash -s -- --version %%VERSION%%
 ```
 
-The script picks the archive for your machine, verifies it against `SHA256SUMS`, and installs into `/usr/local/bin` when writable, otherwise `~/.local/bin`.
-It needs `bash` and `curl`; on a minimal distribution such as Alpine, install them first with `apk add bash curl`.
+The script picks the archive for your machine and verifies it against `SHA256SUMS`. It installs into `/usr/local/bin` when that is writable, otherwise into `~/.local/bin`.
+It needs `bash` and `curl`. On a minimal distribution such as Alpine, install them first with `apk add bash curl`.
 
-Add `--features ner` for the build that also finds untold names (on Linux it needs glibc 2.39+), then fetch its model:
+Add `--features ner` for the build that also detects names not on any list (on Linux it needs glibc 2.39+). Then fetch its model:
 
 ```bash
 curl -fsSL https://m.canouil.dev/oboro/install.sh | bash -s -- --version %%VERSION%% --features ner
@@ -30,10 +30,9 @@ docker run --rm \
   ghcr.io/mcanouil/oboro:%%VERSION%% clean contract.docx
 ```
 
-The vault volume is not optional.
-Without it the mapping between placeholders and real values disappears with the container, and the document can never be restored.
+The vault volume is not optional. Without it, the mapping between placeholders and real values disappears with the container. The document can never be restored.
 
-The `ghcr.io/mcanouil/oboro:%%VERSION%%-ner` tag carries the ner build with the recognition model already inside the image, so untold names are found with no download and no network at run time.
+The `ghcr.io/mcanouil/oboro:%%VERSION%%-ner` tag carries the ner build with the recognition model already inside the image. It finds names with no download and no network at run time.
 
 ### A prebuilt binary
 
@@ -63,10 +62,10 @@ cargo install --git https://github.com/mcanouil/oboro --tag %%VERSION%%
 
 ### From source, with the optional features
 
-The default binaries read `.txt`, `.md`, `.docx`, `.xlsx` and text-based `.pdf`, and find structured values and anything on your denylist.
-They do **not** find names nobody told them about, and they do not read images.
+The default binaries read `.txt`, `.md`, `.docx`, `.xlsx` and text-based `.pdf`. They find structured values and anything on your denylist.
+They do **not** find names you have not listed, and they do not read images.
 
-Names need a `-ner` archive from the table below (then `oboro models pull`), the `:%%VERSION%%-ner` image, or a source build.
+For names, use a `-ner` archive from the table below (then run `oboro models pull`), the `:%%VERSION%%-ner` image, or a source build.
 Images need the Tesseract system libraries, so reading them stays a source build:
 
 ```bash
@@ -77,7 +76,7 @@ cargo build --release --features ocr   # images and scanned pages, needs Tessera
 If names are not being redacted, a default build is almost certainly why.
 `oboro doctor` reports what any build can do.
 
-To build the optional features without setting up the system libraries on your machine, use the devcontainer, which carries the pinned toolchain, Tesseract and the OCR libraries:
+To build the optional features without setting up the system libraries yourself, use the devcontainer. It carries the pinned toolchain, Tesseract and the OCR libraries:
 
 ```bash
 docker build -f .devcontainer/Dockerfile -t oboro-dev .devcontainer
@@ -89,7 +88,7 @@ In Visual Studio Code or a GitHub Codespace, reopen the folder in the container 
 
 ## Verify what you downloaded
 
-Beyond the checksum, every archive carries build provenance, so you can confirm it came from this repository's workflow and not from somewhere else:
+Beyond the checksum, every archive carries build provenance. Use it to confirm the archive came from this repository's workflow, not from somewhere else:
 
 ```bash
 gh attestation verify "oboro-%%VERSION%%-x86_64-unknown-linux-musl.tar.gz" \
@@ -111,7 +110,7 @@ It would be inconsistent to ask you to trust its own binaries on sight.
 | `aarch64-unknown-linux-gnu-ner` | Linux on ARM, with name recognition. Needs glibc 2.39+. |
 | `aarch64-apple-darwin-ner` | macOS on Apple silicon, with name recognition. |
 
-The `-ner` archives find untold names once the model is fetched with `oboro models pull`; the others are the smaller default build.
+The `-ner` archives detect names once you fetch the model with `oboro models pull`. The others are the smaller default build.
 
 The Windows archive is a `.zip`; extract it with `Expand-Archive`.
 

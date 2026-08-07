@@ -3,9 +3,9 @@ title: "Command reference"
 description: "Every oboro command and the options it accepts: clean, review, restore, map, models, doctor, and completions."
 ---
 
-Every command that opens the vault accepts `--vault` and `--key` to point at a store other than the default, which is useful for keeping one vault per project: [`clean`](#clean), [`review`](#review), [`restore`](#restore), [`map`](#map), [`hook post-tool-use` and `hook pre-tool-use`](#hook), [`mcp`](#mcp), [`doctor`](#doctor) and [`uninstall`](#uninstall).
-They go after the command that uses them, and `OBORO_VAULT` and `OBORO_KEY_FILE` do the same job without repeating a flag.
-The commands that never open a vault, [`skill`](#skill), [`hook install`](#hook), [`models`](#models) and [`completions`](#completions), refuse them.
+These commands open the vault and accept `--vault` and `--key` to point at a store other than the default: [`clean`](#clean), [`review`](#review), [`restore`](#restore), [`map`](#map), [`hook post-tool-use` and `hook pre-tool-use`](#hook), [`mcp`](#mcp), [`doctor`](#doctor) and [`uninstall`](#uninstall). Use this to keep one vault per project.
+Both flags go after the command that uses them. `OBORO_VAULT` and `OBORO_KEY_FILE` do the same job without repeating a flag.
+These commands never open a vault, and refuse both flags: [`skill`](#skill), [`hook install`](#hook), [`models`](#models) and [`completions`](#completions).
 
 ## `clean`
 
@@ -23,11 +23,11 @@ oboro clean [PATH]... [OPTIONS]
 | `--config <FILE>` | Use this configuration instead of the nearest `oboro.toml`. |
 
 A `<PATH>` is a file or a directory.
-A directory is walked for the formats this build reads, skipping hidden entries, symlinks and existing `.clean.md`, `.clean.csv` and `.clean.tsv` outputs, and reporting how many files it could not read.
+Oboro walks a directory for the formats this build reads. It skips hidden entries, symlinks and existing `.clean.md`, `.clean.csv` and `.clean.tsv` outputs, and reports how many files it could not read.
 
-Output is named after the input, with a suffix following its format: `report.docx` becomes `report.clean.md` and `data.csv` becomes `data.clean.csv`.
-A workbook becomes one TSV per sheet, so `book.xlsx` with a sheet `Clients` becomes `book.Clients.clean.tsv`.
-With `--output`, a directory's subfolders are mirrored under it.
+Output is named after the input, with a suffix that follows its format: `report.docx` becomes `report.clean.md`, and `data.csv` becomes `data.clean.csv`.
+A workbook becomes one TSV file per sheet. So `book.xlsx` with a sheet `Clients` becomes `book.Clients.clean.tsv`.
+With `--output`, Oboro mirrors a directory's subfolders under it.
 `--stdout` works for a workbook only when it holds a single non-empty sheet, since one stream cannot carry several files.
 
 Text can also be piped in, so nothing has to be written to disk first:
@@ -36,9 +36,9 @@ Text can also be piped in, so nothing has to be written to disk first:
 printf 'Call 06 12 34 56 78.\n' | oboro clean
 ```
 
-Passing `-` as the path does the same thing, and cannot be combined with file paths.
-Piped text is tidied the same way a text or markdown file is, cleaned to standard output, and never written to a file, so `--output` is refused.
-Nothing is named, so filename redaction does not apply.
+Passing `-` as the path does the same thing. You cannot combine `-` with file paths.
+Oboro tidies piped text the same way as a text or markdown file, and cleans it to standard output. It never writes piped text to a file, so `--output` is refused.
+Piped text has no name, so filename redaction does not apply.
 
 ## `review`
 
@@ -67,8 +67,8 @@ A `<PATH>` is a file or a directory, walked as for `clean`.
 | `s` | Skip this document, writing nothing. |
 | `q`, `esc` | Stop, writing nothing further. |
 
-Everything starts accepted, so confirming without touching anything gives exactly what `clean` would have produced.
-A document with nothing detected is skipped rather than opening an empty screen.
+Everything starts accepted. So confirming without touching anything gives exactly what `clean` would have produced.
+A document with nothing detected is skipped, rather than opening an empty screen.
 
 ## `restore`
 
@@ -87,10 +87,10 @@ pbpaste | oboro restore
 ```
 
 Passing `-` as the file does the same thing.
-Piped text has no file to rewrite, so it always goes to standard output, whether or not `--stdout` is given.
+Piped text has no file to rewrite, so it always goes to standard output, with or without `--stdout`.
 
-Placeholders the vault does not know are left untouched and reported.
-They are more likely to be something the model invented than a mapping to recover, and deleting them would corrupt the answer.
+Oboro leaves a placeholder the vault does not know untouched, and reports it.
+Such a placeholder is more likely something the model invented than a mapping to recover. Deleting it would corrupt the answer.
 
 ## `map`
 
@@ -116,7 +116,7 @@ The `--yes` flag is required precisely because there is no way back.
 
 ## `hook`
 
-Answers an agent's hook, so what the model reads has been cleaned before it reads it.
+Answers an agent's hook. It cleans what the model reads before the model reads it.
 
 ```bash
 oboro hook install
@@ -124,8 +124,8 @@ oboro hook post-tool-use
 oboro hook pre-tool-use
 ```
 
-Neither `post-tool-use` nor `pre-tool-use` is run by hand.
-They are named in your settings, and the agent calls them around every matching tool:
+You never run `post-tool-use` or `pre-tool-use` by hand.
+You name them in your settings, and the agent calls them around every matching tool:
 
 ```json
 {
@@ -146,40 +146,40 @@ They are named in your settings, and the agent calls them around every matching 
 }
 ```
 
-The two are inverses, and both are needed.
-`post-tool-use` is what the model is shown; `pre-tool-use` is what reaches your files.
-Without the second one the model writes `[[EMAIL_1]]` into your source.
+The two hooks are inverses, and you need both.
+`post-tool-use` controls what the model is shown. `pre-tool-use` controls what reaches your files.
+Without `pre-tool-use`, the model writes `[[EMAIL_1]]` into your source.
 
 ### `install`
 
 Names both hooks in your settings, so you do not have to paste the block above.
 
-`--project` writes `.claude/settings.local.json` here; `--user` writes `~/.claude/settings.json`.
-Without either it asks which, and with no terminal to ask it fails and names both flags rather than choosing for you.
-`--dry-run` prints the settings as they would end up and writes nothing.
+`--project` writes `.claude/settings.local.json` here. `--user` writes `~/.claude/settings.json`.
+Without either flag, Oboro asks which you want. With no terminal to ask, it fails and names both flags, rather than choosing for you.
+`--dry-run` prints the settings as they would end up, and writes nothing.
 
-The project scope is deliberately the local file rather than the shared `.claude/settings.json`.
-Turning on a hook that intercepts every `Read`, `Grep`, `Bash` and `WebFetch` is a decision for whoever is sitting at the machine, and a committed hook naming a binary a colleague has not installed fails closed on every tool call they make.
-`doctor` reads both files, so either is reported.
+The project scope is deliberately the local file, not the shared `.claude/settings.json`.
+Turning on a hook that intercepts every `Read`, `Grep`, `Bash` and `WebFetch` is a decision for whoever sits at the machine. A committed hook that names a binary a colleague has not installed fails closed on every tool call they make.
+`doctor` reads both files, so it reports either one.
 
-The [plugin](quickstart.qmd#wire-it-into-claude-code) names the same two hooks in its own files, so install one or the other rather than both.
-Its hooks go through a wrapper rather than naming `oboro` directly, since a plugin can be installed on a machine that has no binary: without one the wrapper withholds the result and refuses the call itself, with a message saying what to install.
+The [plugin](quickstart.qmd#wire-it-into-claude-code) names the same two hooks in its own files. Install one or the other, not both.
+Its hooks go through a wrapper, rather than naming `oboro` directly, because a plugin can be installed on a machine that has no binary. Without the binary, the wrapper withholds the result and refuses the call itself, with a message saying what to install.
 
 ::: {.callout-note}
 
 ## What it will not do to your settings
 
 The merge only ever adds.
-Every other key keeps its place and its order, other tools' hooks on the same event are left where they are, and Oboro's group is appended rather than substituted.
+Every other key keeps its place and its order. Other tools' hooks on the same event are left where they are. Oboro's group is appended, not substituted.
 
 A hook already naming `oboro hook <subcommand>` is left exactly as written, matcher included.
-If you narrowed `PostToolUse` to `Read` alone, that is a decision rather than drift, so installing again reports it and changes nothing.
-Each event is decided on its own, so a hook you customised does not stop the other half being installed.
+If you narrowed `PostToolUse` to `Read` alone, that is a decision, not drift. Installing again reports it and changes nothing.
+Oboro decides each event on its own. So a hook you customised does not stop the other half being installed.
 
-Settings that are not JSON, a file whose root is not an object, and a `hooks` entry of the wrong shape are all refused, naming the file.
-`doctor` ignores a settings file it cannot parse because it is only reporting; an installer that did the same would overwrite it.
+Oboro refuses settings that are not JSON, a file whose root is not an object, and a `hooks` entry of the wrong shape. It names the file in each case.
+`doctor` ignores a settings file it cannot parse, since it is only reporting. An installer that did the same would overwrite the file.
 
-Nothing is written through a symbolic link, and the file is replaced by renaming a complete one into place rather than written over where it stands.
+Oboro never writes through a symbolic link. It replaces the file by renaming a complete one into place, rather than writing over it where it stands.
 
 :::
 
@@ -187,36 +187,36 @@ Nothing is written through a symbolic link, and the file is replaced by renaming
 
 Reads a `PostToolUse` payload on standard input and writes the reply that replaces the tool's result.
 
-The result is cleaned the way any other text is, against the vault and the `oboro.toml` found from the working directory the agent runs in.
-A result that is a plain string comes back as a string.
-A result that is structured keeps its shape, with every string inside it cleaned.
+Oboro cleans the result the same way it cleans any other text, against the vault and the `oboro.toml` found from the agent's working directory.
+A plain string result comes back as a string.
+A structured result keeps its shape, with every string inside it cleaned.
 
 ### `pre-tool-use`
 
-Reads a `PreToolUse` payload on standard input and writes the reply that replaces the tool's arguments, so a placeholder the model echoed back becomes the real value before the tool runs.
+Reads a `PreToolUse` payload on standard input and writes the reply that replaces the tool's arguments. So a placeholder the model echoed back becomes the real value before the tool runs.
 
-Every string in the arguments is restored, rather than a list of fields per tool: `Write` carries its text in `content`, `Edit` in `old_string` and `new_string`, and restoring only rewrites the `[[TAG_n]]` shape, so a string holding no placeholder comes back untouched.
+Oboro restores every string in the arguments, rather than tracking a list of fields per tool. `Write` carries its text in `content`. `Edit` carries it in `old_string` and `new_string`. Restoring only rewrites the `[[TAG_n]]` shape, so a string with no placeholder comes back untouched.
 Arguments that are not text are left exactly as they were.
 
 A tool call whose arguments hold no placeholder at all is left alone entirely.
 
-A placeholder this vault never issued is left in place and reported to you, as `restore` does with a document.
-It is more likely something the model invented than a mapping to recover, so the call is not refused over it.
+Oboro leaves in place a placeholder this vault never issued, and reports it to you, the same as `restore` does with a document.
+Such a placeholder is more likely something the model invented than a mapping to recover, so Oboro does not refuse the call over it.
 
-At 17 to 70 ms per call it is cheap enough to run on every matching tool, which is what the [timings](how-it-works.qmd#what-a-run-costs) were measured to decide.
+At 17 to 70 ms per call, it is cheap enough to run on every matching tool. See the [timings](how-it-works.qmd#what-a-run-costs) that measured this.
 
-Run `oboro doctor` to see which halves are installed, since believing they are installed is not the same as having done it.
+Run `oboro doctor` to see which halves are installed. Believing they are installed is not the same as having done it.
 
 ::: {.callout-warning}
 
 ## What the hooks do not cover
 
 What you type is never cleaned.
-The event that fires on a prompt, `UserPromptSubmit`, can add context to a prompt but cannot rewrite it, so there is nowhere for Oboro to stand between your keyboard and the model.
-Tool output and tool arguments are covered; your own words are not.
+The event that fires on a prompt, `UserPromptSubmit`, can add context to a prompt but cannot rewrite it. So there is nowhere for Oboro to stand between your keyboard and the model.
+Tool output and tool arguments are covered. Your own words are not.
 See [Limitations](limitations.qmd#the-hook-does-not-cover-what-you-type).
 
-Object keys are cleaned nowhere either: a tool that keys its result by file path still shows that path.
+Object keys are cleaned nowhere either. A tool that keys its result by file path still shows that path.
 Filename redaction applies to files Oboro writes, not to paths inside a tool's answer.
 
 :::
@@ -227,14 +227,14 @@ Filename redaction applies to files Oboro writes, not to paths inside a tool's a
 
 If Oboro cannot do its job, the tool does not quietly get its way.
 
-On the way out the result is withheld.
-A `PostToolUse` hook cannot stop the tool, which has already run, and a hook that exits non-zero has its reply ignored, which would hand the model the raw text.
-So a failure exits zero and answers with a notice in place of the result, a `block` decision so the model does not continue on it, and a message to you naming what broke.
+On the way out, Oboro withholds the result.
+A `PostToolUse` hook cannot stop the tool, since the tool has already run. A hook that exits non-zero has its reply ignored, which would hand the model the raw text.
+So a failure exits zero, and answers with a notice in place of the result: a `block` decision, so the model does not continue on it, plus a message to you naming what broke.
 
-On the way in the call is refused, with `permissionDecision` set to `deny`.
+On the way in, Oboro refuses the call, with `permissionDecision` set to `deny`.
 The tool has not run yet, and letting it run would write placeholders into your file.
 
-You are told the detail either way; the model is not.
+You are told the detail either way. The model is not.
 The failure usually names a path, and a path is one of the things a vault redacts.
 
 :::
@@ -250,7 +250,7 @@ oboro skill show
 ```
 
 The hooks put `[[PHONE_1]]` in front of an agent without explaining it.
-The skill says what a placeholder is, that writing one back verbatim is correct because `pre-tool-use` restores it, that inventing one is not, and what a withheld result or a refused call means.
+The skill explains what a placeholder is. It says that writing one back verbatim is correct, because `pre-tool-use` restores it, and that inventing one is not. It also explains what a withheld result or a refused call means.
 
 `install` writes `SKILL.md` into a `.claude/skills/oboro/` directory.
 Without `--project` or `--user` it asks which:
@@ -262,36 +262,36 @@ Install the Oboro skill where? [1/2]
 ```
 
 There is no default, because the wrong scope fails silently: the agent simply never reads the file.
-With no terminal to ask, the command fails and names both flags rather than choosing for you.
+With no terminal to ask, the command fails, and names both flags rather than choosing for you.
 
-`--with-hooks` names both hooks in the same scope as well, which is the same merge [`hook install`](#install) does, so one command covers what the plugin covers.
-Both halves are planned before either is written: a scope that refuses one, through a symbolic link or settings that cannot be merged into, installs neither, since a skill describing hooks that are not there is worse than no skill.
-The question then shows both files a scope would write, and `--dry-run` shows both.
+`--with-hooks` also names both hooks in the same scope. This is the same merge [`hook install`](#install) does, so one command covers what the plugin covers.
+Oboro plans both halves before it writes either one. So if a scope refuses one half, through a symbolic link or settings it cannot merge into, Oboro installs neither: a skill that describes hooks that are not there is worse than no skill.
+The question then shows both files a scope would write, and `--dry-run` shows both too.
 
-The same text reaches an agent two other ways, both reading it from this repository rather than copying it: the [plugin](quickstart.qmd#wire-it-into-claude-code), which brings the hooks with it, and `npx skills add mcanouil/oboro`, which brings only the skill and works for agents other than Claude Code.
-The second symlinks by default, and Oboro does not write through a symbolic link, so `install` afterwards names the link and refuses.
+The same text reaches an agent two other ways, and both read it from this repository rather than copy it: the [plugin](quickstart.qmd#wire-it-into-claude-code), which brings the hooks with it, and `npx skills add mcanouil/oboro`, which brings only the skill and works for agents other than Claude Code.
+The second symlinks by default. Oboro never writes through a symbolic link, so `install` afterwards names the link and refuses.
 
 `--dry-run` prints the path and stops.
 `show` prints the text to standard output and writes nothing.
 
-The text is compiled into the binary, so the skill and the hooks it describes are always the same version.
+The text is compiled into the binary. So the skill and the hooks it describes are always the same version.
 
 ::: {.callout-note}
 
 ## What it will not overwrite
 
 An installed skill that differs from the one this build carries is left where it is.
-The new text goes to `SKILL.md.oboro-proposed` beside it, and the path is printed, so an edit is compared rather than lost.
+The new text goes to `SKILL.md.oboro-proposed` beside it, and Oboro prints the path. So you can compare an edit, rather than lose it.
 `--force` overwrites instead.
 
-Nothing is written through a symbolic link.
+Oboro never writes through a symbolic link.
 If `.claude`, `skills`, `oboro` or `SKILL.md` is a link, the install stops and names it, rather than writing to wherever it points.
 
 :::
 
 ## `mcp`
 
-Serves the Model Context Protocol on standard input and output, so an agent in a client with no hook system can ask for a cleaned file rather than reading the file itself.
+Serves the Model Context Protocol on standard input and output. So an agent in a client with no hook system can ask for a cleaned file, rather than reading the file itself.
 
 ```bash
 oboro mcp --root ~/work
@@ -305,43 +305,43 @@ oboro mcp --unconfined
 | `--unconfined` | Let `clean` read any file you can read. |
 | `--config <FILE>` | Use this configuration instead of the nearest `oboro.toml`. Also read from `OBORO_CONFIG`. |
 
-Naming at least one `--root`, or passing `--unconfined`, is required: a server started with neither refuses to start and says so.
-The caller over this protocol is a model rather than you, and a client that offers to remember its approval turns one careless click into a standing licence, so reading the whole disk is not something to arrive at by leaving an argument off.
+You must name at least one `--root`, or pass `--unconfined`. A server started with neither refuses to start, and says so.
+Over this protocol, the caller is a model, not you. A client that offers to remember its approval turns one careless click into a standing licence. So reading the whole disk should never happen just because you left an argument off.
 
-A root is resolved once at startup, so a symbolic link inside one that points outside it is refused rather than followed, and a root that does not exist stops the server while you are still watching.
-A path outside every root is refused in the same words whether or not it exists, so a model cannot map your disk by asking.
+Oboro resolves a root once at startup. So a symbolic link inside a root that points outside it is refused, not followed. A root that does not exist stops the server while you are still watching.
+A path outside every root is refused in the same words, whether or not it exists. So a model cannot map your disk by asking.
 
 Messages are JSON-RPC 2.0, one to a line.
-The `2025-11-25` revision is implemented, and a client asking for `2026-07-28` is answered with `2025-11-25` rather than agreed with: that revision removes the `initialize` handshake and `ping` and requires a `server/discover` method, none of which this server does, so claiming it would leave the client expecting a server this is not.
+Oboro implements the `2025-11-25` revision. A client that asks for `2026-07-28` is answered with `2025-11-25` instead, not agreed with. That later revision removes the `initialize` handshake and `ping`, and requires a `server/discover` method. This server does none of those. Claiming that revision would leave the client expecting a server this is not.
 
 Two tools are offered.
 
 `clean` takes a `path` and answers with that file's text, cleaned the way [`clean`](#clean) cleans it, one content block per part.
-A workbook comes back as one block per sheet, each under a `## <sheet name>` heading, so a client that flattens the blocks into a single string still keeps the sheets apart.
-Every format this build reads is read here, so a `.pdf`, `.docx`, `.xlsx`, `.pptx`, `.odt` or `.eml` reaches the model as text, which a plain file read cannot manage at all.
+A workbook comes back as one block per sheet, each under a `## <sheet name>` heading. So a client that flattens the blocks into a single string still keeps the sheets apart.
+This tool reads every format this build reads. So a `.pdf`, `.docx`, `.xlsx`, `.pptx`, `.odt` or `.eml` reaches the model as text, which a plain file read cannot manage at all.
 
 `map_list` takes no arguments and lists the placeholders the vault has issued.
-The real values are never returned, and neither are the times the placeholders were created, which [`map list`](#map) does print: a timestamp for each entry is a record of your working hours rather than anything a model can reason with.
+It never returns the real values, or the times the placeholders were created. [`map list`](#map) does print those times, since a timestamp for each entry is a record of your working hours, not something a model can reason with.
 
-Setting `--config`, or `OBORO_CONFIG` in the client's environment, is worth the trouble.
-A client launches this server itself and chooses the working directory it runs in, so the nearest `oboro.toml` is unlikely to be your project's, and without one the server runs on the defaults: no denylist and no custom patterns.
+Set `--config`, or `OBORO_CONFIG` in the client's environment. It is worth the trouble.
+A client launches this server itself, and chooses the working directory it runs in. So the nearest `oboro.toml` is unlikely to be your project's. Without one, the server runs on the defaults: no denylist and no custom patterns.
 
-Two lines go to standard error at startup, naming the configuration that was resolved and which detectors are configured and installed.
-Most clients keep a server's standard error in a log, and it is worth reading once after wiring the server up, since a server that found no configuration says so there and nowhere else.
+Two lines go to standard error at startup. They name the configuration that was resolved, and which detectors are configured and installed.
+Most clients keep a server's standard error in a log. Read it once after wiring the server up: a server that found no configuration says so there, and nowhere else.
 
 ::: {.callout-important}
 
 ## What this server does not guarantee
 
-It offers the agent a tool; it does not intercept anything.
-Unlike the [hook](#hook), which fires on every matching tool call, this server relies on the agent choosing `clean` over simply reading the file, and it will not do so reliably.
+It offers the agent a tool. It does not intercept anything.
+Unlike the [hook](#hook), which fires on every matching tool call, this server relies on the agent choosing `clean` over simply reading the file. The agent will not do so reliably.
 Its value is reach into clients that have no hook system.
 
-`clean` reads within the roots you named, and every file you can read if you passed `--unconfined`.
-Within them, cleaning is not confinement: passwords, API keys and access tokens are not detected kinds and pass through as written, so a root should be as narrow as the work allows.
+`clean` reads within the roots you named, or every file you can read if you passed `--unconfined`.
+Within those roots, cleaning is not confinement. Passwords, API keys and access tokens are not detected kinds, and pass through as written. So keep a root as narrow as the work allows.
 
-Restoring is not offered, because over this protocol the caller is the model, and a model that can write a file of placeholders and read it back could use a restore tool to obtain every value the vault holds.
-That absence is not itself protection: in a client with a shell the model can run `oboro restore --stdout` or `oboro map list --reveal` without involving this server.
+Oboro does not offer restoring, because over this protocol the caller is the model. A model that can write a file of placeholders and read it back could use a restore tool to obtain every value the vault holds.
+That absence is not itself protection: in a client with a shell, the model can run `oboro restore --stdout` or `oboro map list --reveal` without involving this server.
 Restoring stays a command-line action: see [`restore`](#restore).
 
 [Limitations](limitations.qmd#the-mcp-server-is-reach-not-protection) sets all of this out at length.
@@ -358,9 +358,9 @@ oboro models pull
 oboro models status
 ```
 
-`pull` downloads roughly 348 MB once and verifies it against pinned SHA-256 hashes.
-A file that fails verification is deleted rather than kept.
-Running it again re-verifies what is already there instead of trusting it.
+`pull` downloads roughly 348 MB once, and verifies it against pinned SHA-256 hashes.
+Oboro deletes a file that fails verification, rather than keeping it.
+Running `pull` again re-verifies what is already there, instead of trusting it.
 
 ## `doctor`
 
@@ -392,16 +392,16 @@ skill       /Users/you/.claude/skills/oboro/SKILL.md (not installed)
 completion  /Users/you/.zfunc/_oboro (current)
 ```
 
-On Windows the two protection lines read from the file's ACL instead of a mode, for example `C:\Users\you\.oboro\vault.db owner-only (ok)` or `... inherited access (too permissive)` for one that has not been restricted.
+On Windows, the two protection lines read from the file's ACL instead of a mode. For example: `C:\Users\you\.oboro\vault.db owner-only (ok)`, or `... inherited access (too permissive)` for a file that has not been restricted.
 
 Start here when something is not being detected: it shows whether the model is installed, which configuration was found, and which formats this build reads.
 
 The four lines before the last answer a different question: whether the agent side is wired up.
 
-Both hook events are reported whether or not they are found, because having only the first is the worst of the three states: the model is shown placeholders and nothing puts the values back, so they reach your files.
-`reachable` means the program the hook names can actually be run; a hook naming a binary that is not on `PATH` is configured and useless.
+`doctor` reports both hook events whether or not they are found. Having only the first is the worst of the three states: the model sees placeholders, nothing puts the values back, and they reach your files.
+`reachable` means the program the hook names can actually run. A hook that names a binary not on `PATH` is configured but useless.
 
-An enabled plugin is reported above them, since what it carries is in its own files rather than in any settings file or skills directory, and reporting all four as missing would send you to `oboro hook install` and `oboro skill install` for what you already have:
+`doctor` reports an enabled plugin above them, since what it carries lives in its own files, not in any settings file or skills directory. Reporting all four as missing would send you to `oboro hook install` and `oboro skill install` for what you already have:
 
 ```text
 plugin      /Users/you/.claude/settings.json (oboro@oboro, enabled)
@@ -411,15 +411,15 @@ skill       /Users/you/work/.claude/skills/oboro/SKILL.md (not installed here; t
 skill       /Users/you/.claude/skills/oboro/SKILL.md (not installed here; the plugin carries its own)
 ```
 
-Installing on top of it is worth avoiding rather than merely noticing: two copies of a hook both run on every matching tool call, cleaning what is already cleaned and restoring what is already restored.
-`oboro hook install` and `oboro skill install --with-hooks` both say so when they find the plugin enabled, since that is the moment the second copy would be created.
+Avoid installing on top of it: two copies of a hook both run on every matching tool call, cleaning what is already cleaned and restoring what is already restored.
+`oboro hook install` and `oboro skill install --with-hooks` both warn you when they find the plugin enabled, since that is the moment a second copy would appear.
 
-Both [skill](#skill) scopes are reported for the same reason.
-`current` is the text this build carries; `edited` is a copy that has drifted from it, which is the state where the agent is being told something the binary no longer does.
+`doctor` reports both [skill](#skill) scopes for the same reason.
+`current` is the text this build carries. `edited` is a copy that has drifted from it: the state where the agent is told something the binary no longer does.
 
 The `completion` lines answer the same question for [completions](#completions).
-Every conventional destination is looked in, whichever shell you use, and only the ones holding a file are named.
-Each is regenerated and compared byte for byte against this binary, so `current` and `stale` are measured rather than guessed, and a stale one is followed by the command that rewrites it:
+`doctor` checks every conventional destination for your shell, and names only the ones that hold a file.
+It regenerates each one and compares it byte for byte against this binary. So `current` and `stale` are measured, not guessed. A stale line is followed by the command that rewrites it:
 
 ```text
 completion  /Users/you/.config/fish/completions/oboro.fish (stale)
@@ -434,18 +434,18 @@ Prints a shell completion script, or installs one.
 oboro completions [SHELL] [--install|--uninstall] [--dry-run]
 ```
 
-`SHELL` is one of `bash`, `zsh`, `fish`, `elvish` or `powershell`, and is taken from `$SHELL` when you leave it out.
+`SHELL` is one of `bash`, `zsh`, `fish`, `elvish` or `powershell`. Oboro takes it from `$SHELL` when you leave it out.
 
-Printing is what happens without a flag: the script goes to standard output and the destination it belongs in goes to standard error, so one command answers both halves of the question.
+Printing is what happens without a flag. The script goes to standard output, and the destination it belongs in goes to standard error. So one command answers both halves of the question.
 
 ```bash
 oboro completions zsh > ~/.oh-my-zsh/custom/completions/_oboro
 ```
 
-The redirect captures the script alone, leaving a file with nothing in front of it for the shell to trip over, while the instructions still reach the terminal.
-Add `2>/dev/null` to drop them when you are scripting this.
+The redirect captures the script alone. It leaves a file with nothing in front of it for the shell to trip over, while the instructions still reach the terminal.
+Add `2>/dev/null` to drop them when scripting this.
 
-`--install` picks the destination and writes it for you, editing your shell's configuration only where the file alone is not enough:
+`--install` picks the destination and writes it for you. It edits your shell's configuration only where the file alone is not enough:
 
 ```bash
 oboro completions --install
@@ -453,17 +453,17 @@ oboro completions zsh --install --dry-run
 oboro completions zsh --uninstall
 ```
 
-A script already on disk is updated where it is rather than moved, and copies left in the other known places are swept.
-[Shells](shells.qmd) sets out every destination, the configuration each shell needs, and how to do it by hand.
+Oboro updates a script already on disk where it is, rather than moving it, and sweeps copies left in the other known places.
+See [Shells](shells.qmd) for every destination, the configuration each shell needs, and how to do it by hand.
 
-PowerShell is the one shell with nothing to write: it evaluates the script from `$PROFILE` instead, so `--install` refuses and says what to run.
+PowerShell is the one shell with nothing to write. It evaluates the script from `$PROFILE` instead, so `--install` refuses, and says what to run.
 
 ```powershell
 oboro completions powershell | Out-String | Invoke-Expression
 ```
 
-A completion script is a copy of the command surface from the moment it was generated, so an upgrade that adds a command leaves it offering the old set.
-[`doctor`](#doctor) says when that has happened, and the install script says so at the moment it happens.
+A completion script is a copy of the command surface from the moment it was generated. So an upgrade that adds a command leaves it offering the old set.
+[`doctor`](#doctor) reports when that has happened, and the install script reports it at the moment it happens.
 
 ## `uninstall`
 
@@ -473,25 +473,26 @@ Removes everything Oboro wrote: completion scripts, the agent hooks and skill in
 oboro uninstall [--dry-run] [--yes] [--keep-vault]
 ```
 
-Without a flag it prints everything that would go and asks to confirm, the same shape `map purge` uses.
+Without a flag, it prints everything that would go and asks you to confirm, the same shape `map purge` uses.
 `--dry-run` prints the same report and stops there.
 `--yes` skips the prompt, for a script that already knows what it wants.
-`--keep-vault` leaves the vault and its key in place; without it they go too, and restoring anything cleaned earlier becomes impossible from then on.
+`--keep-vault` leaves the vault and its key in place. Without it, they go too, and after that you can no longer restore anything cleaned earlier.
 
-An agent hook is taken out of a settings file rather than the file itself being deleted, since the file is yours: another tool's hook on the same event, and every other key, are left exactly as written.
+Oboro takes an agent hook out of a settings file, rather than deleting the file itself, since the file is yours. Another tool's hook on the same event, and every other key, are left exactly as written.
 A settings file that held nothing else of Oboro's ends as `{}`.
-The skill file and the `oboro` directory it sits in go outright, since Oboro created and owns exactly that directory; `.claude/skills` above it does not, since another skill may still be using it.
+The skill file and the `oboro` directory it sits in go outright, since Oboro created and owns exactly that directory. `.claude/skills` above it does not go, since another skill may still be using it.
 
-The running binary removes itself once everything else is gone, on macOS and Linux.
-On Windows the running image is locked, so the path and the command to finish the job are printed instead.
+On macOS and Linux, the running binary removes itself once everything else is gone.
+On Windows, the running image is locked. So Oboro prints the path and the command to finish the job instead.
 
-The two settings files swept are the two [`hook install`](#hook) writes: `.claude/settings.local.json` for a project and `~/.claude/settings.json` for a user.
-A hook in a project's shared, committed `.claude/settings.json`, which `hook install` never writes and which only a hand-copied snippet puts there, is left exactly as written, since a command that never wrote that file has no business rewriting it for a whole team.
-It is named in the report instead, and [`doctor`](#doctor) marks it too, so a hook that goes on running is not mistaken for one that is gone.
+The two settings files Oboro sweeps are the two files [`hook install`](#hook) writes: `.claude/settings.local.json` for a project, and `~/.claude/settings.json` for a user.
+A project's shared, committed `.claude/settings.json` is different: `hook install` never writes there, and only a hand-copied snippet puts a hook in it. Oboro leaves that hook exactly as written, since a command that never wrote the file has no business rewriting it for a whole team.
+Oboro names that hook in the report instead, and [`doctor`](#doctor) marks it too, so a hook that goes on running is not mistaken for one that is gone.
 
-A Claude Code plugin, if one is enabled, and a persisted Docker volume or image are outside what this command can reach; it names them rather than pretending they were never there.
+A Claude Code plugin, if one is enabled, and a persisted Docker volume or image, are outside what this command can reach. It names them, rather than pretending they were never there.
 
 ```bash
 oboro uninstall --dry-run
 oboro uninstall --yes --keep-vault
 ```
+</content>

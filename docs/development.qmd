@@ -6,7 +6,7 @@ description: "Build oboro in the devcontainer, run the checks CI runs, and find 
 ## The devcontainer
 
 Build in the devcontainer.
-It carries the pinned Rust toolchain, Tesseract and the OCR libraries, so the only thing your machine needs is Docker, and `cargo build --release --features "ner,ocr"` builds every feature inside it with nothing extra to install.
+It carries the pinned Rust toolchain, Tesseract and the OCR libraries. Your machine only needs Docker. `cargo build --release --features "ner,ocr"` builds every feature inside it, with nothing extra to install.
 
 In Visual Studio Code, reopen the folder in the container when prompted.
 Otherwise use the image directly:
@@ -16,7 +16,7 @@ docker build -f .devcontainer/Dockerfile -t oboro-dev .devcontainer
 docker run --rm -it -v "$PWD":/work -w /work -u vscode oboro-dev bash
 ```
 
-The toolchain is pinned by `rust-toolchain.toml`, so the container, CI and a host build all use the same compiler.
+The toolchain is pinned by `rust-toolchain.toml`. So the container, CI and a host build all use the same compiler.
 
 ## Checks
 
@@ -26,7 +26,7 @@ cargo clippy --all-targets -- -D warnings
 cargo fmt --all --check
 ```
 
-The lint configuration denies all of `clippy::all` and warns on `pedantic`, and CI treats warnings as errors.
+The lint configuration denies all of `clippy::all`, and warns on `pedantic`. CI treats warnings as errors.
 Run all three feature combinations before opening a pull request, since each compiles different code:
 
 ```bash
@@ -36,8 +36,8 @@ cargo clippy --all-targets --features ocr -- -D warnings
 
 ## The test that matters
 
-`tests/leak.rs` plants known values in fixtures and fails if any of them survives `clean`.
-It runs over every readable format, so a converter cannot be added without being covered.
+`tests/leak.rs` plants known values in fixtures, and fails if any of them survives `clean`.
+It runs over every readable format. So you cannot add a converter without covering it.
 
 It has earned its place.
 It caught an unredacted SIRET, a SIREN mislabelled as a phone number, and a Word letterhead that was being silently dropped.
@@ -54,7 +54,7 @@ cargo test --features ner -- --ignored
 ```
 
 Run them after changing the labels, the threshold or the model.
-They assert recall, which is the guarantee this layer offers, rather than precision, which it cannot promise.
+They assert recall. That is the guarantee this layer offers. They do not assert precision, which it cannot promise.
 
 ## Layout
 
@@ -81,5 +81,5 @@ Step three is the one that proves it works end to end.
 2. Add its extensions to `FORMATS` in `src/convert/mod.rs`, which is the single source of truth for both dispatch and what `doctor` advertises.
 3. Add a fixture and list it in `DOCUMENTS` in `tests/leak.rs`.
 
-A converter either produces the document's real text or fails.
-Returning part of a document is the worst outcome available, because the result looks sanitised without ever having been read.
+A converter either produces the document's real text, or fails.
+Returning part of a document is the worst outcome available: the result looks sanitised without ever having been read.

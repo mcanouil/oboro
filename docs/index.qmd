@@ -1,7 +1,7 @@
 ---
 title: "Oboro"
 subtitle: "An anonymisation layer between your files and a language model."
-description: "Replace the sensitive parts of a document with stable placeholders, reason about it with a model, then turn the answer back into the real thing."
+description: "Replace the sensitive parts of a document with stable placeholders. Reason about it with a model. Turn the answer back into the real thing."
 ---
 
 You have a contract to reason about, and a model that could help.
@@ -9,7 +9,8 @@ The contract has a client's name in it, a bank account, a phone number.
 Pasting it into Claude Code, Copilot, Codex or Cursor sends all of that to somebody else's computer.
 
 `oboro` sits in between.
-It reads the document, replaces the sensitive parts with stable placeholders, and keeps the mapping locally so the answer can be turned back into the real thing afterwards.
+It reads the document and replaces the sensitive parts with stable placeholders.
+It keeps the mapping locally, so you can turn the answer back into the real thing afterwards.
 
 ```{mermaid}
 %%| label: fig-flow
@@ -27,10 +28,13 @@ flowchart LR
 ```
 
 The name is 朧, Japanese for hazy, or veiled by mist.
-The tool blurs identifying detail rather than silencing it: the document still reads as a document, and the model can still reason about it.
+The tool blurs identifying detail rather than silencing it.
+The document still reads as a document, and the model can still reason about it.
 
-An agent that reads files itself never waits to be handed a cleaned copy, so in Claude Code Oboro sits in the tool path instead of in front of it.
-Two hooks clean what a tool hands the model and put the real values back into what it writes; the [Quickstart](quickstart.qmd#wire-it-into-claude-code) has the four lines of settings.
+An agent that reads files itself never waits to be handed a cleaned copy.
+So in Claude Code, Oboro sits in the tool path instead of in front of it.
+Two hooks clean what a tool hands the model, and put the real values back into what it writes.
+See the [Quickstart](quickstart.qmd#wire-it-into-claude-code) for the four lines of settings.
 
 ## What it looks like
 
@@ -46,7 +50,7 @@ becomes
 Son numero est le [[PHONE_1]].
 ```
 
-The same value always becomes the same placeholder, so a model can still tell that two documents mention the same client.
+The same value always becomes the same placeholder. So a model can still tell that two documents mention the same client.
 
 ## What it reads
 
@@ -64,7 +68,7 @@ The same value always becomes the same placeholder, so a model can still tell th
 
 ## What it finds
 
-Structured values are matched by rules and confirmed by a real check, not just a regular expression.
+Rules match structured values. A real check confirms each one, not just a regular expression.
 
 | Kind | Confirmed by |
 | --- | --- |
@@ -79,18 +83,19 @@ Structured values are matched by rules and confirmed by a real check, not just a
 | Your own formats | Regular expressions you supply. |
 
 Names, companies and addresses have no structure to match on.
-Those are found by a multilingual recognition model that runs on your machine, described in [How it works](how-it-works.qmd).
+A multilingual recognition model finds them instead. It runs on your machine. See [How it works](how-it-works.qmd).
 
-Detection does not depend on the document's language, and a file that mixes languages is handled in one pass.
-Nothing has to be declared: the address patterns carry several languages at once, and the two locale hints that exist, `regions` for national phone formats and `ocr_languages` for images, only widen what is read; see [Limitations](limitations.qmd#languages).
+Detection does not depend on the document's language. A file that mixes languages is handled in one pass.
+Nothing has to be declared. The address patterns carry several languages at once. Two locale hints exist, `regions` for national phone formats and `ocr_languages` for images, and both only widen what is read. See [Limitations](limitations.qmd#languages).
 
 ::: {.callout-warning}
 
 ## Read the output before you send it
 
-No tool of this kind catches everything, and this one deliberately errs towards redacting too much rather than too little.
-Both failures matter, and neither is fixed by trusting the output unread.
-[Limitations](limitations.qmd) is the honest account of where it falls short.
+No tool of this kind catches everything.
+This one deliberately errs towards redacting too much rather than too little.
+Both failures matter. Trusting the output unread fixes neither.
+See [Limitations](limitations.qmd) for the honest account of where it falls short.
 
 :::
 

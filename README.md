@@ -2,14 +2,14 @@
 
 An anonymisation layer between your files and a language model.
 
-`oboro` replaces sensitive values in a document with stable placeholders, so
-the text can be pasted into Claude Code, Copilot, Codex or Cursor without
-leaking phone numbers, bank details, addresses or client names.
-The mapping is kept in a local encrypted vault, so the model's answer can be
-turned back into the real thing afterwards.
+`oboro` replaces sensitive values in a document with stable placeholders.
+You can then paste the text into Claude Code, Copilot, Codex or Cursor.
+No phone numbers, bank details, addresses or client names leak out.
+Oboro keeps the mapping in a local, encrypted vault.
+Use the vault to turn the model's answer back into the real values.
 
-Nothing is ever sent anywhere: the tool is a single binary that makes no
-network requests.
+The tool never sends anything anywhere.
+It is a single binary and makes no network requests.
 
 ## How it works
 
@@ -20,35 +20,36 @@ contract.txt ──► oboro clean ──► contract.clean.md ──► paste i
               vault (encrypted)  ◄────── oboro restore ◄── model's answer
 ```
 
-The same value always becomes the same placeholder within a vault, so a
-model still sees that two documents mention the same client.
+The same value always becomes the same placeholder within one vault.
+So the model can still see that two documents mention the same client.
 
 ## Install
 
-Several ways in, quickest first; the [Quickstart](https://m.canouil.dev/oboro/quickstart.html) has the detail.
+There are several ways to install Oboro, quickest first.
+See the [Quickstart](https://m.canouil.dev/oboro/quickstart.html) for full detail.
 
-**Install script** — the prebuilt binary for macOS or Linux, verified against the release checksums:
+**Install script** — installs the prebuilt binary for macOS or Linux, and verifies it against the release checksums:
 
 ```bash
 curl -fsSL https://m.canouil.dev/oboro/install.sh | bash
 ```
 
-Add `--features ner` for the build that also finds untold names (Linux: glibc 2.39+), then fetch its model:
+Add `--features ner` to also detect names not on any list (Linux needs glibc 2.39+). Then fetch the model:
 
 ```bash
 curl -fsSL https://m.canouil.dev/oboro/install.sh | bash -s -- --features ner
 oboro models pull   # about 348 MB, once
 ```
 
-**Windows** — the prebuilt binary, verified against the release checksums:
+**Windows** — installs the prebuilt binary and verifies it against the release checksums:
 
 ```powershell
 powershell -ExecutionPolicy ByPass -c "irm https://m.canouil.dev/oboro/install.ps1 | iex"
 ```
 
-Installs into `%LOCALAPPDATA%\Programs\oboro\bin` and adds it to your user `PATH` if it is missing; no administrator rights needed. Name recognition (`ner`) and image reading (`ocr`) have no prebuilt Windows build yet, so both need `cargo build --release --features ner` (or `ocr`) from source.
+This installs Oboro into `%LOCALAPPDATA%\Programs\oboro\bin`. It adds that folder to your user `PATH` if the folder is missing. You do not need administrator rights. Windows has no prebuilt build yet for name recognition (`ner`) or image reading (`ocr`). For either feature, build from source: `cargo build --release --features ner` (or `ocr`).
 
-**Docker** — no toolchain, one static binary; the vault volume holds the mapping, so it is not optional:
+**Docker** — needs no toolchain, just one static binary. The vault volume holds the mapping, so you must create it:
 
 ```bash
 docker volume create oboro-vault
@@ -56,13 +57,13 @@ docker run --rm -v oboro-vault:/vault -v "$PWD":/work -w /work \
   --user "$(id -u):$(id -g)" ghcr.io/mcanouil/oboro:latest clean contract.docx
 ```
 
-The `ghcr.io/mcanouil/oboro:ner` tag carries the ner build with the recognition model already inside, so untold names are found with no download and no network at run time.
+The `ghcr.io/mcanouil/oboro:ner` tag carries the ner build with the recognition model already inside. It finds names with no download and no network at run time.
 
-**Prebuilt binary, by hand** — download the archive for your machine and `SHA256SUMS` from the [releases page](https://github.com/mcanouil/oboro/releases), verify, and put `oboro` on your `PATH`.
+**Prebuilt binary, by hand** — download the archive for your machine and `SHA256SUMS` from the [releases page](https://github.com/mcanouil/oboro/releases). Verify the archive, then put `oboro` on your `PATH`.
 
 **With Rust** — `cargo install --git https://github.com/mcanouil/oboro`.
 
-**From source** — required for `ocr`, which no prebuilt binary or image carries:
+**From source** — the only way to get `ocr`, since no prebuilt binary or image carries it:
 
 ```bash
 git clone https://github.com/mcanouil/oboro.git
@@ -71,28 +72,29 @@ cargo build --release                        # default build
 cargo build --release --features "ner,ocr"   # names and image OCR
 ```
 
-**Devcontainer** — for building or contributing with only Docker on the host; it carries the pinned toolchain, Tesseract and the OCR libraries. Reopen the folder in the container in Visual Studio Code or a GitHub Codespace; see [`CONTRIBUTING.md`](CONTRIBUTING.md).
+**Devcontainer** — for building or contributing with only Docker on the host. It carries the pinned toolchain, Tesseract and the OCR libraries. Reopen the folder in the container in Visual Studio Code or a GitHub Codespace. See [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
-**Uninstalling** — `oboro uninstall` removes everything the tool wrote, the vault included; see the [reference](https://m.canouil.dev/oboro/reference.html#uninstall).
+**Uninstalling** — `oboro uninstall` removes everything the tool wrote, including the vault. See the [reference](https://m.canouil.dev/oboro/reference.html#uninstall).
 
-The default prebuilt binary and Docker image carry no optional feature. Name recognition (`ner`) links ONNX Runtime, which has no musl build, so its prebuilt forms are separate: glibc release archives via the install script, and the `:ner` image. Optical character recognition (`ocr`) needs the Tesseract shared libraries at run time, so it stays a source build.
+The default prebuilt binary and Docker image carry no optional feature. Name recognition (`ner`) links ONNX Runtime, which has no musl build. So its prebuilt forms are separate: glibc release archives from the install script, and the `:ner` image. Optical character recognition (`ocr`) needs the Tesseract shared libraries at run time, so `ocr` stays a source-only build.
 
 ## In Claude Code
 
-Claude Code reads files itself, so pasting a cleaned copy into it protects
-nothing: the agent already read the original. Two hooks put Oboro in that path,
-and the plugin names them both along with the skill that explains what they do:
+Claude Code reads files itself. Pasting a cleaned copy into it protects
+nothing, because the agent already read the original. Two hooks put Oboro
+in that path. The plugin installs both hooks, plus the skill that explains
+what they do:
 
 ```text
 /plugin marketplace add mcanouil/oboro
 /plugin install oboro@oboro
 ```
 
-The plugin still needs the binary on your `PATH`; it cannot install one. Until
-there is one, every matching tool result is withheld and every matching write is
-refused, rather than left unprotected.
+The plugin still needs the binary on your `PATH`. It cannot install one.
+Until the binary is there, Oboro withholds every matching tool result and
+refuses every matching write, rather than leave you unprotected.
 
-With the binary already installed, one command does the same without a plugin:
+If the binary is already installed, one command does the same job without a plugin:
 
 ```bash
 oboro skill install --with-hooks
@@ -100,14 +102,15 @@ oboro skill install --with-hooks
 
 It asks whether to cover this project, in `.claude/settings.local.json` and
 `.claude/skills/`, or every project, in `~/.claude/settings.json` and
-`~/.claude/skills/`. `--project` and `--user` skip the question, and `--dry-run`
-prints what both halves would write without writing either. Both are planned
-before either is written, so a scope that refuses one installs neither.
+`~/.claude/skills/`. `--project` and `--user` skip the question. `--dry-run`
+prints what both halves would write, without writing either. Oboro plans
+both halves before it writes either one. So if a scope refuses one half,
+Oboro installs neither.
 
-Drop `--with-hooks` for the skill on its own, or use `oboro hook install` for
-the hooks on their own. Nothing already in the settings is moved, reordered or
-removed, and a hook already naming `oboro hook` is left exactly as you wrote it.
-This is what the hooks half adds:
+Drop `--with-hooks` to install only the skill. Use `oboro hook install` to
+install only the hooks. Oboro never moves, reorders or removes anything
+already in the settings. A hook that already names `oboro hook` is left
+exactly as you wrote it. This is what the hooks half adds:
 
 ```json
 {
@@ -128,51 +131,55 @@ This is what the hooks half adds:
 }
 ```
 
-`post-tool-use` replaces a tool's result with a cleaned one, so the model reads
-`[[PHONE_1]]` where the file said a phone number. `pre-tool-use` puts the values
-back into what the model writes, so the placeholder never reaches your source.
-Both are needed: the first without the second means the model writes
-placeholders into your files.
+`post-tool-use` replaces a tool's result with a cleaned one. So the model
+reads `[[PHONE_1]]` where the file held a phone number. `pre-tool-use` puts
+the real values back into what the model writes. So the placeholder never
+reaches your source. You need both hooks: with only `post-tool-use`, the
+model writes placeholders straight into your files.
 
-An agent that was never told what `[[PHONE_1]]` is will guess: a bug in your
-file, a template to fill in, or a redaction to work around. The skill that
-explains it is the other half of the command above, and it installs on its own
-too:
+An agent that was never told what `[[PHONE_1]]` is will guess. It might
+guess a bug in your file, a template to fill in, or a redaction to work
+around. The skill explains what the placeholder is. It is the other half of
+the command above, and it installs on its own too:
 
 ```bash
 oboro skill install
 ```
 
-`oboro skill show` prints the text without writing anything. The plugin carries
-the same skill, so install it one way or the other rather than both.
+`oboro skill show` prints the skill text without writing anything. The
+plugin carries the same skill. Install the skill one way or the other, not
+both.
 
-For an agent other than Claude Code, the skill without any of the above:
+For an agent other than Claude Code, install just the skill:
 
 ```bash
 npx skills add mcanouil/oboro
 ```
 
-That installs the explanation and not the machine: no binary, no hooks, and
-nothing redacted until you add them. It also symlinks the skill by default,
-which is why `oboro skill install` afterwards refuses the path by name rather
-than overwriting it.
+That installs the explanation, not the machine. It installs no binary and
+no hooks, and redacts nothing until you add them. It also symlinks the
+skill by default. That is why `oboro skill install` afterwards refuses to
+overwrite the path, and names it instead.
 
-`oboro doctor` reports which halves are installed, whether they came from the
-plugin or from your own settings, and whether the skill is there, since
-believing the agent side is wired up is not the same as having done it.
+`oboro doctor` reports which halves are installed. It says whether they
+came from the plugin or from your own settings, and whether the skill is
+there. Believing the agent side is wired up is not the same as having done
+it.
 
-If Oboro cannot do its job the tool does not quietly get its way: on the way out
-the result is withheld, on the way in the call is refused, and you are told why.
+If Oboro cannot do its job, it does not fail silently. On the way out, it
+withholds the result. On the way in, it refuses the call. Either way, it
+tells you why.
 
-What you type yourself is never covered. The event that fires on a prompt can
-add context to a prompt but cannot rewrite it, so a value you paste into the
-chat reaches the model as you typed it. Paste a document instead and the hook
-covers it. The [Limitations](https://m.canouil.dev/oboro/limitations.html) page
-is the honest account.
+Oboro never covers what you type yourself. The event that fires on a
+prompt can add context to it, but cannot rewrite it. So a value you paste
+into the chat reaches the model exactly as you typed it. Paste a document
+instead, and the hook covers it. See
+[Limitations](https://m.canouil.dev/oboro/limitations.html) for the full
+account.
 
 ## Usage
 
-Without an agent that has hooks, or for a document you are handling yourself:
+Without an agent that has hooks, or when you handle a document yourself:
 
 ```bash
 # Anonymise a document.
@@ -194,8 +201,8 @@ oboro review contract.txt
 oboro doctor
 ```
 
-Both `clean` and `restore` accept `--stdout`, and both read standard input when
-text is piped in, so they compose in a pipeline and nothing has to be written to
+Both `clean` and `restore` accept `--stdout`. Both read standard input when
+you pipe text in. So they compose in a pipeline, and nothing has to touch
 disk first:
 
 ```bash
@@ -203,8 +210,9 @@ oboro clean report.txt --stdout | pbcopy
 pbpaste | oboro restore
 ```
 
-`clean` and `review` also take a directory, cleaning every supported file it
-holds; unsupported files are skipped and counted rather than stopping the run:
+`clean` and `review` also accept a directory. They clean every supported
+file inside it. Unsupported files are skipped and counted; they do not
+stop the run:
 
 ```bash
 # Every readable file in the folder, then its subfolders too.
@@ -212,8 +220,8 @@ oboro clean contracts/
 oboro clean contracts/ --recursive --output sanitised/
 ```
 
-With `--output` a directory's subfolders are mirrored under it, so files sharing
-a name in different subfolders do not collide.
+With `--output`, Oboro mirrors the directory's subfolders under it. So
+files that share a name in different subfolders do not collide.
 
 ### What it reads
 
@@ -229,11 +237,11 @@ a name in different subfolders do not collide.
 | `.pdf`                 | Embedded text; a scan needs a build compiled `--features ocr`     |
 | `.png`, `.jpg`, `.tif` | Tesseract, with a build compiled `--features ocr`                 |
 
-Optical character recognition is optional because it needs the Tesseract
-system libraries. Without it the binary depends on nothing but Rust, and
-images are refused with a message saying so rather than read as empty. With
-it, whatever trained data Tesseract has installed is used, so no language
-needs declaring; `ocr_languages` picks among them.
+Optical character recognition is optional, because it needs the Tesseract
+system libraries. Without it, the binary depends on nothing but Rust, and
+Oboro refuses images with a message, rather than reading them as empty.
+With it, Oboro uses whatever trained data Tesseract has installed, so you
+do not need to declare a language; `ocr_languages` picks among them.
 
 ```bash
 cargo build --release --features ocr
@@ -241,11 +249,11 @@ cargo build --release --features ocr
 
 ### What gets detected
 
-Detection does not depend on the document's language, and a file that mixes languages is handled in one pass.
-This build recognises:
+Detection does not depend on the document's language. A file that mixes
+languages is handled in one pass. This build recognises:
 
 | Kind                                  | How it is verified                                 |
-| ------------------------------------- | -------------------------------------------------- |
+| -------------------------------------- | ---------------------------------------------------- |
 | Email addresses                       | Pattern                                            |
 | Phone numbers                         | `libphonenumber`                                   |
 | IBANs                                 | ISO 13616 mod-97 checksum                          |
@@ -256,49 +264,51 @@ This build recognises:
 | Street addresses and postcodes        | Pattern                                            |
 | Anything you list yourself            | Your regular expressions and terms                 |
 
-Street addresses are matched in the three word orders languages use, so `12 rue
-de la Paix`, `10 Downing Street` and `Hauptstraße 5` are all read without
-anything being declared. Two settings exist as hints and neither is required:
-`regions` widens which national phone formats are read, an international `+`
-number being caught whatever it holds, and `ocr_languages` names what an image
-is written in. See [Limitations](https://m.canouil.dev/oboro/limitations.html#languages)
-for what the postcode patterns do and do not cover.
+Oboro matches street addresses in the three word orders languages use. So
+`12 rue de la Paix`, `10 Downing Street` and `Hauptstraße 5` are all read,
+with nothing declared. Two settings exist as hints, and neither is
+required. `regions` widens which national phone formats are read; an
+international `+` number is caught whatever it holds. `ocr_languages`
+names the language an image is written in. See
+[Limitations](https://m.canouil.dev/oboro/limitations.html#languages) for
+what the postcode patterns cover and miss.
 
-Personal and company names are found by a local, multilingual recognition
-model, in any build with `--features ner`. The install script and the `:ner`
-Docker image both ship one prebuilt; from source it is:
+A local, multilingual recognition model finds personal and company names.
+Any build with `--features ner` includes it. The install script and the
+`:ner` Docker image both ship a prebuilt model. From source, build it
+yourself:
 
 ```bash
 cargo build --release --features ner   # downloads ONNX Runtime while building
 oboro models pull   # about 348 MB, once, verified against pinned hashes
 ```
 
-The build fetches ONNX Runtime, so `--features ner` needs network access at
-build time and a fully offline build fails there. The model itself runs on
-your machine. Once built, `models pull` is the only command that touches the
-network, and only when you run it; the `:ner` image skips even that, since
-the model is baked in.
+The build fetches ONNX Runtime. So `--features ner` needs network access
+at build time, and a fully offline build fails there. The model itself
+runs on your machine. Once built, `models pull` is the only command that
+touches the network, and only when you run it. The `:ner` image skips
+even that, since the model is baked in.
 
 Without the model, names are matched from the denylist in `oboro.toml`
 instead.
 
-Since the model over-redacts, `oboro review` exists to put some of it back.
-It lists every detection with its kind, confidence and surrounding line, and
-you accept or reject each one before a single byte is written:
+The model over-redacts, so `oboro review` exists to put some of it back.
+It lists every detection with its kind, confidence and surrounding line.
+You accept or reject each one before Oboro writes a single byte:
 
 ```text
 j/k move   space toggle   a accept all   n reject none   w write   s skip   q quit
 ```
 
-Rejecting a detection leaves the value in the output and never records it in
-the vault.
+Rejecting a detection leaves the value in the output. Oboro never records
+a rejected value in the vault.
 
-**The model over-redacts, deliberately.** A real name inside a document and
-an ordinary phrase score almost the same: "Thomas Bernard" scores 0.237 while
-"The quick brown fox" scores 0.218. No threshold separates them, so the
-default errs towards redacting and expects you to read the result. Raise
-`ner_threshold` to redact less and risk missing names, or lower it to redact
-more.
+**The model over-redacts, deliberately.** A real name and an ordinary
+phrase score almost the same: "Thomas Bernard" scores 0.237 while "The
+quick brown fox" scores 0.218. No threshold separates them cleanly. So the
+default errs towards redacting, and expects you to read the result. Raise
+`ner_threshold` to redact less, at the risk of missing names. Lower it to
+redact more.
 
 ## Configuration
 
@@ -343,13 +353,13 @@ regex = "CT-[0-9]{6}"
 | `~/.oboro/vault.db` | Placeholder mapping, values encrypted with AES-256-GCM |
 | `~/.oboro/key`      | The 32-byte key, created on first use                  |
 
-Both are created readable only by you: an owner-only file mode on Unix, an
-ACL granting only your account on Windows. Values are looked up through a
-keyed hash rather than the plaintext, so the database on its own reveals
+Oboro creates both files readable only by you: an owner-only file mode on
+Unix, an ACL granting only your account on Windows. Oboro looks up values
+through a keyed hash, not the plaintext. So the database alone reveals
 neither the values nor whether a guessed value is present.
 
-Lose the key and the vault cannot be read, including by you. Pass `--vault`
-and `--key` to keep a separate vault per project.
+If you lose the key, no one can read the vault, including you. Pass
+`--vault` and `--key` to keep a separate vault per project.
 
 ## Limitations
 
@@ -358,21 +368,23 @@ Read them before trusting the output with anything that matters.
 - Identifiers that fail their own checksum are not recognised. A mistyped
   IBAN will not be detected.
 - The recognition model redacts some ordinary prose as though it were a
-  name. This is the intended direction of error, not a bug, but it means the
-  output needs reading before you send it.
+  name. This is the intended direction of error, not a bug. Read the
+  output before you send it.
 - Without `--features ner`, names are only redacted if you list them.
-- A PDF made of scanned images is read only with the `ocr` feature, and only
-  where the page image is `DCTDecode`, `JPXDecode` or `CCITTFaxDecode` with
-  nothing layered over it. Any other page refuses the file by name rather than
-  being half-read, including one carrying no image at all.
-- Whether to recognise is decided per page, so a scanned page in an otherwise
-  textual PDF is still read. A page carrying a few words and no image is kept
-  as it is rather than refused.
-- Reading images needs the `ocr` feature and Tesseract; a plain build refuses
-  them.
-- Recognition is tested on rendered text, not on real photographs. Treat text
-  recovered from an image as less reliable than text read directly.
-- Older `.doc`, `.xls` and `.ppt` are not read at all, nor are `.ods` and `.odp`.
+- Oboro reads a PDF made of scanned images only with the `ocr` feature,
+  and only when the page image is `DCTDecode`, `JPXDecode` or
+  `CCITTFaxDecode` with nothing layered over it. For any other page, Oboro
+  refuses the file and names the reason, rather than reading it half-way.
+  This includes a page with no image at all.
+- Oboro decides whether to recognise a page one page at a time. So a
+  scanned page inside an otherwise textual PDF is still read. A page with
+  a few words and no image is kept as it is, not refused.
+- Reading images needs the `ocr` feature and Tesseract. A plain build
+  refuses them.
+- Recognition is tested on rendered text, not on real photographs. Treat
+  text recovered from an image as less reliable than text read directly.
+- Older `.doc`, `.xls` and `.ppt` are not read at all, nor are `.ods` and
+  `.odp`.
 - Detection favours redacting too much over too little. Use the allowlist
   when it goes too far.
 - **Read the sanitised output before you share it.** No tool of this kind
@@ -392,3 +404,4 @@ GitHub renders it via the "Cite this repository" widget on the repository sideba
 
 This project is licensed under the MIT License.
 See the [LICENSE](LICENSE) file for details.
+</content>

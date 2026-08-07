@@ -23,21 +23,22 @@ Nothing about your documents is involved.
 | `~/.oboro/key` | A 32-byte key, generated on first use. |
 | `~/.oboro/models/` | The recognition model, if you fetched it. |
 
-Both the vault and the key are created readable only by you: an owner-only file mode on Unix, an ACL granting only your account on Windows, and the key file is protected that way from the moment it exists rather than being tightened afterwards. On Windows the WAL and SHM sidecars next to the database inherit that ACL from the vault's directory instead of being restricted individually, so a vault opened inside a directory `oboro` did not create is the one case where they are not covered.
-`oboro doctor` reports their protection so you can confirm.
+Oboro creates both the vault and the key readable only by you: an owner-only file mode on Unix, an ACL granting only your account on Windows. It protects the key file that way from the moment the key file exists, rather than tightening it afterwards.
+On Windows, the WAL and SHM sidecars next to the database inherit that ACL from the vault's directory, instead of being restricted individually. So a vault opened inside a directory `oboro` did not create is the one case where they are not covered.
+`oboro doctor` reports their protection, so you can confirm.
 
 Pass `--vault` and `--key` to keep a separate vault per project.
 
 ## How the vault protects values
 
 Values are never written in plaintext.
-Each is sealed with AES-256-GCM, and the ciphertext is bound to its entity kind, so a row cannot be quietly moved to another kind.
+Oboro seals each one with AES-256-GCM, and binds the ciphertext to its entity kind. So a row cannot be quietly moved to another kind.
 
 Lookups do not use the value either.
-They use a keyed hash of it, so somebody holding the database but not the key file cannot test whether a value they guessed is present.
+Oboro uses a keyed hash of it. So somebody holding the database but not the key file cannot test whether a value they guessed is present.
 Without that keyed step, a database of hashed phone numbers would fall to anybody willing to hash every phone number.
 
-Two keys are derived from your key file through domain separation, one for encryption and one for the index, so neither job weakens the other.
+Oboro derives two keys from your key file through domain separation: one for encryption, one for the index. So neither job weakens the other.
 
 ::: {.callout-important}
 
@@ -54,10 +55,10 @@ Treat it the way you would treat an SSH private key.
 ## The model is verified, not just downloaded
 
 `models pull` checks each file against a SHA-256 hash pinned in the source.
-A file that does not match is deleted rather than kept.
+Oboro deletes a file that does not match, rather than keeping it.
 
 This matters more than it might seem.
-A model decides which parts of your documents are sensitive, so weights from a compromised mirror could quietly recognise nothing at all and you would notice only by reading every output.
+A model decides which parts of your documents are sensitive. So weights from a compromised mirror could quietly recognise nothing at all, and you would notice only by reading every output.
 
 ## What this does not protect against
 

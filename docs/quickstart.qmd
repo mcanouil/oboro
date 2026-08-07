@@ -5,7 +5,7 @@ description: "Install oboro, wire the Claude Code hooks in, and clean and restor
 
 ## Install
 
-Pick whichever fits; the install script is the quickest.
+Pick whichever fits. The install script is the quickest.
 
 ### Install script
 
@@ -15,18 +15,18 @@ Downloads the prebuilt binary for macOS or Linux and verifies it against the rel
 curl -fsSL https://m.canouil.dev/oboro/install.sh | bash
 ```
 
-It installs into `/usr/local/bin` when writable, otherwise `~/.local/bin`.
+It installs into `/usr/local/bin` when that is writable, otherwise into `~/.local/bin`.
 Pin a version with `--version`, choose a directory with `--dir`, and pass `--help` for the rest.
-The script needs `bash` and `curl`; on a minimal distribution such as Alpine, install them first with `apk add bash curl`.
+The script needs `bash` and `curl`. On a minimal distribution such as Alpine, install them first with `apk add bash curl`.
 
-To also find names nobody told the tool about, install the ner build and fetch its model:
+To also detect names you have not listed, install the ner build and fetch its model:
 
 ```bash
 curl -fsSL https://m.canouil.dev/oboro/install.sh | bash -s -- --features ner
 oboro models pull   # about 348 MB, once
 ```
 
-On Linux the ner binary needs glibc 2.39 or newer (Ubuntu 24.04+, Debian 13+); the default binary is static and runs anywhere.
+On Linux, the ner binary needs glibc 2.39 or newer (Ubuntu 24.04+, Debian 13+). The default binary is static and runs anywhere.
 
 ### Windows
 
@@ -36,19 +36,19 @@ Downloads the prebuilt binary and verifies it against the release checksums:
 powershell -ExecutionPolicy ByPass -c "irm https://m.canouil.dev/oboro/install.ps1 | iex"
 ```
 
-Installs into `%LOCALAPPDATA%\Programs\oboro\bin`, no administrator rights needed, and adds that directory to your user `PATH` if it is missing; open a new terminal for it to take effect.
-`irm | iex` cannot take arguments, so pin a version with the parameterised form instead:
+This installs into `%LOCALAPPDATA%\Programs\oboro\bin`. You do not need administrator rights. It adds that directory to your user `PATH` if the directory is missing; open a new terminal for that to take effect.
+`irm | iex` cannot take arguments. To pin a version, use the parameterised form instead:
 
 ```powershell
 & ([scriptblock]::Create((irm https://m.canouil.dev/oboro/install.ps1))) -Version 0.7.0
 ```
 
-`-Dir` picks an install directory and `-Help` lists the rest; `OBORO_VERSION`, `OBORO_INSTALL_DIR`, `OBORO_SKIP_CHECKSUM` and `OBORO_VERIFY_PROVENANCE` do the same jobs as their `install.sh` counterparts.
-No prebuilt Windows build offers `ner` or `ocr` yet: both stay a [source build](#from-source) there, same as everywhere else.
+`-Dir` picks an install directory, and `-Help` lists the rest. `OBORO_VERSION`, `OBORO_INSTALL_DIR`, `OBORO_SKIP_CHECKSUM` and `OBORO_VERIFY_PROVENANCE` do the same jobs as their `install.sh` counterparts.
+No prebuilt Windows build offers `ner` or `ocr` yet. Both stay a [source build](#from-source) there, the same as everywhere else.
 
 ### Docker
 
-No toolchain needed; the image is one static binary on `distroless`.
+You need no toolchain. The image is one static binary on `distroless`.
 The vault volume is not optional, because the placeholder mapping lives in it:
 
 ```bash
@@ -60,7 +60,7 @@ docker run --rm \
   ghcr.io/mcanouil/oboro:latest clean contract.docx
 ```
 
-The [Docker](docker.qmd) page covers `restore` and the volume in full, along with the `ghcr.io/mcanouil/oboro:ner` variant, which finds untold names with the recognition model already inside the image.
+See the [Docker](docker.qmd) page for `restore` and the volume in full, and for the `ghcr.io/mcanouil/oboro:ner` variant, which detects names with the recognition model already inside the image.
 
 ### Prebuilt binary, by hand
 
@@ -85,7 +85,7 @@ cargo install --git https://github.com/mcanouil/oboro
 
 ### From source
 
-Required for `ocr`, which no prebuilt binary or image carries, and for a `ner` build on a Linux distribution older than the prebuilt one's glibc:
+This is required for `ocr`, since no prebuilt binary or image carries it. It is also required for a `ner` build on a Linux distribution older than the prebuilt one's glibc:
 
 ```bash
 git clone https://github.com/mcanouil/oboro.git
@@ -96,27 +96,27 @@ cargo build --release
 The binary lands in `target/release/oboro`.
 
 That plain build depends on nothing but Rust.
-Two capabilities are optional: reading images needs the Tesseract system libraries, and recognising names links ONNX Runtime, which the build fetches over the network.
-The ner build is also shipped prebuilt, by the [install script](#install-script) and as [a Docker image](docker.qmd); ocr is compiled in rather than shipped.
+Two capabilities are optional. Reading images needs the Tesseract system libraries. Recognising names links ONNX Runtime, which the build fetches over the network.
+The ner build also ships prebuilt, from the [install script](#install-script) and as [a Docker image](docker.qmd). The ocr build does not; you compile it yourself.
 
 ::: {.panel-tabset}
 
 ## Names and companies
 
-Finding names nobody told the tool about needs the recognition model:
+To detect names you have not listed, you need the recognition model:
 
 ```bash
 cargo build --release --features ner   # downloads ONNX Runtime while building
 oboro models pull
 ```
 
-The build downloads ONNX Runtime, so `--features ner` needs network access and a fully offline build fails here.
+The build downloads ONNX Runtime. So `--features ner` needs network access, and a fully offline build fails here.
 `models pull` then fetches the model, about 348 MB once, checked against pinned hashes.
-Once built, it is the only command that touches the network.
+Once you have built it, `models pull` is the only command that touches the network.
 
 ## Images
 
-Reading images and scanned documents needs Tesseract, plus trained data for the languages your documents are in:
+Reading images and scanned documents needs Tesseract. It also needs trained data for the languages your documents are in:
 
 ```bash
 # Debian and Ubuntu; add a tesseract-ocr-<language> package per language
@@ -128,8 +128,8 @@ brew install tesseract tesseract-lang
 cargo build --release --features ocr
 ```
 
-Whatever is installed is used, so no language has to be declared.
-Set [`ocr_languages`](configuration.qmd#ocr_languages) to pick among them.
+Oboro uses whatever trained data is installed, so you do not need to declare a language.
+Set [`ocr_languages`](configuration.qmd#ocr_languages) to pick among the installed languages.
 
 ## Both
 
@@ -142,8 +142,8 @@ cargo build --release --features "ner,ocr"
 ### In a devcontainer
 
 For building or contributing with nothing on the host but Docker.
-The container carries the pinned Rust toolchain, Tesseract and the OCR libraries, so `cargo build --release --features "ner,ocr"` runs inside it without setting up a host toolchain, and the binary lands in `target/release/oboro` as usual.
-In Visual Studio Code or a GitHub Codespace, reopen the folder in the container when prompted; [Development](development.qmd) has the manual `docker` invocation.
+The container carries the pinned Rust toolchain, Tesseract and the OCR libraries. So `cargo build --release --features "ner,ocr"` runs inside it, with no host toolchain to set up. The binary lands in `target/release/oboro`, as usual.
+In Visual Studio Code or a GitHub Codespace, reopen the folder in the container when prompted. See [Development](development.qmd) for the manual `docker` invocation.
 
 Check what your build can do:
 
@@ -151,43 +151,43 @@ Check what your build can do:
 oboro doctor
 ```
 
-However you installed it, `oboro completions --install` puts a completion script where your shell reads it, taking the shell from `$SHELL` unless you name one:
+However you installed it, `oboro completions --install` puts a completion script where your shell reads it. It takes the shell from `$SHELL` unless you name one:
 
 ```bash
 oboro completions --install
 ```
 
-Without `--install` the script goes to standard output and where it belongs to standard error, so a redirect captures the script alone.
-[Shells](shells.qmd) sets out every destination and how to do it by hand.
+Without `--install`, the script goes to standard output, and where it belongs goes to standard error. So a redirect captures the script alone.
+See [Shells](shells.qmd) for every destination, and how to do it by hand.
 
 ## Wire it into Claude Code
 
 Do this first if you use Claude Code.
-The agent reads files itself, so cleaning a copy by hand and pasting it in protects nothing: it already read the original.
+The agent reads files itself. So cleaning a copy by hand and pasting it in protects nothing: the agent already read the original.
 
 Two hooks put Oboro in that path.
-The plugin names them both and brings the skill that explains their placeholders:
+The plugin installs both hooks, and brings the skill that explains their placeholders:
 
 ```text
 /plugin marketplace add mcanouil/oboro
 /plugin install oboro@oboro
 ```
 
-The plugin cannot install the binary its hooks run, so install that first, with any of the ways above.
-Without one, every matching tool result is withheld and every matching write is refused, and the message says what to install: the plugin fails closed rather than leaving you unprotected while looking installed.
+The plugin cannot install the binary its hooks run. Install that first, with any of the ways above.
+Without the binary, Oboro withholds every matching tool result and refuses every matching write, and the message says what to install. The plugin fails closed, rather than leaving you unprotected while looking installed.
 
-If you would rather keep both halves in your own files rather than in a plugin, one command writes them:
+If you would rather keep both halves in your own files, not in a plugin, one command writes them:
 
 ```bash
 oboro skill install --with-hooks
 ```
 
-It asks whether to cover this project or every project, showing both files it would write, and shows what it will write before writing it.
-Pass `--project` or `--user` to skip the question, and `--dry-run` to see the settings without writing them.
-Both halves are planned before either is written, so a scope that refuses one, through a symbolic link or settings that cannot be merged into, installs neither.
+It asks whether to cover this project or every project, and shows both files it would write before writing them.
+Pass `--project` or `--user` to skip the question. Pass `--dry-run` to see the settings without writing them.
+Oboro plans both halves before it writes either one. So if a scope refuses one half, through a symbolic link or settings it cannot merge into, Oboro installs neither.
 
-Either half installs on its own: drop `--with-hooks` for the skill alone, or run `oboro hook install` for the hooks alone.
-The hooks alone are the state worth avoiding, since the model is then shown placeholders with nothing to explain them.
+Either half installs on its own. Drop `--with-hooks` for the skill alone. Run `oboro hook install` for the hooks alone.
+Avoid installing the hooks alone: the model then sees placeholders with nothing to explain them.
 
 This is what it adds, next to whatever your settings already hold:
 
@@ -210,8 +210,8 @@ This is what it adds, next to whatever your settings already hold:
 }
 ```
 
-Nothing already in the file is moved, reordered or removed, and a hook Oboro finds already named is left exactly as you wrote it.
-Write it by hand instead if you would rather: the command is a convenience, not the only way in.
+Oboro never moves, reorders or removes anything already in the file. A hook Oboro finds already named `oboro hook` is left exactly as you wrote it.
+You can write it by hand instead if you prefer: the command is a convenience, not the only way in.
 
 Then check it took:
 
@@ -224,7 +224,7 @@ PostToolUse .claude/settings.local.json (Read|Grep|Bash|WebFetch, reachable)
 PreToolUse  .claude/settings.local.json (Write|Edit, reachable)
 ```
 
-Installed as a plugin, the hooks are in the plugin's own files rather than in your settings, and `doctor` says so:
+Installed as a plugin, the hooks live in the plugin's own files, not in your settings. `doctor` says so:
 
 ```text
 plugin      /home/you/.claude/settings.json (oboro@oboro, enabled)
@@ -234,28 +234,28 @@ skill       /home/you/project/.claude/skills/oboro/SKILL.md (not installed here;
 skill       /home/you/.claude/skills/oboro/SKILL.md (not installed here; the plugin carries its own)
 ```
 
-Installing them again in your settings on top of the plugin is worth avoiding: both copies would run on every matching tool call.
-`oboro hook install` says so when it finds the plugin enabled.
+Avoid installing them again in your settings on top of the plugin: both copies would then run on every matching tool call.
+`oboro hook install` warns you when it finds the plugin enabled.
 
 Ask the agent to read a file holding a phone number, and it will tell you about `[[PHONE_1]]`.
 Ask it to write that back, and the real number lands in the file.
 
-Install both halves, which is what `oboro hook install` does.
-The first without the second means the model is shown placeholders and nothing puts them back, so `[[PHONE_1]]` ends up in your source.
+Install both halves. `oboro hook install` installs both.
+With only the first half, the model sees placeholders and nothing puts them back. So `[[PHONE_1]]` ends up in your source.
 
-`reachable` is worth reading: a hook naming a binary that is not on `PATH` is configured and useless, and it fails closed on every matching tool call.
+Read the `reachable` field. A hook that names a binary not on `PATH` is configured but useless, and it fails closed on every matching tool call.
 
-At 17 to 70 ms a call this runs on every matching tool without being felt; the [timings](how-it-works.qmd#what-a-run-costs) are recorded.
-The [reference](reference.qmd#hook) covers what each half does, and what neither covers.
+At 17 to 70 ms a call, this runs on every matching tool without being felt. See the [timings](how-it-works.qmd#what-a-run-costs).
+See the [reference](reference.qmd#hook) for what each half does, and what neither covers.
 
 ::: {.callout-warning}
 
 ## Your own words are not covered
 
 The hooks clean what tools read and write.
-What you type into the chat is never touched, because the event that fires on a prompt can add context to it but cannot rewrite it.
+What you type into the chat is never touched. The event that fires on a prompt can add context to it, but cannot rewrite it.
 
-Paste a document rather than retyping what is in it, and the hook covers it.
+Paste a document instead of retyping what is in it, and the hook covers it.
 
 :::
 
@@ -264,7 +264,7 @@ Paste a document rather than retyping what is in it, and the hook covers it.
 With the hooks on, the agent reads `[[PHONE_1]]` without being told what that is.
 Left to guess, it reads a placeholder as a bug in your file, as a template to fill in, or as a redaction to work around.
 
-The plugin above carries it, and so does `oboro skill install --with-hooks`, so this section is for the skill on its own; installing it twice is not worth doing.
+The plugin above carries the skill, and so does `oboro skill install --with-hooks`. So this section is only for installing the skill on its own; installing it twice is not worth doing.
 
 Install the skill that explains them:
 
@@ -272,7 +272,7 @@ Install the skill that explains them:
 oboro skill install
 ```
 
-It asks whether to install for this project or for every project, and names the file it will write before writing it:
+It asks whether to install for this project or for every project, and names the file it will write before it writes it:
 
 ```text
 1  this project    /home/you/project/.claude/skills/oboro/SKILL.md
@@ -280,7 +280,7 @@ It asks whether to install for this project or for every project, and names the 
 Install the Oboro skill where? [1/2]
 ```
 
-Pass `--project` or `--user` to skip the question, and `--with-hooks` to name the hooks in the same scope while you are here.
+Pass `--project` or `--user` to skip the question. Pass `--with-hooks` to install the hooks in the same scope at the same time.
 `oboro skill show` prints the text without writing anything.
 
 Then check it took, as with the hooks:
@@ -294,8 +294,8 @@ skill       /home/you/project/.claude/skills/oboro/SKILL.md (current)
 skill       /home/you/.claude/skills/oboro/SKILL.md (not installed)
 ```
 
-The skill is carried in the binary, so it describes the version of the hooks you have rather than the ones documented when you installed.
-Edit the installed copy and a later install leaves your edit alone, writing what it would have installed to `SKILL.md.oboro-proposed` beside it.
+The skill is carried in the binary. So it describes the version of the hooks you have, not the version documented when you installed.
+Edit the installed copy, and a later install leaves your edit alone. It writes what it would have installed to `SKILL.md.oboro-proposed` beside it instead.
 
 For an agent other than Claude Code, the same skill is one command away:
 
@@ -304,13 +304,13 @@ npx skills add mcanouil/oboro
 ```
 
 That reads `skills/oboro/SKILL.md` from this repository and installs it for whichever agents it finds.
-It installs the explanation and not the machine: no binary, no hooks, and nothing redacted until you add both.
-It also symlinks the skill by default, and Oboro does not write through a symbolic link, so `oboro skill install` afterwards names the link and refuses rather than overwriting what you installed.
+It installs the explanation, not the machine: no binary, no hooks, and nothing redacted until you add both.
+It also symlinks the skill by default. Oboro never writes through a symbolic link. So `oboro skill install` afterwards names the link and refuses to overwrite what you installed.
 
 ## Clean a document
 
 Everything below is the manual loop.
-It is the primary path in any tool without hooks, and the fallback in Claude Code for a document you would rather handle yourself.
+It is the primary path in any tool without hooks. In Claude Code, it is the fallback for a document you would rather handle yourself.
 
 ```bash
 oboro clean contract.docx
@@ -324,7 +324,7 @@ contract.docx -> contract.clean.md (7 replaced: ADDRESS 2, EMAIL 1, IBAN 1, ORG 
 
 Read it, then paste it into whichever model you are using.
 
-Point `clean` at a directory to do a whole folder at once; add `--recursive` to include its subfolders:
+Point `clean` at a directory to do a whole folder at once. Add `--recursive` to include its subfolders:
 
 ```bash
 oboro clean contracts/ --recursive
@@ -349,7 +349,7 @@ oboro review contract.docx
  j/k move   space toggle   a accept all   n reject none   w write
 ```
 
-Rejecting a detection leaves the value in the output and never records it anywhere.
+Rejecting a detection leaves the value in the output. Oboro never records it anywhere.
 
 ## Bring the answer back
 
@@ -381,7 +381,8 @@ One command removes everything Oboro wrote: the completion script, the agent hoo
 oboro uninstall
 ```
 
-It prints everything that would go and asks to confirm; `--dry-run` prints the same report and stops there.
-Without `--keep-vault` the vault and its key go too, and restoring anything cleaned earlier becomes impossible from then on.
-A hook you pasted by hand into a project's shared `.claude/settings.json` is named rather than removed, since that is a committed file Oboro never wrote.
+It prints everything that would go, and asks you to confirm. `--dry-run` prints the same report and stops there.
+Without `--keep-vault`, the vault and its key go too. After that, you can no longer restore anything cleaned earlier.
+A hook you pasted by hand into a project's shared `.claude/settings.json` is named, not removed, since that file is committed and Oboro never wrote it.
 See the [`uninstall` reference](reference.qmd#uninstall) for the flags, and the [Docker guide](docker.qmd) for the volume and image this command cannot reach.
+</content>

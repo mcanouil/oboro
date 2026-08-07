@@ -3,9 +3,9 @@
 Every value in these files is invented. No real person, company, bank
 account, card or registration number appears in any of them.
 
-The identifiers are constructed to be structurally valid so the recognisers
-are exercised properly: the SIREN and SIRET pass their Luhn checks, the IBAN
-passes ISO 13616 mod-97, and the card number is the well-known test value.
+The identifiers are constructed to be structurally valid, so the recognisers
+are exercised properly. The SIREN and SIRET pass their Luhn checks. The IBAN
+passes ISO 13616 mod-97. The card number is the well-known test value.
 
 | File | Covers |
 | --- | --- |
@@ -31,7 +31,7 @@ structures directly, since no document tooling was available. They are
 deliberately minimal: enough structure for a reader to parse, and nothing
 else.
 
-`slides.pptx` is generated from `slides.qmd` rather than written by hand,
+`slides.pptx` is generated from `slides.qmd`, rather than written by hand,
 since building a valid `.pptx` archive by hand is impractical. Regenerate
 it with:
 
@@ -39,19 +39,19 @@ it with:
 quarto render testdata/slides.qmd --to pptx
 ```
 
-Plain declarative text collapses to one run per paragraph, so a fixture of
+Plain declarative text collapses to one run per paragraph. So a fixture of
 ordinary prose would not exercise run concatenation at all. The "Contact"
 slide plants `Jean Dupont` with inline emphasis (`Jean **Dupont**`), which
-forces Pandoc to split it across two `a:t` runs in the same paragraph; that
+forces Pandoc to split it across two `a:t` runs in the same paragraph. That
 value only survives reading if the reader concatenates them with nothing
 between them. A regeneration that stopped producing that split would still
-render correctly but would silently drop this coverage, so check with
+render correctly, but would silently drop this coverage. So check with
 `unzip -p testdata/slides.pptx "ppt/slides/slide*.xml" | grep -c '<a:t>Jean '`
-after regenerating and confirm it still finds a run holding `Jean` on its
+after regenerating, and confirm it still finds a run holding `Jean` on its
 own, separate from `Dupont`.
 
-It carries no `ppt/media` and its author field is invented, so nothing has to
-be scrubbed after generation.
+It carries no `ppt/media`, and its author field is invented. So nothing
+has to be scrubbed after generation.
 
 `contract.odt` is written by `build-contract-odt.py`, in this directory, since
 no OpenDocument tooling is available here. Regenerate it with:
@@ -60,7 +60,7 @@ no OpenDocument tooling is available here. Regenerate it with:
 python3 testdata/build-contract-odt.py
 ```
 
-Each part is written as a single line, the way a real producer writes one, so
+Each part is written as a single line, the way a real producer writes one. So
 the reader's handling of a producer's indentation is not what the fixture
 happens to exercise. Its content is chosen from the shapes that actually leaked
 past three earlier versions of the reader, each of which had closed the shape in
@@ -70,22 +70,22 @@ front of it: an annotation carrying `dc:creator`, `dc:date` and
 marker sits directly inside `text:note`; entity and character references inside
 that bare character data, which used to shatter a name across lines; and
 base64 under `office:binary-data`, which must not reach the detectors at all.
-A regeneration that dropped any of those would still read correctly and would
+A regeneration that dropped any of those would still read correctly, and would
 silently drop the coverage that matters most.
 
-`message.eml` is written by hand rather than generated, since an RFC 5322
+`message.eml` is written by hand, rather than generated, since an RFC 5322
 message is plain text. Its line endings are CRLF, as a real message has. Three
 values, the international telephone number, `Globex Industries` and the
 Champs-Élysées address, appear only in its HTML part and in adjacent `<div>`
-elements, so the leak test fails if the HTML is not read or if adjacent blocks
+elements. So the leak test fails if the HTML is not read, or if adjacent blocks
 weld together.
 
 The three `scan` fixtures are the exception: they carry a real image of
 rendered text, which is the only way to exercise recognition end to end.
-They were produced once with ImageMagick 7 and committed, rather than
-generated during the test run, so the tests need no image tooling. The
+Someone produced them once with ImageMagick 7 and committed them, rather than
+generating them during the test run. So the tests need no image tooling. The
 same six lines are rendered into each, differing only in how the page is
-encoded, so one codec failing is distinguishable from recognition failing.
+encoded. So one codec failing is distinguishable from recognition failing.
 
 ```sh
 font=/System/Library/Fonts/Supplemental/Arial.ttf # DejaVuSans.ttf elsewhere
@@ -101,8 +101,8 @@ magick scan.png -quality 80 page.jpg && magick page.jpg -alpha off scan.pdf
 magick scan.png -monochrome -compress Group4 -alpha off scan-fax.pdf
 ```
 
-Regenerating them is only worth it if the rendering has to change. The text
+Regenerate them only if the rendering has to change. The text
 is deliberately large and high contrast, because the integration tests match
-names by exact string: a single misread character would fail the leak test
+names by exact string. A single misread character would fail the leak test
 for a reason that has nothing to do with the code under test. Check any new
 rendering with `tesseract scan.png -` before committing it.

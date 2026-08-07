@@ -6,7 +6,7 @@ description: "Detection runs in layers, cheapest first: rules, a local recogniti
 ## The three layers
 
 Detection runs in layers, cheapest first.
-Each produces spans over the same text, and a merge step decides between them.
+Each layer produces spans over the same text. A merge step decides between them.
 
 ```{mermaid}
 %%| label: fig-layers
@@ -24,33 +24,33 @@ flowchart TB
 ### Rules
 
 Regular expressions paired with a real check.
-The expression proposes a candidate and the check confirms it: an IBAN must clear ISO 13616 mod-97, a card and a SIREN must clear Luhn, a phone number must satisfy `libphonenumber`.
+The expression proposes a candidate, and the check confirms it. An IBAN must clear ISO 13616 mod-97. A card and a SIREN must clear Luhn. A phone number must satisfy `libphonenumber`.
 
 This matters because a regular expression alone is a poor judge.
-Any sixteen digits look like a card number; only some of them are one.
+Any sixteen digits look like a card number. Only some of them are one.
 
-A SIRET has to satisfy Luhn twice, once on its nine-digit SIREN prefix and once on the whole fourteen digits, which rejects most incidental runs of digits.
+A SIRET must satisfy Luhn twice: once on its nine-digit SIREN prefix, and once on the whole fourteen digits. This rejects most incidental runs of digits.
 
 ### The recognition model
 
-Names have no checksum.
-Neither do company names, and listing every client by hand does not scale.
+Names have no checksum. Neither do company names.
+Listing every client by hand does not scale.
 
 A [GLiNER](https://github.com/urchade/GLiNER) model handles those, running entirely on your machine.
 `oboro models pull` fetches a quantised ONNX export and verifies it against pinned hashes.
 The model is asked for four kinds of thing: people, organisations, companies and addresses.
 
-It is zero-shot, meaning those are ordinary words rather than trained categories, which is why it can find a company it has never seen.
+It is zero-shot. Those are ordinary words, not trained categories. That is why it can find a company it has never seen.
 
 ## Deciding between layers
 
 Two layers often claim the same words, sometimes disagreeing about what they are.
 
 Longer spans win first, because a short match is usually a fragment of a longer one.
-The phone recogniser sees a run of digits inside an IBAN; keeping the IBAN redacts strictly more.
+The phone recogniser sees a run of digits inside an IBAN. Keeping the IBAN redacts strictly more.
 
 When two spans are the same length, the more specific kind wins.
-A nine-digit SIREN is also a well-formed French phone number, and SIREN is the more specific reading, so the placeholder says `SIREN`.
+A nine-digit SIREN is also a well-formed French phone number. SIREN is the more specific reading, so the placeholder says `SIREN`.
 
 Only then does confidence break the tie.
 
@@ -62,7 +62,7 @@ These are two different questions, and mixing them causes trouble.
 Specificity ranks *labels*: a SIRET is a more specific reading than a card number.
 Confidence estimates whether a detector is *right*: the model is 31% sure this is a person.
 
-Ranking them together would put a hand-tuned constant into direct competition with a model's probability, and let the constant win arguments it has no business winning.
+Ranking them together would put a hand-tuned constant into direct competition with a model's probability. The constant would win arguments it has no business winning.
 
 :::
 
@@ -71,27 +71,27 @@ Ranking them together would put a hand-tuned constant into direct competition wi
 Every replaced value is stored so it can be put back.
 
 The database holds no plaintext.
-Values are sealed with AES-256-GCM under a key derived from a local key file, and looked up through a keyed hash rather than the value itself.
-The database on its own therefore reveals neither the values nor whether a value you guessed is present.
+Oboro seals values with AES-256-GCM under a key derived from a local key file, and looks them up through a keyed hash, not the value itself.
+So the database on its own reveals neither the values nor whether a value you guessed is present.
 
-Two separate keys are derived from the one key file, one for encryption and one for the lookup index, so the two jobs never share key material.
+Oboro derives two separate keys from the one key file: one for encryption, one for the lookup index. So the two jobs never share key material.
 
 Allocation is deterministic: the same value always yields the same placeholder within a vault.
 That is what lets a model see that two documents mention the same client without knowing who the client is.
 
-Formatting differences are folded away first, so `06 12 34 56 78` and `0612345678` are one value and one placeholder.
-What comes back on restore is the spelling that was stored first.
+Oboro folds away formatting differences first. So `06 12 34 56 78` and `0612345678` are one value and one placeholder.
+On restore, you get back the spelling that was stored first.
 
 Two runs can share one vault.
-Allocation takes the database's write lock before it reads, so invocations that meet the same new value at the same moment agree on its placeholder instead of one of them failing.
+Allocation takes the database's write lock before it reads. So two invocations that meet the same new value at the same moment agree on its placeholder, instead of one of them failing.
 
 ## What a run costs
 
-Oboro is a one-shot command, so everything it needs is set up again on every invocation.
-Whether that is affordable decides whether it can sit behind something that calls it often, such as a tool wrapper, rather than only being run by hand.
+Oboro is a one-shot command. It sets up everything it needs again on every invocation.
+Whether that cost is affordable decides whether Oboro can sit behind something that calls it often, such as a tool wrapper, rather than only being run by hand.
 
 Measured on an Apple M1 Pro under macOS 26.5.2, release build, against a warm vault.
-Median wall clock over thirty runs for the default build, and over ten for the recognition model, which is slow enough that thirty runs measure nothing more:
+This is the median wall clock over thirty runs for the default build, and over ten runs for the recognition model, which is slow enough that thirty runs measure nothing more:
 
 | Invocation | Default build | With `--features ner` |
 | --- | --- | --- |
@@ -102,25 +102,25 @@ Median wall clock over thirty runs for the default build, and over ten for the r
 | `clean` a 770 byte contract holding seventeen distinct values | 71 ms | 1,473 ms |
 | `clean` ten copies of that two-line file in one run | 72 ms | 1,751 ms |
 
-On the default build the cost is fixed per process, not per document.
-Ten files cost what one costs, and the contract costs what two lines cost, so matching text is not where the time goes.
+On the default build, the cost is fixed per process, not per document.
+Ten files cost what one costs, and the contract costs what two lines cost. So matching text is not where the time goes.
 
 Opening the vault is 2 ms of it, including generating the key and the schema on a first run: a cold vault and a warm one are within a millisecond of each other.
 
 The 53 ms between a line with no phone number and a line with one is `libphonenumber`'s metadata, built once when the first candidate is checked.
 Text with no run of digits that could be a phone number never pays it.
 
-The recognition model changes the shape of the cost as well as its size.
-Roughly 1.1 s goes on constructing a GLiNER from the 348 MB export, once per process, which is why a line with nothing in it still takes over a second.
-On top of that each document is passed through the model: ten small files cost about 500 ms more than one, so around 55 ms each.
+The recognition model changes the shape of the cost, as well as its size.
+Roughly 1.1 s goes on constructing a GLiNER from the 348 MB export, once per process. That is why a line with nothing in it still takes over a second.
+On top of that, each document is passed through the model. Ten small files cost about 500 ms more than one, so around 55 ms each.
 
 ::: {.callout-note}
 
 ## No daemon
 
-The default build is fast enough to be called per tool call, so nothing needs to stay resident and there is no background process to manage, secure, or shut down.
+The default build is fast enough to be called per tool call. So nothing needs to stay resident, and there is no background process to manage, secure, or shut down.
 
-The recognition model is not, at a second a call.
-Use it for runs over files, where a second amortises across the batch, and keep the rule-based default for anything called repeatedly.
+The recognition model is not fast enough for that, at a second a call.
+Use it for runs over files, where a second amortises across the batch. Keep the rule-based default for anything called repeatedly.
 
 :::

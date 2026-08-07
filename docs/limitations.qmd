@@ -17,7 +17,7 @@ The sanitised file is a few seconds' reading, and that reading is part of the wo
 
 ## The model cannot tell a name from a phrase
 
-This is the sharpest limitation, and it is not something a better setting fixes.
+This is the sharpest limitation. No setting fixes it.
 
 Measured on the shipped model:
 
@@ -27,51 +27,51 @@ Measured on the shipped model:
 | `The quick brown fox` | 0.218 |
 
 They are eighteen thousandths apart.
-No threshold separates a real name from an ordinary phrase, so the tool redacts both and expects you to put back what it got wrong.
+No threshold separates a real name from an ordinary phrase. So the tool redacts both, and expects you to put back what it got wrong.
 
 That is why [`oboro review`](reference.qmd#review) exists.
 
 Two consequences follow.
-Ordinary prose sometimes comes back with holes in it, which is a nuisance.
-And a name may still be missed, which is not.
+Ordinary prose sometimes comes back with holes in it. That is a nuisance.
+A name may still be missed. That is not.
 
 ## Context changes what the model sees
 
 The same name scores 0.47 alone and 0.24 once surrounded by a document.
 
 The default threshold is calibrated on whole documents for exactly this reason.
-An earlier version was tuned on single sentences and silently missed a name in a real file, which is the failure this tool exists to prevent.
+An earlier version was tuned on single sentences, and silently missed a name in a real file. That is the failure this tool exists to prevent.
 
 ## Identifiers that fail their own checksum are not found
 
 A mistyped IBAN, a SIREN with a digit dropped, a card number that fails Luhn: none are detected.
 
-The check is what makes the rules trustworthy rather than noisy, so it stays.
+The check is what makes the rules trustworthy, rather than noisy. So it stays.
 Add a [custom pattern](configuration.qmd#patterns) if your documents carry identifiers that do not validate.
 
 ## Some scanned PDFs are still refused
 
 A PDF whose pages are images yields almost no text.
-On a build with `--features ocr` the images on those pages are read instead, which covers what a scanner produces: one image per page.
+On a build with `--features ocr`, Oboro reads the images on those pages instead. This covers what a scanner produces: one image per page.
 
 Three kinds are still refused rather than half read, each naming the page.
 
 Pages whose image uses a codec that cannot be handed to the recogniser.
-Only `DCTDecode`, `JPXDecode` and `CCITTFaxDecode` are read, so `JBIG2Decode` is refused, and so is a `FlateDecode` page image of the kind Ghostscript and other re-encoding pipelines produce.
-A fax image with `/EncodedByteAlign` set is refused for the same reason: it cannot be described to the recogniser, and describing it wrongly would recognise noise.
+Oboro reads only `DCTDecode`, `JPXDecode` and `CCITTFaxDecode`. So it refuses `JBIG2Decode`, and a `FlateDecode` page image of the kind Ghostscript and other re-encoding pipelines produce.
+A fax image with `/EncodedByteAlign` set is refused for the same reason: Oboro cannot describe it to the recogniser, and describing it wrongly would recognise noise.
 
 Pages whose image is wrapped in another filter, such as `[/FlateDecode /DCTDecode]`.
-The stream is stored as the document holds it, so the codec is still under a layer this does not unwrap.
+The stream is stored as the document holds it, so the codec stays under a layer Oboro does not unwrap.
 
 Pages holding no image at all, where the text was drawn as vector shapes.
 Nothing is embedded to recognise, and rasterising the page needs a large external library the tool does not carry.
-A page whose only images are too small to be a scan, such as a rule or a spacer, is refused the same way and says so.
+A page whose only images are too small to be a scan, such as a rule or a spacer, is refused the same way, and says so.
 
 A scan drawn through a form XObject rather than placed on the page directly is found, so that shape is read rather than refused.
 
-Both the decision and the refusal are per page.
-A page short of text is read as a scan whatever the pages around it hold, so a scanned page in an otherwise textual PDF is recognised rather than carried along by the text on the others.
-One unreadable page refuses the whole file rather than dropping out of it silently.
+Both the decision and the refusal happen per page.
+Oboro reads a page short of text as a scan, whatever the pages around it hold. So a scanned page in an otherwise textual PDF is recognised, rather than carried along by the text on the others.
+One unreadable page refuses the whole file, rather than dropping out of it silently.
 
 Two pages are kept rather than refused, both deliberately.
 
@@ -79,106 +79,73 @@ A page carrying a few words and no image, such as a section divider or a continu
 Demanding an image of one would refuse documents that read perfectly well.
 
 A page whose image yields no text.
-A blank page is ordinary in a scan and nothing distinguishes it from a page too faint to read.
-That second one is the gap worth knowing about: a page whose writing is too faint contributes nothing, and the document still comes back as read.
+A blank page is ordinary in a scan, and nothing distinguishes it from a page too faint to read.
+That second case is the gap worth knowing about: a page whose writing is too faint contributes nothing, and the document still comes back as read.
 
 Without `--features ocr` a page short of text is refused, and the error says so.
 
 ## A PDF page can be read short without anything saying so
 
-A page that cannot be processed at all is caught: the extractor stops there, `oboro` notices the document came back shorter than its page count and refuses it, naming the page.
+Oboro catches a page that cannot be processed at all. The extractor stops there. `oboro` notices the document came back shorter than its page count, and refuses it, naming the page.
 
-A page read *incompletely* is not caught, and cannot be.
-The extractor drops text it does not recognise the shape of rather than failing on it: a `Tj` operand that is not a string is skipped, as are surrogate-range code units.
-The page still comes back, just with less on it than it holds, and nothing distinguishes that from a page which really did say less.
+Oboro cannot catch a page read *incompletely*.
+The extractor drops text it does not recognise the shape of, rather than failing on it: it skips a `Tj` operand that is not a string, and surrogate-range code units.
+The page still comes back, just with less on it than it holds. Nothing distinguishes that from a page that really did say less.
 
-The per-page floor catches the worst of it, since a page reduced to almost nothing is then read as a scan.
-A page that loses a line or two stays above the floor and is used as it is, so a value in that line is neither redacted nor reported.
+The per-page floor catches the worst of it: a page reduced to almost nothing is then read as a scan.
+A page that loses a line or two stays above the floor, and is used as it is. So a value in that line is neither redacted nor reported.
 
-This is the one place where output can be short of the input without an error, so a PDF whose text matters is worth reading over before you send it.
+This is the one place where output can fall short of the input without an error. So read over a PDF whose text matters, before you send it.
 
 ## Formats it does not read
 
-Older `.doc`, `.xls` and `.ppt` are not read at all, nor are the OpenDocument
-spreadsheet and presentation formats, `.ods` and `.odp`.
-Neither is anything embedded inside a document: a spreadsheet pasted into a Word file is not reached.
+Oboro does not read older `.doc`, `.xls` and `.ppt`, or the OpenDocument spreadsheet and presentation formats, `.ods` and `.odp`.
+It does not reach anything embedded inside a document either: a spreadsheet pasted into a Word file is not reached.
 
-Structured data is not read either: `.json` and `.yaml`.
-A file with one of those extensions is refused rather than read partially, and
-the message names the formats this build does read.
+Oboro does not read structured data either: `.json` and `.yaml`.
+It refuses a file with one of those extensions, rather than reading it partially, and the message names the formats this build does read.
 
-Inside a `.pptx`, a footer set through PowerPoint's Header and Footer dialog
-is written into the slide master and the layouts rather than the slides
-themselves, so it is not read; a client name or a confidentiality line set
-there once is missed.
-A chart's cached category labels, under `ppt/charts/`, are visible on the
-slide and are not read either.
-`SmartArt` is read, because the `mc:Fallback` inside the slide carries its
-shapes and their runs.
+Inside a `.pptx`, PowerPoint's Header and Footer dialog writes a footer into the slide master and the layouts, not the slides themselves. So Oboro does not read it: a client name or a confidentiality line set there once is missed.
+A chart's cached category labels, under `ppt/charts/`, are visible on the slide, and Oboro does not read them either.
+Oboro reads `SmartArt`, because the `mc:Fallback` inside the slide carries its shapes and their runs.
 
-Inside a `.odt`, an embedded object such as a chart or a spreadsheet is stored
-as its own sub-document in the archive, and only `content.xml` and `styles.xml`
-are read, so an object's text is missed.
-Text that is not part of a paragraph, an annotation's author and date, a
-footnote's marker, an image's alt text, is read but placed on a line of its own
-rather than where it sits in the page.
-That is deliberate: it is what stops such a value concatenating onto the word
-beside it and escaping detection, and it means the output reads less like the
-original than the other formats do.
+Inside a `.odt`, an embedded object such as a chart or a spreadsheet is stored as its own sub-document in the archive. Oboro reads only `content.xml` and `styles.xml`, so it misses an object's text.
+Text that is not part of a paragraph, such as an annotation's author and date, a footnote's marker, or an image's alt text, is read but placed on a line of its own, rather than where it sits on the page.
+That is deliberate. It stops such a value concatenating onto the word beside it and escaping detection. It also means the output reads less like the original than the other formats do.
 
-Inside an `.eml`, an attachment is named but never read.
-Its filename is cleaned like any other text, since a filename often identifies
-a document by itself, but its content is not, so an email carrying a contract
-as a PDF reaches the model as a covering note and a filename.
-An attachment with no filename, which is the shape a meeting invitation takes,
-is named by its type alone.
+Inside an `.eml`, Oboro names an attachment but never reads it.
+It cleans the filename like any other text, since a filename often identifies a document by itself. It does not clean the content. So an email carrying a contract as a PDF reaches the model as a covering note and a filename.
+An attachment with no filename, the shape a meeting invitation takes, is named by its type alone.
 Read the attachment separately if its content matters.
 
-Only the headers a person writes and reads are rendered: `Date`, `From`,
-`Reply-To`, `To`, `Cc`, `Bcc` and `Subject`.
-Everything else is dropped, the routing headers `Received`, `Message-ID`, DKIM
-signatures and `X-*` along with the rest, so an internal hostname or an IP
-address in a `Received` chain never reaches the model, and so does
-`Organization`, which is written by a person and is not envelope at all.
+Oboro renders only the headers a person writes and reads: `Date`, `From`, `Reply-To`, `To`, `Cc`, `Bcc` and `Subject`.
+It drops everything else, including the routing headers `Received` and `Message-ID`, DKIM signatures, and `X-*`. So an internal hostname or an IP address in a `Received` chain never reaches the model.
+`Organization` is dropped too, even though a person writes it and it is not envelope data at all.
 
-An HTML body has every element other than the inline ones put on a line of its
-own, for the same reason a `.odt` does, so an email laid out as a table reads
-as one value per line rather than as the table it was.
-Naming the elements that run on, rather than the ones that break, is what
-keeps an element nobody thought of from welding two values into one that
-matches no rule.
-Two elements written hard against each other are separated even when they are
-inline, since that is how Outlook and Word write a signature block, and text
-either side of an element that runs on is joined, since that is how the same
-clients split a name.
+An HTML body has every element other than the inline ones put on a line of its own, for the same reason a `.odt` does. So an email laid out as a table reads as one value per line, rather than as the table it was.
+Oboro names the elements that run on, rather than the ones that break. That keeps an element nobody thought of from welding two values into one that matches no rule.
+It separates two elements written hard against each other, even when they are inline, since that is how Outlook and Word write a signature block. It joins text either side of an element that runs on, since that is how the same clients split a name.
 
-HTML the flattener cannot follow, an unclosed `<head>` or comment among it, is
-read by stripping its tags instead.
-That recovers the text a strict reading would drop, and it is noisier: what
-was markup can reach the model as words.
+Oboro reads HTML the flattener cannot follow, such as an unclosed `<head>` or a comment among it, by stripping its tags instead.
+That recovers text a strict reading would drop, and it is noisier: what was markup can reach the model as words.
 
-An address written only as a link target survives when the link is `mailto:`
-or `tel:`, quoted or not.
+An address written only as a link target survives when the link is `mailto:` or `tel:`, quoted or not.
 It is lost otherwise, since flattening HTML to text discards attributes.
 
-A forwarded message is followed, up to eight levels deep and up to three when
-the forward is itself base64 or quoted-printable encoded, which is the parser's
-own limit.
-Past either, the forward is named as unread rather than read.
+Oboro follows a forwarded message up to eight levels deep, or up to three levels when the forward is itself base64 or quoted-printable encoded. That is the parser's own limit.
+Past either limit, the forward is named as unread, rather than read.
 
-Charsets are decoded, single-byte and multi-byte alike, so ISO-8859-x,
-windows-125x, Shift-JIS and GB2312 are all read as written.
+Oboro decodes charsets, single-byte and multi-byte alike. So ISO-8859-x, windows-125x, Shift-JIS and GB2312 are all read as written.
 
-`.msg`, which is Outlook's own compound-file container rather than a MIME
-message, and `.mbox`, which holds many messages in one file, are not read.
+Oboro does not read `.msg`, which is Outlook's own compound-file container rather than a MIME message, or `.mbox`, which holds many messages in one file.
 
 ## Recognition accuracy on real scans is not guaranteed
 
-The tests read rendered text at a generous size, for a plain image and for both PDF codecs, and check three things: that none of the planted values survive cleaning, that two of the six rendered lines come back from recognition rather than being lost on the way in, and that the provider name restores.
-That covers the path end to end, not the conditions a real scan arrives in, and two lines out of six is a long way from measuring how much of a page was recognised.
+The tests read rendered text at a generous size, for a plain image and for both PDF codecs. They check three things: that none of the planted values survive cleaning, that two of the six rendered lines come back from recognition rather than being lost on the way in, and that the provider name restores.
+That covers the path end to end, not the conditions a real scan arrives in. Two lines out of six is a long way from measuring how much of a page was recognised.
 
 A photograph taken at an angle, a low resolution fax or a handwritten note is another matter.
-Treat text recovered from images as less reliable than text read directly, and check the output before sharing it.
+Treat text recovered from images as less reliable than text read directly. Check the output before sharing it.
 
 ## The hook does not cover what you type
 
@@ -186,8 +153,8 @@ The hooks clean what a tool hands the model and put values back into what the mo
 What you type yourself is never touched.
 
 This is not an omission to be fixed later.
-The event that fires on a prompt, `UserPromptSubmit`, can add context to a prompt; it cannot rewrite the prompt.
-There is nowhere for Oboro to stand between your keyboard and the model, so a value pasted into the chat reaches the model as you typed it.
+The event that fires on a prompt, `UserPromptSubmit`, can add context to a prompt. It cannot rewrite the prompt.
+There is nowhere for Oboro to stand between your keyboard and the model. So a value pasted into the chat reaches the model exactly as you typed it.
 
 File content and command output are covered.
 Your own words are not, in any tool, by any configuration.
@@ -197,9 +164,9 @@ Paste a document rather than retyping its contents, and the hook covers it.
 ## The plugin does not run on native Windows
 
 `hooks/oboro-hook.sh`, which the Claude Code plugin installs, is a Bash script.
-Native Windows has no Bash, so `/plugin install oboro@oboro` there wires up a hook that cannot run.
+Native Windows has no Bash. So `/plugin install oboro@oboro` there wires up a hook that cannot run.
 
-`oboro hook install` does not have this problem: it writes a command string into `settings.json` rather than a script, so it is the way in on native Windows.
+`oboro hook install` does not have this problem: it writes a command string into `settings.json`, rather than a script. So it is the way in on native Windows.
 Use it, and `oboro skill install`, in place of the plugin there.
 
 ## The MCP server is reach, not protection
@@ -207,38 +174,38 @@ Use it, and `oboro skill install`, in place of the plugin there.
 The hook and `oboro mcp` look like two ways of doing one thing.
 They are not, and the difference is the whole of what each is worth.
 
-A hook fires on every matching tool call and the agent cannot route around it.
-The MCP server cannot make that claim: it offers the agent a tool, and the agent must choose that tool over simply reading the file.
+A hook fires on every matching tool call, and the agent cannot route around it.
+The MCP server cannot make that claim. It offers the agent a tool, and the agent must choose that tool over simply reading the file.
 It will not do so reliably, whatever the tool description says.
 
 What the server buys is reach.
-Cursor, Codex and Claude Desktop have no hook system, so without it Oboro cannot reach them at all.
-Use the hook where you can have one, and read `oboro mcp` as a way of offering the agent a better option rather than as a way of removing the worse one.
+Cursor, Codex and Claude Desktop have no hook system. Without the server, Oboro cannot reach them at all.
+Use the hook where you can have one. Read `oboro mcp` as a way of offering the agent a better option, not as a way of removing the worse one.
 
 ### Cleaning is not confinement
 
-`oboro mcp` will not start until you have said what it may read, with `--root` or with `--unconfined`, so the whole disk is never the default.
+`oboro mcp` will not start until you say what it may read, with `--root` or with `--unconfined`. So the whole disk is never the default.
 Within a root, though, cleaning and confinement are different things.
 
 The detectors find names, addresses, telephone numbers, email addresses and checksummed identifiers.
-Passwords, API keys, access tokens and private keys are none of those, and they pass through into the model's context exactly as written.
-A `.env` file inside a root is read and handed over with its secrets intact.
+Passwords, API keys, access tokens and private keys are none of those. They pass through into the model's context exactly as written.
+A `.env` file inside a root is read, and handed over with its secrets intact.
 
 A root bounds paths, and a file can have more than one.
-A hard link inside a root to a file outside it is read, because to the filesystem there is no outside: both names are the file.
-A symbolic link is different and is refused, since roots are resolved before they are compared.
+Oboro reads a hard link inside a root to a file outside it, because to the filesystem there is no outside: both names are the file.
+A symbolic link is different. Oboro refuses it, since it resolves roots before comparing them.
 
 So a root is a boundary on which files can be reached, not a promise about what is in them.
-Keep them as narrow as the work allows, and remember that for a client with no file access of its own, Claude Desktop being the one that matters, this server is the read capability it did not otherwise have.
+Keep roots as narrow as the work allows. For a client with no file access of its own, Claude Desktop being the one that matters, remember that this server is the read capability it did not otherwise have.
 
 ### Restoring is not offered, and its absence is not protection
 
 There is no `restore` tool, deliberately.
-Over this protocol the caller is the model, and a model that can write a file of placeholders and read it back afterwards would use a restore tool to obtain every value the vault holds.
+Over this protocol, the caller is the model. A model that can write a file of placeholders and read it back afterwards would use a restore tool to obtain every value the vault holds.
 
 That absence closes the route the server would otherwise have opened.
 It does not close the vault.
-In any client with a shell, which is Cursor, Codex and Claude Code, the model can run `oboro restore --stdout` or `oboro map list --reveal` itself, and no MCP server is involved in that at all.
+In any client with a shell, such as Cursor, Codex and Claude Code, the model can run `oboro restore --stdout` or `oboro map list --reveal` itself. No MCP server is involved in that at all.
 Restoring is a command-line action because it should be yours, not because the vault is sealed against a model that can run commands.
 
 ### Error detail goes to the client's log
@@ -246,35 +213,36 @@ Restoring is a command-line action because it should be yours, not because the v
 Failures are reported to the model as fixed messages.
 The reason behind them goes to standard error, which the client keeps in a log.
 
-That log is worth knowing about, and it is not a second way out for your data: a model able to read the log could read the document itself, and a log file's extension is not one Oboro reads, so `clean` cannot be pointed at one to fetch it.
+That log is worth knowing about. It is not a second way out for your data: a model able to read the log could read the document itself. A log file's extension is not one Oboro reads, so you cannot point `clean` at one to fetch it.
 
 ## What redaction does not hide
 
 Replacing a name with `[[PERSON_1]]` removes the name.
 It does not remove the shape of the story around it.
 
-A document describing a dispute with a named supplier in a named town in a named month may identify everyone involved even with every name replaced.
-Structured identifiers are the part this tool can handle; inference from context is not, and no placeholder scheme solves it.
+A document describing a dispute with a named supplier in a named town in a named month may identify everyone involved, even with every name replaced.
+Structured identifiers are the part this tool can handle. Inference from context is not, and no placeholder scheme solves it.
 
 ## Languages
 
-Detection does not depend on the document's language, and you never declare one.
+Detection does not depend on the document's language. You never declare one.
 Structured identifiers such as emails, IBANs, payment cards and IP addresses are matched by format, so they work in any language.
-The recognition model is multilingual and reads the whole document in one pass, so a file that mixes languages, for example French and English names side by side, is handled at once with no per-language setting.
+The recognition model is multilingual, and reads the whole document in one pass. So a file that mixes languages, for example French and English names side by side, is handled at once, with no per-language setting.
 
 Street addresses are matched by shape too, in the three word orders languages use: the type before the name (`12 rue de la Paix`, `3 via Roma`), after it (`10 Downing Street`), or welded onto it (`Hauptstraße 5`).
 An address whose street type is not in that vocabulary is left to the recognition model or to your denylist.
 
 Two gaps in the postcode patterns are worth knowing.
 
-A postcode of four bare digits followed by a place name, as in Belgium, Switzerland, Austria and Scandinavia, is deliberately not matched: it cannot be told apart from `2024 January`, and matching it would put a hole in every document that mentions a year.
-Those addresses are still caught when the street line is, and the postcode alone is rarely identifying.
+Oboro deliberately does not match a postcode of four bare digits followed by a place name, as in Belgium, Switzerland, Austria and Scandinavia: it cannot be told apart from `2024 January`, and matching it would put a hole in every document that mentions a year.
+Those addresses are still caught when the street line is. The postcode alone is rarely identifying.
 
 Five-digit, British, Canadian, Dutch and American postcodes are matched.
 Anything else is not.
 
 Two settings exist as hints, and neither is required.
-[`regions`](configuration.qmd#regions) widens which national phone number formats are read, and a number in international `+` form is read whatever it holds.
-[`ocr_languages`](configuration.qmd#ocr_languages) names what an image is written in, and left unset the installed trained data is used.
+[`regions`](configuration.qmd#regions) widens which national phone number formats are read. A number in international `+` form is read whatever it holds.
+[`ocr_languages`](configuration.qmd#ocr_languages) names what an image is written in. Left unset, Oboro uses the installed trained data.
 
 The tool has been exercised mostly on French and English, though nothing in it is limited to those two.
+</content>
