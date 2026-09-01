@@ -15,7 +15,7 @@
 
 # Pinned by digest so a registry-side tag repoint cannot change what the binary
 # is built from. Dependabot bumps the digest when the tag moves.
-FROM rust:1-alpine@sha256:3c38f3f82c2f3d73da3b38e18d279393a04cb43ddded0e35088a8c3324d40900 AS build
+FROM rust:1-alpine@sha256:a10e64dd139b7387337c7fbe8aca31b959b57b2fd4c8ae20a02cf1d6ea424dce AS build
 
 # musl-dev and the C toolchain are for rusqlite, which vendors SQLite's C
 # sources through its `bundled` feature. Nothing else in the default build
@@ -47,7 +47,7 @@ RUN touch src/main.rs src/lib.rs \
 RUN mkdir -p /seed-vault
 
 # Pinned by digest for the same reason as the build stage.
-FROM gcr.io/distroless/static-debian12:nonroot@sha256:f5b485ea962d9bd1186b2f6b3a061191539b905b82ec395de78cbfae51f20e35
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
 
 COPY --from=build /src/target/release/oboro /usr/local/bin/oboro
 COPY --from=build --chown=nonroot:nonroot /seed-vault /vault
