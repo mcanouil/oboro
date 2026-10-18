@@ -6,7 +6,7 @@
 curl -fsSL https://m.canouil.dev/oboro/install.sh | bash
 
 # or pin this exact release
-curl -fsSL https://m.canouil.dev/oboro/install.sh | bash -s -- --version %%VERSION%%
+curl -fsSL https://m.canouil.dev/oboro/install.sh | bash -s -- --version {version}
 ```
 
 The script picks the archive for your machine and verifies it against `SHA256SUMS`. It installs into `/usr/local/bin` when that is writable, otherwise into `~/.local/bin`.
@@ -15,7 +15,7 @@ It needs `bash` and `curl`. On a minimal distribution such as Alpine, install th
 Add `--features ner` for the build that also detects names not on any list (on Linux it needs glibc 2.39+). Then fetch its model:
 
 ```bash
-curl -fsSL https://m.canouil.dev/oboro/install.sh | bash -s -- --version %%VERSION%% --features ner
+curl -fsSL https://m.canouil.dev/oboro/install.sh | bash -s -- --version {version} --features ner
 oboro models pull   # about 348 MB, once, verified against pinned hashes
 ```
 
@@ -27,19 +27,19 @@ docker run --rm \
   -v oboro-vault:/vault \
   -v "$PWD":/work -w /work \
   --user "$(id -u):$(id -g)" \
-  ghcr.io/mcanouil/oboro:%%VERSION%% clean contract.docx
+  ghcr.io/mcanouil/oboro:{version} clean contract.docx
 ```
 
 The vault volume is not optional. Without it, the mapping between placeholders and real values disappears with the container. The document can never be restored.
 
-The `ghcr.io/mcanouil/oboro:%%VERSION%%-ner` tag carries the ner build with the recognition model already inside the image. It finds names with no download and no network at run time.
+The `ghcr.io/mcanouil/oboro:{version}-ner` tag carries the ner build with the recognition model already inside the image. It finds names with no download and no network at run time.
 
 ### A prebuilt binary
 
 Pick the archive for your machine from the table below, then:
 
 ```bash
-VERSION=%%VERSION%%
+VERSION={version}
 TARGET=x86_64-unknown-linux-musl   # or whichever row matches
 
 curl -fsSLO "https://github.com/mcanouil/oboro/releases/download/${VERSION}/oboro-${VERSION}-${TARGET}.tar.gz"
@@ -57,7 +57,7 @@ On macOS, `shasum -a 256 --ignore-missing --check SHA256SUMS` does the same job.
 ### With Rust already installed
 
 ```bash
-cargo install --git https://github.com/mcanouil/oboro --tag %%VERSION%%
+cargo install --git https://github.com/mcanouil/oboro --tag {version}
 ```
 
 ### From source, with the optional features
@@ -65,7 +65,7 @@ cargo install --git https://github.com/mcanouil/oboro --tag %%VERSION%%
 The default binaries read `.txt`, `.md`, `.docx`, `.xlsx` and text-based `.pdf`. They find structured values and anything on your denylist.
 They do **not** find names you have not listed, and they do not read images.
 
-For names, use a `-ner` archive from the table below (then run `oboro models pull`), the `:%%VERSION%%-ner` image, or a source build.
+For names, use a `-ner` archive from the table below (then run `oboro models pull`), the `:{version}-ner` image, or a source build.
 Images need the Tesseract system libraries, so reading them stays a source build:
 
 ```bash
@@ -91,7 +91,7 @@ In Visual Studio Code or a GitHub Codespace, reopen the folder in the container 
 Beyond the checksum, every archive carries build provenance. Use it to confirm the archive came from this repository's workflow, not from somewhere else:
 
 ```bash
-gh attestation verify "oboro-%%VERSION%%-x86_64-unknown-linux-musl.tar.gz" \
+gh attestation verify "oboro-{version}-x86_64-unknown-linux-musl.tar.gz" \
   --repo mcanouil/oboro
 ```
 

@@ -75,136 +75,56 @@ jobs:
       contents: write
       pull-requests: write
 
-    env:
-      BRANCH: ci/bump-version
-      BUMP: ${{ inputs.version }}
-
     outputs:
       version: ${{ steps.bump.outputs.version }}
-      release_date: ${{ steps.bump.outputs.release_date }}
-      pr_url: ${{ steps.bump.outputs.pr_url }}
-      commit_sha: ${{ steps.bump.outputs.commit_sha }}
+      commit_sha: ${{ steps.land.outputs.sha }}
 
     steps:
-      - name: Create GitHub App token
-        id: app-token
-        uses: actions/create-github-app-token@v3
+      - name: Get the token
+        id: token
+        uses: mcanouil/release-actions/token@v1
         with:
-          client-id: ${{ vars.APP_ID }}
-          private-key: ${{ secrets.APP_KEY }}
+          app-id: ${{ vars.APP_ID }}
+          app-key: ${{ secrets.APP_KEY }}
 
       - name: Checkout repository
         uses: actions/checkout@v7
         with:
-          token: ${{ steps.app-token.outputs.token }}
+          token: ${{ steps.token.outputs.token }}
 
-      - name: Set up Git user
-        id: setup-git
-        uses: ./.github/actions/setup-git-user
-        with:
-          token: ${{ steps.app-token.outputs.token }}
-          app-slug: ${{ steps.app-token.outputs.app-slug }}
-          gh-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Compute next version and update sources
+      # The plugin pins itself to its version string, so a user is only
+      # offered an update when it changes. The lock file follows the bump, or
+      # the released tag builds a version that disagrees with its own manifest.
+      - name: Bump the version
         id: bump
-        env:
-          GH_TOKEN: ${{ steps.setup-git.outputs.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          CURRENT=$(grep -E '^version[[:space:]]*=' Cargo.toml | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/')
-          IFS='.' read -r MAJOR MINOR PATCH <<< "${CURRENT}"
-          case "${BUMP}" in
-            major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
-            minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
-            patch) PATCH=$((PATCH + 1)) ;;
-            *) echo "::error::Unknown bump: ${BUMP}"; exit 1 ;;
-          esac
-          VERSION="${MAJOR}.${MINOR}.${PATCH}"
-          DATE=$(date -u +%Y-%m-%d)
+        uses: mcanouil/release-actions/bump@v1
+        with:
+          bump: ${{ inputs.version }}
+          token: ${{ steps.token.outputs.token }}
+          targets: |
+            - file: Cargo.toml
+              pattern: '^version = "{version}"$'
+              source: true
+            - file: CITATION.cff
+              pattern: '^version: {version}$'
+            - file: CITATION.cff
+              pattern: '^date-released: "{date}"$'
+            - file: .claude-plugin/plugin.json
+              pattern: '^  "version": "{version}",$'
+          after-bump: cargo update --workspace --quiet
 
-          if git show-ref --quiet "refs/heads/${BRANCH}"; then
-            git branch -D "${BRANCH}"
-          fi
-          if git ls-remote --exit-code --heads origin "${BRANCH}" >/dev/null 2>&1; then
-            git push origin --delete "${BRANCH}"
-          fi
-          git checkout -b "${BRANCH}"
-
-          sed -E -i '0,/^version[[:space:]]*=/s/^(version[[:space:]]*=[[:space:]]*")[^"]+/\1'"${VERSION}"'/' Cargo.toml
-          sed -E -i 's/^(version:[[:space:]]*).*/\1'"${VERSION}"'/' CITATION.cff
-          sed -E -i 's/^(date-released:[[:space:]]*).*/\1"'"${DATE}"'"/' CITATION.cff
-          sed -i "s/^## \[Unreleased\]/## ${VERSION} (${DATE})/" CHANGELOG.md
-
-          # The plugin pins itself to this string, so a user is only offered an
-          # update when it changes; left behind, it would offer them the
-          # release before this one.
-          sed -E -i '0,/^  "version"/s/^(  "version":[[:space:]]*")[^"]+/\1'"${VERSION}"'/' .claude-plugin/plugin.json
-
-          # Keep the lockfile in step, or the released tag builds a version that
-          # disagrees with its own manifest.
-          cargo update --workspace --quiet
-
-          git add Cargo.toml Cargo.lock CITATION.cff CHANGELOG.md .claude-plugin/plugin.json
-          git commit -m "ci: bump version to ${VERSION} :rocket:" -m "[skip ci]"
-          git push --force origin "${BRANCH}"
-
-          sleep 5
-          PR_URL=$(gh pr create \
-            --fill-first \
-            --base "${GITHUB_REF_NAME}" \
-            --head "${BRANCH}" \
-            --label "Type: CI/CD :robot:")
-          sleep 5
-          merged=false
-          for attempt in {1..10}; do
-            if gh pr merge --squash --delete-branch "${BRANCH}"; then
-              merged=true
-              break
-            fi
-            echo "Bump PR not mergeable yet (attempt ${attempt}/10); retrying in 6s..."
-            sleep 6
-          done
-          if [ "${merged}" != "true" ]; then
-            echo "::error::Failed to merge bump PR ${PR_URL}."
-            exit 1
-          fi
-
-          COMMIT_SHA=""
-          for attempt in {1..10}; do
-            COMMIT_SHA=$(gh pr view "${PR_URL}" --json mergeCommit --jq '.mergeCommit.oid // empty')
-            [ -n "${COMMIT_SHA}" ] && break
-            echo "Merge commit not available yet (attempt ${attempt}/10); retrying in 3s..."
-            sleep 3
-          done
-          if [ -z "${COMMIT_SHA}" ]; then
-            echo "::error::Could not resolve merge commit for ${PR_URL}."
-            exit 1
-          fi
-
-          {
-            echo "version=${VERSION}"
-            echo "release_date=${DATE}"
-            echo "commit_sha=${COMMIT_SHA}"
-            echo "pr_url=${PR_URL}"
-          } >> "${GITHUB_OUTPUT}"
-
-      - name: Summary
-        env:
-          VERSION: ${{ steps.bump.outputs.version }}
-          DATE: ${{ steps.bump.outputs.release_date }}
-          PR_URL: ${{ steps.bump.outputs.pr_url }}
-          COMMIT_SHA: ${{ steps.bump.outputs.commit_sha }}
-        run: |
-          {
-            echo "## Version bump"
-            echo ""
-            echo "- Version: \`${VERSION}\`"
-            echo "- Release date: \`${DATE}\`"
-            echo "- Bump commit: \`${COMMIT_SHA}\`"
-            echo "- PR: ${PR_URL}"
-          } >> "${GITHUB_STEP_SUMMARY}"
+      # Skip CI on the squash-merged bump: the validate job already tests and
+      # lints the tree before the release.
+      - name: Land the bump
+        id: land
+        uses: mcanouil/release-actions/land@v1
+        with:
+          mode: pull-request
+          files: ${{ steps.bump.outputs.files }}
+          version: ${{ steps.bump.outputs.version }}
+          message: "ci: bump version to ${{ steps.bump.outputs.version }} :rocket: [skip ci]"
+          branch: ci/bump-version
+          token: ${{ steps.token.outputs.token }}
 
   build-binaries:
     name: Build ${{ matrix.target }}${{ matrix.suffix }}
@@ -367,51 +287,17 @@ jobs:
       COMMIT_SHA: ${{ needs.bump-version.outputs.commit_sha }}
 
     steps:
-      - name: Create GitHub App token
-        id: app-token
-        uses: actions/create-github-app-token@v3
+      - name: Get the token
+        id: token
+        uses: mcanouil/release-actions/token@v1
         with:
-          client-id: ${{ vars.APP_ID }}
-          private-key: ${{ secrets.APP_KEY }}
+          app-id: ${{ vars.APP_ID }}
+          app-key: ${{ secrets.APP_KEY }}
 
       - name: Checkout the bump commit
         uses: actions/checkout@v7
         with:
           ref: ${{ needs.bump-version.outputs.commit_sha }}
-          fetch-depth: 0
-          token: ${{ steps.app-token.outputs.token }}
-
-      - name: Set up Git user
-        id: git-user
-        uses: ./.github/actions/setup-git-user
-        with:
-          token: ${{ steps.app-token.outputs.token }}
-          app-slug: ${{ steps.app-token.outputs.app-slug }}
-          gh-token: ${{ secrets.GITHUB_TOKEN }}
-
-      # The changelog says what changed; on its own it never says how to get
-      # the thing. The template carries the install and verification steps,
-      # and lives outside the workflow so the prose can be edited without
-      # touching CI.
-      - name: Assemble the release notes
-        shell: bash
-        run: |
-          set -euo pipefail
-          NOTES="RELEASE-${VERSION}.md"
-          sed "s/%%VERSION%%/${VERSION}/g" .github/release-notes.md > "${NOTES}"
-
-          HEADING="## ${VERSION}"
-          awk -v heading="${HEADING}" '
-            index($0, heading) == 1 { flag = 1; next }
-            /^## / && flag { flag = 0 }
-            flag
-          ' CHANGELOG.md | sed '/./,$!d' > "changes.md"
-          if [ ! -s "changes.md" ]; then
-            echo "::error::No release notes found for ${HEADING} in CHANGELOG.md."
-            exit 1
-          fi
-          cat "changes.md" >> "${NOTES}"
-          echo "NOTES_FILE=${NOTES}" >> "${GITHUB_ENV}"
 
       - name: Download binaries
         uses: actions/download-artifact@v8
@@ -427,52 +313,32 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sha256sum *.tar.gz *.zip > SHA256SUMS
+          sha256sum -- *.tar.gz *.zip > SHA256SUMS
           cat SHA256SUMS
 
+      # The changelog says what changed; on its own it never says how to get
+      # the thing. The template carries the install and verification steps,
+      # and lives outside the workflow so the prose can be edited without
+      # touching CI.
+      - name: Compose the release body
+        id: notes
+        uses: mcanouil/release-actions/notes@v1
+        with:
+          version: ${{ env.VERSION }}
+          header: .github/release-notes.md
+          section-heading: ""
+
       - name: Create GitHub Release
-        env:
-          GH_TOKEN: ${{ steps.git-user.outputs.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          gh release create "${VERSION}" \
-            release_assets/*.tar.gz \
-            release_assets/*.zip \
-            release_assets/SHA256SUMS \
-            --title "${VERSION}" \
-            --notes-file "${NOTES_FILE}" \
-            --target "${COMMIT_SHA}"
-
-      - name: Restore the Unreleased heading
-        env:
-          GH_TOKEN: ${{ steps.git-user.outputs.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          # The next change needs somewhere to go, so put the heading back
-          # rather than making the first contributor after a release add it.
-          if grep -q '^## \[Unreleased\]' CHANGELOG.md; then
-            echo "Unreleased heading already present."
-            exit 0
-          fi
-          sed -i "0,/^## ${VERSION}/s//## [Unreleased]\n\n## ${VERSION}/" CHANGELOG.md
-          git add CHANGELOG.md
-          git commit -m "ci: reopen the changelog for the next version" -m "[skip ci]"
-          # HEAD is detached at the bump commit (the current main tip), so name
-          # the destination branch explicitly rather than pushing a local main.
-          git push origin HEAD:main
-
-      - name: Summary
-        env:
-          PAGE: https://github.com/${{ github.repository }}/releases/tag/${{ env.VERSION }}
-        run: |
-          {
-            echo "## Release"
-            echo ""
-            echo "- Version: \`${VERSION}\`"
-            echo "- Release: ${PAGE}"
-          } >> "${GITHUB_STEP_SUMMARY}"
+        uses: mcanouil/release-actions/release@v1
+        with:
+          version: ${{ env.VERSION }}
+          body-file: ${{ steps.notes.outputs.body-file }}
+          target: ${{ env.COMMIT_SHA }}
+          assets: |
+            release_assets/*.tar.gz
+            release_assets/*.zip
+            release_assets/SHA256SUMS
+          token: ${{ steps.token.outputs.token }}
 
   pages:
     name: Deploy documentation
