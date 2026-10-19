@@ -79,29 +79,27 @@ impl Workspace {
     }
 
     /// A `oboro` invocation for the tests that look for completion scripts.
+    pub fn completions_command(&self) -> Command {
+        let mut command = self.std_command("fr_FR.UTF-8");
+        self.isolate_completions(&mut command);
+        Command::from_std(command)
+    }
+
+    /// Keeps the temporary home the only place `command` can find or write a
+    /// completion script, so the developer's own machine cannot decide the
+    /// result.
     ///
     /// The conventional destinations are resolved against the home directory
     /// unless one of these variables names somewhere else, and a developer with
-    /// oh-my-zsh or an XDG layout of their own has them set. Clearing them is
-    /// what keeps the temporary home the only place these tests can find a
-    /// script, so their own machine cannot decide the result.
-    ///
-    /// Homebrew is found without a variable, by looking in `/opt/homebrew` and
-    /// `/usr/local`, so it is pointed at a prefix with no completions directory
-    /// instead of cleared.
-    pub fn completions_command(&self) -> Command {
-        let mut command = self.command();
+    /// oh-my-zsh or an XDG layout of their own has them set. Homebrew is also
+    /// found without a variable, in `/opt/homebrew` or `/usr/local`, so it is
+    /// pointed at a prefix that does not exist rather than cleared.
+    pub fn isolate_completions(&self, command: &mut std::process::Command) {
         command
             .env_remove("XDG_DATA_HOME")
             .env_remove("XDG_CONFIG_HOME")
             .env_remove("ZSH_CUSTOM")
-            .env("HOMEBREW_PREFIX", self.no_homebrew());
-        command
-    }
-
-    /// A Homebrew prefix that does not exist, so no Homebrew is found.
-    pub fn no_homebrew(&self) -> PathBuf {
-        self.dir.path().join("no-homebrew")
+            .env("HOMEBREW_PREFIX", self.dir.path().join("no-homebrew"));
     }
 
     /// The same invocation as [`Workspace::command_in_locale`], as a plain
