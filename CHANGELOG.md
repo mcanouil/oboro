@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- chore: Make a maintenance release with no change for users. The release and the documentation now run on the shared workflows, and builds use Rust 1.99.1. (#126)
+
 ## 0.8.2 (2026-08-07)
 
 - docs: Rewrite documentation prose in plain, direct sentences.
