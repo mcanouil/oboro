@@ -213,14 +213,14 @@ mod tests {
 
     #[test]
     fn an_entity_that_is_not_in_the_text_yields_nothing() {
-        assert!(locate("nothing here", "Jean Dupont", (0, 11)).is_empty());
-        assert!(locate("text", "", (0, 0)).is_empty());
+        assert_eq!(locate("nothing here", "Jean Dupont", (0, 11)), Vec::new());
+        assert_eq!(locate("text", "", (0, 0)), Vec::new());
     }
 
     #[test]
     fn offsets_past_the_end_do_not_panic() {
         let text = "short";
-        assert!(locate(text, "Jean", (100, 200)).is_empty());
+        assert_eq!(locate(text, "Jean", (100, 200)), Vec::new());
     }
 
     #[test]
@@ -320,7 +320,7 @@ mod calibration {
         let spans = recogniser
             .detect("Thomas Bernard reprend le dossier Valmont Industries.")
             .expect("detecting");
-        assert!(!spans.is_empty());
+        assert_ne!(spans, Vec::new());
         for span in &spans {
             assert!(
                 span.confidence > 0.0 && span.confidence < 1.0,

@@ -11,6 +11,7 @@
 
 mod support;
 
+#[cfg(unix)]
 use std::path::{Path, PathBuf};
 
 use predicates::prelude::*;
@@ -18,16 +19,15 @@ use support::Workspace;
 
 /// A private copy of the built binary, inside `workspace`, safe to let an
 /// uninstall delete.
+#[cfg(unix)]
 fn private_binary(workspace: &Workspace) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
     let original = assert_cmd::cargo::cargo_bin("oboro");
     let copy = workspace.path().join("oboro-under-test");
     std::fs::copy(&original, &copy).expect("copying the binary for a destructive test");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&copy, std::fs::Permissions::from_mode(0o755))
-            .expect("making the copy executable");
-    }
+    std::fs::set_permissions(&copy, std::fs::Permissions::from_mode(0o755))
+        .expect("making the copy executable");
     copy
 }
 
@@ -39,6 +39,7 @@ fn private_binary(workspace: &Workspace) -> PathBuf {
 /// that is a property of the disk under this test rather than of `oboro
 /// uninstall` itself; retrying the spawn is the ordinary answer, not a
 /// sleep before it that would only narrow the window.
+#[cfg(unix)]
 fn run_private_binary(command: &mut std::process::Command) -> std::process::Output {
     for attempt in 0..10 {
         match command.output() {
@@ -56,6 +57,7 @@ fn run_private_binary(command: &mut std::process::Command) -> std::process::Outp
 /// [`Workspace::command`] and [`Workspace::completions_command`] are: a
 /// temporary home, a vault outside it, and no ambient XDG variable left over
 /// from the developer's own shell to decide where a completion script goes.
+#[cfg(unix)]
 fn uninstall_command(binary: &Path, workspace: &Workspace) -> std::process::Command {
     let mut command = std::process::Command::new(binary);
     command
@@ -77,6 +79,7 @@ fn uninstall_command(binary: &Path, workspace: &Workspace) -> std::process::Comm
 /// both branches `oboro uninstall` sweeps: the wholesale directory removal
 /// under `~/.oboro`, and the explicit removal of a vault `--vault` or
 /// `OBORO_VAULT` points elsewhere.
+#[cfg(unix)]
 fn install_everything(workspace: &Workspace) {
     for scope in ["--project", "--user"] {
         workspace

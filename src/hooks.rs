@@ -704,7 +704,7 @@ mod tests {
     fn settings_without_hooks_report_nothing() {
         let settings: serde_json::Value =
             serde_json::from_str(r#"{"model": "opus", "hooks": {}}"#).expect("valid JSON");
-        assert!(commands_for(&settings, "PostToolUse").is_empty());
+        assert_eq!(commands_for(&settings, "PostToolUse"), Vec::new());
     }
 
     /// The post hook must not be reported as the pre hook, or a user missing

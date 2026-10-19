@@ -375,8 +375,8 @@ mod tests {
     #[test]
     fn missing_configuration_yields_defaults() {
         let config = Config::load(None).expect("defaults must load");
-        assert!(config.allowlist.is_empty());
-        assert!(config.ocr_languages.is_empty());
+        assert_eq!(config.allowlist, Vec::<String>::new());
+        assert_eq!(config.ocr_languages, Vec::<String>::new());
         assert!(config.ner_enabled);
     }
 
@@ -397,7 +397,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("temporary directory");
         let path = write(dir.path(), "regions = []\n");
         let config = Config::load(Some(&path)).expect("configuration must load");
-        assert!(config.regions.is_empty());
+        assert_eq!(config.regions, Vec::new());
         assert_eq!(config.regions_source, RegionSource::Configured);
     }
 
