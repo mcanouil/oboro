@@ -55,8 +55,9 @@ fn run_private_binary(command: &mut std::process::Command) -> std::process::Outp
 
 /// An invocation of `binary`, wired to `workspace` the same way
 /// [`Workspace::command`] and [`Workspace::completions_command`] are: a
-/// temporary home, a vault outside it, and no ambient XDG variable left over
-/// from the developer's own shell to decide where a completion script goes.
+/// temporary home, a vault outside it, and no ambient XDG variable or Homebrew
+/// prefix left over from the developer's machine to decide where a completion
+/// script goes.
 #[cfg(unix)]
 fn uninstall_command(binary: &Path, workspace: &Workspace) -> std::process::Command {
     let mut command = std::process::Command::new(binary);
@@ -69,7 +70,8 @@ fn uninstall_command(binary: &Path, workspace: &Workspace) -> std::process::Comm
         .env("OBORO_KEY_FILE", workspace.path().join("key"))
         .env_remove("XDG_DATA_HOME")
         .env_remove("XDG_CONFIG_HOME")
-        .env_remove("ZSH_CUSTOM");
+        .env_remove("ZSH_CUSTOM")
+        .env("HOMEBREW_PREFIX", workspace.no_homebrew());
     command
 }
 

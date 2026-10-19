@@ -85,13 +85,23 @@ impl Workspace {
     /// oh-my-zsh or an XDG layout of their own has them set. Clearing them is
     /// what keeps the temporary home the only place these tests can find a
     /// script, so their own machine cannot decide the result.
+    ///
+    /// Homebrew is found without a variable, by looking in `/opt/homebrew` and
+    /// `/usr/local`, so it is pointed at a prefix with no completions directory
+    /// instead of cleared.
     pub fn completions_command(&self) -> Command {
         let mut command = self.command();
         command
             .env_remove("XDG_DATA_HOME")
             .env_remove("XDG_CONFIG_HOME")
-            .env_remove("ZSH_CUSTOM");
+            .env_remove("ZSH_CUSTOM")
+            .env("HOMEBREW_PREFIX", self.no_homebrew());
         command
+    }
+
+    /// A Homebrew prefix that does not exist, so no Homebrew is found.
+    pub fn no_homebrew(&self) -> PathBuf {
+        self.dir.path().join("no-homebrew")
     }
 
     /// The same invocation as [`Workspace::command_in_locale`], as a plain
