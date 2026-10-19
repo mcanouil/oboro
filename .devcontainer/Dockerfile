@@ -17,12 +17,13 @@ RUN apt-get update \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/*
 
-# The base image lags behind current stable, which is older than the
-# rust-version this crate declares. Updating here means the container can
-# actually build the project rather than failing on the edition.
+# The toolchain comes from rust-toolchain.toml, the same file CI and the
+# release images read, so the container builds with the pinned compiler
+# rather than whatever the base image ships.
 USER vscode
-RUN rustup update stable \
-  && rustup default stable \
-  && rustup component add clippy rustfmt \
+COPY rust-toolchain.toml /tmp/toolchain/
+RUN cd /tmp/toolchain \
+  && rustup toolchain install \
+  && rustup default "$(rustup show active-toolchain | cut -d" " -f1)" \
   && cargo install cargo-nextest --locked
 USER root

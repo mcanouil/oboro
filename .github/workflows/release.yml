@@ -45,9 +45,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
 
       - uses: Swatinem/rust-cache@v2.9.2
 
@@ -186,10 +185,12 @@ jobs:
         with:
           ref: ${{ needs.bump-version.outputs.commit_sha }}
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Install the pinned toolchain
         if: ${{ !endsWith(matrix.target, '-musl') }}
-        with:
-          targets: ${{ matrix.target }}
+        shell: bash
+        run: |
+          rustup toolchain install
+          rustup target add ${{ matrix.target }}
 
       # The cache action does not key on cargo features, so without an
       # explicit key the default and ner jobs sharing a target would fight

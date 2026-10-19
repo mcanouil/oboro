@@ -53,9 +53,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.0
 
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
 
       - uses: Swatinem/rust-cache@v2.9.2
 
@@ -86,9 +85,8 @@ jobs:
             clang libclang-dev libleptonica-dev libtesseract-dev \
             tesseract-ocr tesseract-ocr-eng tesseract-ocr-fra
 
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
 
       - uses: Swatinem/rust-cache@v2.9.2
 
@@ -106,9 +104,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.0
 
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
 
       - uses: Swatinem/rust-cache@v2.9.2
 
