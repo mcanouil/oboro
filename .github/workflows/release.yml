@@ -100,17 +100,10 @@ jobs:
         with:
           bump: ${{ inputs.version }}
           token: ${{ steps.token.outputs.token }}
+          ecosystems: cargo, citation
           targets: |
-            - file: Cargo.toml
-              pattern: '^version = "{version}"$'
-              source: true
-            - file: CITATION.cff
-              pattern: '^version: {version}$'
-            - file: CITATION.cff
-              pattern: '^date-released: "{date}"$'
             - file: .claude-plugin/plugin.json
               pattern: '^  "version": "{version}",$'
-          after-bump: cargo update --workspace --quiet
 
       # Skip CI on the squash-merged bump: the validate job already tests and
       # lints the tree before the release.
