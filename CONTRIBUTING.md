@@ -24,7 +24,7 @@ In Visual Studio Code, reopen the folder in the container when prompted.
 Otherwise use the image directly:
 
 ```bash
-docker build -f .devcontainer/Dockerfile -t oboro-dev .devcontainer
+docker build -f .devcontainer/Dockerfile -t oboro-dev .
 docker run --rm -it -v "$PWD":/work -w /work -u vscode oboro-dev bash
 ```
 
