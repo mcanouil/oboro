@@ -755,6 +755,10 @@ fn note_what_cannot_be_reached_here(cwd: &Path) {
 /// Windows, and anywhere else this crate is not known to run, locks a running
 /// image instead, so the path and the command to finish the job are printed
 /// rather than attempted.
+#[cfg_attr(
+    not(unix),
+    expect(clippy::unnecessary_wraps, reason = "only the Unix removal can fail")
+)]
 fn finish_binary(exe: &Path) -> Result<()> {
     #[cfg(unix)]
     {

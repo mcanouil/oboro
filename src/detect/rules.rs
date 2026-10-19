@@ -901,11 +901,14 @@ mod tests {
 
     #[test]
     fn empty_text_yields_no_spans() {
-        assert!(detect("").is_empty());
+        assert_eq!(detect(""), Vec::new());
     }
 
     #[test]
     fn text_without_entities_yields_no_spans() {
-        assert!(detect("The quick brown fox jumps over the lazy dog.").is_empty());
+        assert_eq!(
+            detect("The quick brown fox jumps over the lazy dog."),
+            Vec::new()
+        );
     }
 }

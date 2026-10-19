@@ -86,11 +86,11 @@ mod tests {
     #[test]
     fn empty_spans_are_discarded() {
         let empty = Span::new(3, 3, EntityKind::Email, "");
-        assert!(resolve(vec![empty]).is_empty());
+        assert_eq!(resolve(vec![empty]), Vec::new());
     }
 
     #[test]
     fn resolving_nothing_yields_nothing() {
-        assert!(resolve(Vec::new()).is_empty());
+        assert_eq!(resolve(Vec::new()), Vec::new());
     }
 }
