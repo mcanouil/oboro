@@ -21,15 +21,13 @@ use support::Workspace;
 /// uninstall delete.
 #[cfg(unix)]
 fn private_binary(workspace: &Workspace) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
     let original = assert_cmd::cargo::cargo_bin("oboro");
     let copy = workspace.path().join("oboro-under-test");
     std::fs::copy(&original, &copy).expect("copying the binary for a destructive test");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&copy, std::fs::Permissions::from_mode(0o755))
-            .expect("making the copy executable");
-    }
+    std::fs::set_permissions(&copy, std::fs::Permissions::from_mode(0o755))
+        .expect("making the copy executable");
     copy
 }
 
