@@ -21,9 +21,8 @@ RUN apt-get update \
 # release images read, so the container builds with the pinned compiler
 # rather than whatever the base image ships.
 USER vscode
-WORKDIR /tmp/toolchain
-COPY rust-toolchain.toml .
-RUN rustup toolchain install \
+COPY rust-toolchain.toml /tmp/toolchain/
+RUN cd /tmp/toolchain \
+  && rustup toolchain install \
   && cargo install cargo-nextest --locked
-WORKDIR /
 USER root

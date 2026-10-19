@@ -79,7 +79,7 @@ If names are not being redacted, a default build is almost certainly why.
 To build the optional features without setting up the system libraries yourself, use the devcontainer. It carries the pinned toolchain, Tesseract and the OCR libraries:
 
 ```bash
-docker build -f .devcontainer/Dockerfile -t oboro-dev .devcontainer
+docker build -f .devcontainer/Dockerfile -t oboro-dev .
 docker run --rm -it -v "$PWD":/work -w /work -u vscode oboro-dev \
   cargo build --release --features "ner,ocr"
 ```

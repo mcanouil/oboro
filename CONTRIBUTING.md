@@ -30,6 +30,7 @@ docker run --rm -it -v "$PWD":/work -w /work -u vscode oboro-dev bash
 
 The toolchain is pinned by `rust-toolchain.toml`.
 So the container, CI and a host build all use the same compiler.
+To move to a newer Rust, change the version in that file and run the four checks below.
 
 Run these four checks before you open a pull request.
 CI runs the same ones:
