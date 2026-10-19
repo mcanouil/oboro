@@ -24,5 +24,6 @@ USER vscode
 COPY rust-toolchain.toml /tmp/toolchain/
 RUN cd /tmp/toolchain \
   && rustup toolchain install \
+  && rustup default "$(rustup show active-toolchain | cut -d" " -f1)" \
   && cargo install cargo-nextest --locked
 USER root
