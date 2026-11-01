@@ -47,7 +47,7 @@ RUN touch src/main.rs src/lib.rs \
 RUN mkdir -p /seed-vault
 
 # Pinned by digest for the same reason as the build stage.
-FROM gcr.io/distroless/static-debian12:nonroot@sha256:f5b485ea962d9bd1186b2f6b3a061191539b905b82ec395de78cbfae51f20e35
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
 
 COPY --from=build /src/target/release/oboro /usr/local/bin/oboro
 COPY --from=build --chown=nonroot:nonroot /seed-vault /vault
