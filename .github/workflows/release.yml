@@ -48,7 +48,7 @@ jobs:
       - name: Install the pinned toolchain
         run: rustup toolchain install
 
-      - uses: Swatinem/rust-cache@v2.9.2
+      - uses: Swatinem/rust-cache@v2.9.3
 
       - name: Check formatting
         run: cargo fmt --all --check
@@ -188,7 +188,7 @@ jobs:
       # The cache action does not key on cargo features, so without an
       # explicit key the default and ner jobs sharing a target would fight
       # over one cache entry.
-      - uses: Swatinem/rust-cache@v2.9.2
+      - uses: Swatinem/rust-cache@v2.9.3
         if: ${{ !endsWith(matrix.target, '-musl') }}
         with:
           key: ${{ matrix.features }}
